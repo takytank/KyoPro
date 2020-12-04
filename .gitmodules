@@ -1,0 +1,3 @@
+[submodule "submodules/KyoProLib"]
+	path = submodules/KyoProLib
+	url = git@github.com:takytank/KyoProLib.git
