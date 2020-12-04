@@ -2,14 +2,12 @@
 using System.Collections.Generic;
 using System.Text;
 using TakyTank.KyoProLib.CSharp;
-using TakyTank.KyoProLib.CSharp.Core31;
+using TakyTank.KyoProLib.CSharp.Csc360;
 
-namespace AtCoder.Temp
+namespace YukiCoder.Temp
 {
 	class ContestPool
 	{
-		//const long INF = 1L << 60;
-
 		public static void A()
 		{
 			using var cin = new Scanner();

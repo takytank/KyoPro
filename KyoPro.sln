@@ -22,6 +22,10 @@ Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution 
 		.editorconfig = .editorconfig
 	EndProjectSection
 EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "YukiCoder", "projects\YukiCoder\YukiCoder.csproj", "{AA4D4954-090B-4F4F-894F-B2F2F049F50B}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "YukiCoder.Temp", "projects\YukiCoder.Temp\YukiCoder.Temp.csproj", "{F3C96024-0D0E-434B-A1FB-D16ADA616A36}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -52,6 +56,14 @@ Global
 		{F1D74799-ABDB-41AF-87AC-0BD8ABE3A111}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{F1D74799-ABDB-41AF-87AC-0BD8ABE3A111}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{F1D74799-ABDB-41AF-87AC-0BD8ABE3A111}.Release|Any CPU.Build.0 = Release|Any CPU
+		{AA4D4954-090B-4F4F-894F-B2F2F049F50B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{AA4D4954-090B-4F4F-894F-B2F2F049F50B}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{AA4D4954-090B-4F4F-894F-B2F2F049F50B}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{AA4D4954-090B-4F4F-894F-B2F2F049F50B}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F3C96024-0D0E-434B-A1FB-D16ADA616A36}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F3C96024-0D0E-434B-A1FB-D16ADA616A36}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F3C96024-0D0E-434B-A1FB-D16ADA616A36}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F3C96024-0D0E-434B-A1FB-D16ADA616A36}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE

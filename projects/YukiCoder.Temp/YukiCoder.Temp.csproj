@@ -1,0 +1,12 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>netstandard2.1</TargetFramework>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.Csc360\TakyTank.KyoProLib.CSharp.Csc360.csproj" />
+    <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp\TakyTank.KyoProLib.CSharp.csproj" />
+  </ItemGroup>
+
+</Project>
