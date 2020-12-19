@@ -7,9 +7,9 @@ namespace AtCoder.Temp.Lib
 {
 	public static class Matrix
 	{
-		public static VModInt[,] Mul(int n, VModInt[,] a, VModInt[,] b)
+		public static ModInt[,] Mul(int n, ModInt[,] a, ModInt[,] b)
 		{
-			var ret = new VModInt[n, n];
+			var ret = new ModInt[n, n];
 			for (int i = 0; i < n; i++) {
 				for (int j = 0; j < n; j++) {
 					for (int k = 0; k < n; k++) {
@@ -21,9 +21,9 @@ namespace AtCoder.Temp.Lib
 			return ret;
 		}
 
-		public static VModInt[,] Pow(int n, VModInt[,] a, long k)
+		public static ModInt[,] Pow(int n, ModInt[,] a, long k)
 		{
-			var ret = new VModInt[n, n];
+			var ret = new ModInt[n, n];
 			for (int i = 0; i < n; i++) {
 				ret[i, i] = 1;
 			}

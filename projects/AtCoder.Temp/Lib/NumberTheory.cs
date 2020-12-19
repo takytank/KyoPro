@@ -440,9 +440,9 @@ namespace AtCoder.Temp.Lib
 		}
 
 		// original: ttps://github.com/key-moon/ac-library-cs
-		// x=y(mod z) on x=valus[i](mod[i])
+		// x=y(mod p = lcm of mods) on x=valus[i](mod[i])
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static (long y, long mod) ChineseRemainderTheorem(long[] values, long[] mods)
+		public static (long y, long p) ChineseRemainderTheorem(long[] values, long[] mods)
 		{
 			long r0 = 0, m0 = 1;
 			for (int i = 0; i < mods.Length; i++) {
