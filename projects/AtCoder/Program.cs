@@ -39,6 +39,7 @@ namespace AtCoder
 		public BitFlag OrBit(int bitNumber) => (flags_ | (1 << bitNumber));
 		public BitFlag AndBit(int bitNumber) => (flags_ & (1 << bitNumber));
 		public BitFlag XorBit(int bitNumber) => (flags_ ^ (1 << bitNumber));
+		public BitFlag ComplementOf(BitFlag sub) => flags_ & (~sub.flags_);
 
 		public static BitFlag operator ++(BitFlag src) => new BitFlag(src.flags_ + 1);
 		public static BitFlag operator --(BitFlag src) => new BitFlag(src.flags_ - 1);
@@ -76,9 +77,40 @@ namespace AtCoder
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public void ForEachSubBits(Action<BitFlag> action)
 		{
-			for (BitFlag sub = flags_; sub >= 0; --sub) {
-				sub &= flags_;
+			for (BitFlag sub = (flags_ - 1) & flags_; sub > 0; sub = --sub & flags_) {
 				action(sub);
+			}
+		}
+
+		public SubBitsEnumerator SubBits => new SubBitsEnumerator(flags_);
+		public struct SubBitsEnumerator : IEnumerable<BitFlag>
+		{
+			private readonly int flags_;
+			public SubBitsEnumerator(int flags)
+			{
+				flags_ = flags;
+			}
+
+			IEnumerator<BitFlag> IEnumerable<BitFlag>.GetEnumerator() => new Enumerator(flags_);
+			IEnumerator IEnumerable.GetEnumerator() => new Enumerator(flags_);
+			public Enumerator GetEnumerator() => new Enumerator(flags_);
+			public struct Enumerator : IEnumerator<BitFlag>
+			{
+				private readonly int src_;
+				public BitFlag Current { get; private set; }
+				object IEnumerator.Current => Current;
+
+				public Enumerator(int flags)
+				{
+					src_ = flags;
+					Current = flags;
+				}
+
+				public void Dispose() { }
+				[MethodImpl(MethodImplOptions.AggressiveInlining)]
+				public bool MoveNext() => (Current = --Current & src_) > 0;
+				[MethodImpl(MethodImplOptions.AggressiveInlining)]
+				public void Reset() => Current = src_;
 			}
 		}
 	}
@@ -128,8 +160,8 @@ namespace AtCoder
 
 	public struct ModInt
 	{
-		public const long P = 1000000007;
-		//public const long P = 998244353;
+		//public const long P = 1000000007;
+		public const long P = 998244353;
 		public const long ROOT = 3;
 
 		// (924844033, 5)
@@ -141,8 +173,8 @@ namespace AtCoder
 
 		private long value_;
 
-		public ModInt(long value)
-			=> value_ = value;
+		public static ModInt New(long value, bool mods) => new ModInt(value, mods);
+		public ModInt(long value) => value_ = value;
 		public ModInt(long value, bool mods)
 		{
 			if (mods) {
@@ -225,15 +257,20 @@ namespace AtCoder
 		public static ModInt Pow(long value, long k)
 		{
 			long ret = 1;
-			for (k %= P - 1; k > 0; k >>= 1, value = value * value % P) {
-				if ((k & 1) == 1) {
+			while (k > 0) {
+				if ((k & 1) != 0) {
 					ret = ret * value % P;
 				}
+
+				value = value * value % P;
+				k >>= 1;
 			}
+
 			return new ModInt(ret);
 		}
 
-
+		public static Span<ModInt> NTT(Span<int> values, bool inverses = false)
+			=> NumberTheoreticTransform(values, inverses);
 		public static Span<ModInt> NumberTheoreticTransform(
 			Span<int> values, bool inverses = false)
 		{
@@ -245,6 +282,8 @@ namespace AtCoder
 			return NumberTheoreticTransform(mods, inverses);
 		}
 
+		public static Span<ModInt> NTT(Span<long> values, bool inverses = false)
+			=> NumberTheoreticTransform(values, inverses);
 		public static Span<ModInt> NumberTheoreticTransform(
 			Span<long> values, bool inverses = false)
 		{
@@ -256,6 +295,8 @@ namespace AtCoder
 			return NumberTheoreticTransform(mods, inverses);
 		}
 
+		public static Span<ModInt> NTT(Span<ModInt> values, bool inverses = false)
+			=> NumberTheoreticTransform(values, inverses);
 		public static Span<ModInt> NumberTheoreticTransform(
 			Span<ModInt> a, bool inverses = false)
 		{
@@ -304,6 +345,8 @@ namespace AtCoder
 			return a;
 		}
 
+		public static ModInt[,] Ntt2D(ModInt[,] a, bool inverses = false)
+			=> NumberTheoreticTransform2D(a, inverses);
 		public static ModInt[,] NumberTheoreticTransform2D(ModInt[,] a, bool inverses = false)
 		{
 			int h = a.GetLength(0);
@@ -434,6 +477,26 @@ namespace AtCoder
 
 	public static class Helper
 	{
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static int Pow(int n, int k)
+			=> (int)Pow((long)n, (long)k);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static long Pow(long n, long k)
+		{
+			long ret = 1;
+			long mul = n;
+			while (k > 0) {
+				if ((k & 1) != 0) {
+					ret *= mul;
+				}
+
+				k >>= 1;
+				mul *= mul;
+			}
+
+			return ret;
+		}
+
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static void UpdateMin<T>(this ref T target, T value) where T : struct, IComparable<T>
 			=> target = target.CompareTo(value) > 0 ? value : target;
@@ -594,7 +657,7 @@ namespace AtCoder
 	{
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static int PopCount(this BitFlag bit)
-			=> (int)Popcnt.PopCount((uint)bit.Flag);
+			=> (int)BitOperations.PopCount((uint)bit.Flag);
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static Span<T> AsSpan<T>(this List<T> list)
@@ -605,6 +668,29 @@ namespace AtCoder
 		private class FakeList<T>
 		{
 			public T[] Array = null;
+		}
+
+		public static void Swap(this string str, int i, int j)
+		{
+			var span = str.AsWriteableSpan();
+			(span[i], span[j]) = (span[j], span[i]);
+		}
+
+		public static char Replace(this string str, int index, char c)
+		{
+			var span = str.AsWriteableSpan();
+			char old = span[index];
+			span[index] = c;
+			return old;
+		}
+
+		public static Span<char> AsWriteableSpan(this string str)
+		{
+			unsafe {
+				fixed (char* p = str) {
+					return MemoryMarshal.CreateSpan(ref *p, str.Length);
+				}
+			}
 		}
 	}
 

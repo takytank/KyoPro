@@ -1,4 +1,5 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
@@ -35,6 +36,7 @@ namespace YukiCoder
 		public BitFlag OrBit(int bitNumber) => (flags_ | (1 << bitNumber));
 		public BitFlag AndBit(int bitNumber) => (flags_ & (1 << bitNumber));
 		public BitFlag XorBit(int bitNumber) => (flags_ ^ (1 << bitNumber));
+		public BitFlag ComplementOf(BitFlag sub) => flags_ & (~sub.flags_);
 
 		public static BitFlag operator ++(BitFlag src) => new BitFlag(src.flags_ + 1);
 		public static BitFlag operator --(BitFlag src) => new BitFlag(src.flags_ - 1);
@@ -72,9 +74,40 @@ namespace YukiCoder
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public void ForEachSubBits(Action<BitFlag> action)
 		{
-			for (BitFlag sub = flags_; sub >= 0; --sub) {
-				sub &= flags_;
+			for (BitFlag sub = (flags_ - 1) & flags_; sub > 0; sub = --sub & flags_) {
 				action(sub);
+			}
+		}
+
+		public SubBitsEnumerator SubBits => new SubBitsEnumerator(flags_);
+		public struct SubBitsEnumerator : IEnumerable<BitFlag>
+		{
+			private readonly int flags_;
+			public SubBitsEnumerator(int flags)
+			{
+				flags_ = flags;
+			}
+
+			IEnumerator<BitFlag> IEnumerable<BitFlag>.GetEnumerator() => new Enumerator(flags_);
+			IEnumerator IEnumerable.GetEnumerator() => new Enumerator(flags_);
+			public Enumerator GetEnumerator() => new Enumerator(flags_);
+			public struct Enumerator : IEnumerator<BitFlag>
+			{
+				private readonly int src_;
+				public BitFlag Current { get; private set; }
+				object IEnumerator.Current => Current;
+
+				public Enumerator(int flags)
+				{
+					src_ = flags;
+					Current = flags;
+				}
+
+				public void Dispose() { }
+				[MethodImpl(MethodImplOptions.AggressiveInlining)]
+				public bool MoveNext() => (Current = --Current & src_) > 0;
+				[MethodImpl(MethodImplOptions.AggressiveInlining)]
+				public void Reset() => Current = src_;
 			}
 		}
 	}
@@ -137,8 +170,8 @@ namespace YukiCoder
 
 		private long value_;
 
-		public ModInt(long value)
-			=> value_ = value;
+		public static ModInt New(long value, bool mods) => new ModInt(value, mods);
+		public ModInt(long value) => value_ = value;
 		public ModInt(long value, bool mods)
 		{
 			if (mods) {
@@ -221,15 +254,20 @@ namespace YukiCoder
 		public static ModInt Pow(long value, long k)
 		{
 			long ret = 1;
-			for (k %= P - 1; k > 0; k >>= 1, value = value * value % P) {
-				if ((k & 1) == 1) {
+			while (k > 0) {
+				if ((k & 1) != 0) {
 					ret = ret * value % P;
 				}
+
+				value = value * value % P;
+				k >>= 1;
 			}
+
 			return new ModInt(ret);
 		}
 
-
+		public static Span<ModInt> NTT(Span<int> values, bool inverses = false)
+			=> NumberTheoreticTransform(values, inverses);
 		public static Span<ModInt> NumberTheoreticTransform(
 			Span<int> values, bool inverses = false)
 		{
@@ -241,6 +279,8 @@ namespace YukiCoder
 			return NumberTheoreticTransform(mods, inverses);
 		}
 
+		public static Span<ModInt> NTT(Span<long> values, bool inverses = false)
+			=> NumberTheoreticTransform(values, inverses);
 		public static Span<ModInt> NumberTheoreticTransform(
 			Span<long> values, bool inverses = false)
 		{
@@ -252,6 +292,8 @@ namespace YukiCoder
 			return NumberTheoreticTransform(mods, inverses);
 		}
 
+		public static Span<ModInt> NTT(Span<ModInt> values, bool inverses = false)
+			=> NumberTheoreticTransform(values, inverses);
 		public static Span<ModInt> NumberTheoreticTransform(
 			Span<ModInt> a, bool inverses = false)
 		{
@@ -300,6 +342,8 @@ namespace YukiCoder
 			return a;
 		}
 
+		public static ModInt[,] Ntt2D(ModInt[,] a, bool inverses = false)
+			=> NumberTheoreticTransform2D(a, inverses);
 		public static ModInt[,] NumberTheoreticTransform2D(ModInt[,] a, bool inverses = false)
 		{
 			int h = a.GetLength(0);
@@ -430,6 +474,26 @@ namespace YukiCoder
 
 	public static class Helper
 	{
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static int Pow(int n, int k)
+			=> (int)Pow((long)n, (long)k);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static long Pow(long n, long k)
+		{
+			long ret = 1;
+			long mul = n;
+			while (k > 0) {
+				if ((k & 1) != 0) {
+					ret *= mul;
+				}
+
+				k >>= 1;
+				mul *= mul;
+			}
+
+			return ret;
+		}
+
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static void UpdateMin<T>(this ref T target, T value) where T : struct, IComparable<T>
 			=> target = target.CompareTo(value) > 0 ? value : target;
@@ -595,6 +659,17 @@ namespace YukiCoder
 			bits = (bits & 0x0f0f0f0f) + (bits >> 4 & 0x0f0f0f0f);
 			bits = (bits & 0x00ff00ff) + (bits >> 8 & 0x00ff00ff);
 			return (bits & 0x0000ffff) + (bits >> 16 & 0x0000ffff);
+		}
+
+		public static int PopCount(ulong bits)
+		{
+			bits = ((bits & 0xaaaaaaaaaaaaaaaa) >> 1) + (bits & 0x5555555555555555);
+			bits = ((bits & 0xcccccccccccccccc) >> 2) + (bits & 0x3333333333333333);
+			bits = ((bits & 0xf0f0f0f0f0f0f0f0) >> 4) + (bits & 0x0f0f0f0f0f0f0f0f);
+			bits = ((bits & 0xff00ff00ff00ff00) >> 8) + (bits & 0x00ff00ff00ff00ff);
+			bits = ((bits & 0xffff0000ffff0000) >> 16) + (bits & 0x0000ffff0000ffff);
+			bits = ((bits & 0xffffffff00000000) >> 32) + (bits & 0x00000000ffffffff);
+			return (int)bits;
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
