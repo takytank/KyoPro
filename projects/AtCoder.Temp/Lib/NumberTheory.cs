@@ -16,7 +16,7 @@ namespace AtCoder.Temp.Lib
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static bool IsPrime(long value)
 		{
-			for (int i = 2; i * i <= value; i++) {
+			for (long i = 2; i * i <= value; i++) {
 				if (value % i == 0) {
 					return false;
 				}
