@@ -39,7 +39,7 @@ namespace AtCoder
 		public BitFlag OrBit(int bitNumber) => (flags_ | (1 << bitNumber));
 		public BitFlag AndBit(int bitNumber) => (flags_ & (1 << bitNumber));
 		public BitFlag XorBit(int bitNumber) => (flags_ ^ (1 << bitNumber));
-		public BitFlag ComplementOf(BitFlag sub) => flags_ & (~sub.flags_);
+		public BitFlag ComplementOf(BitFlag sub) => flags_ ^ sub.flags_;
 
 		public static BitFlag operator ++(BitFlag src) => new BitFlag(src.flags_ + 1);
 		public static BitFlag operator --(BitFlag src) => new BitFlag(src.flags_ - 1);
@@ -158,10 +158,51 @@ namespace AtCoder
 		}
 	}
 
+	public class LightList<T>
+	{
+		private T[] values_;
+		private int count_;
+
+		public int Count => count_;
+
+		public T this[int index]
+		{
+			get => values_[index];
+			set => values_[index] = value;
+		}
+
+		public LightList(int capacity = 4)
+		{
+			values_ = new T[capacity];
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public ref T Ref(int index) => ref values_[index];
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public void Add(T value)
+		{
+			if (count_ < values_.Length) {
+				values_[count_] = value;
+				++count_;
+			} else {
+				var newArray = new T[count_ * 2];
+				Array.Copy(values_, newArray, count_);
+				values_ = newArray;
+				values_[count_] = value;
+				++count_;
+			}
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public Span<T> AsSpan() => values_.AsSpan().Slice(0, Count);
+	}
+
 	public struct ModInt
 	{
-		//public const long P = 1000000007;
-		public const long P = 998244353;
+		public const long P = 1000000007;
+		//public const long P = 998244353;
+		//public const long P = 2;
 		public const long ROOT = 3;
 
 		// (924844033, 5)
@@ -236,19 +277,7 @@ namespace AtCoder
 		}
 
 		public static ModInt operator /(ModInt lhs, ModInt rhs)
-		{
-			long exp = P - 2;
-			while (exp > 0) {
-				if (exp % 2 > 0) {
-					lhs *= rhs;
-				}
-
-				rhs *= rhs;
-				exp /= 2;
-			}
-
-			return lhs;
-		}
+			=> lhs * Inverse(rhs);
 
 		public static implicit operator ModInt(long n) => new ModInt(n, true);
 
@@ -596,6 +625,37 @@ namespace AtCoder
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static Span<T> AsSpan<T>(this T[,,,] array, int i, int j, int k)
 			=> MemoryMarshal.CreateSpan<T>(ref array[i, j, k, 0], array.GetLength(3));
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static T[] Merge<T>(ReadOnlySpan<T> first, ReadOnlySpan<T> second) where T : IComparable<T>
+		{
+			var ret = new T[first.Length + second.Length];
+			int p = 0;
+			int q = 0;
+			while (p < first.Length || q < second.Length) {
+				if (p == first.Length) {
+					ret[p + q] = second[q];
+					q++;
+					continue;
+				}
+
+				if (q == second.Length) {
+					ret[p + q] = first[p];
+					p++;
+					continue;
+				}
+
+				if (first[p].CompareTo(second[q]) < 0) {
+					ret[p + q] = first[p];
+					p++;
+				} else {
+					ret[p + q] = second[q];
+					q++;
+				}
+			}
+
+			return ret;
+		}
 
 		private static readonly int[] delta4_ = { 1, 0, -1, 0, 1 };
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
