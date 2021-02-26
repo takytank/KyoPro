@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Numerics;
 using System.Text;
 using AtCoder.Temp.Lib;
 using TakyTank.KyoProLib.CSharp;
