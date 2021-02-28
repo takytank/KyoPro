@@ -158,72 +158,126 @@ namespace AtCoder
 		}
 	}
 
-	public class LightList<T>
+	public class JagList2<T> where T : struct
 	{
-		private T[] values_;
-		private int count_;
+		private readonly int n_;
+		private readonly List<T>[] tempValues_;
+		private T[][] values_;
+
+		public int Count => n_;
+		public List<T>[] Raw => tempValues_;
+		public T[][] Values => values_;
+		public T[] this[int index] => values_[index];
+
+		public JagList2(int n)
+		{
+			n_ = n;
+			tempValues_ = new List<T>[n];
+			for (int i = 0; i < n; ++i) {
+				tempValues_[i] = new List<T>();
+			}
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public void Add(int i, T value) => tempValues_[i].Add(value);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public void Build()
+		{
+			values_ = new T[n_][];
+			for (int i = 0; i < values_.Length; ++i) {
+				values_[i] = tempValues_[i].ToArray();
+			}
+		}
+	}
+
+	public class DijkstraQ
+	{
+		private int count_ = 0;
+		private long[] distanceHeap_;
+		private int[] vertexHeap_;
 
 		public int Count => count_;
-
-		public T this[int index]
+		public DijkstraQ()
 		{
-			get => values_[index];
-			set => values_[index] = value;
-		}
-
-		public LightList(int capacity = 4)
-		{
-			values_ = new T[capacity];
+			distanceHeap_ = new long[8];
+			vertexHeap_ = new int[8];
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public ref T Ref(int index) => ref values_[index];
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public void Add(T value)
+		public void Enqueue(long distance, int v)
 		{
-			if (count_ < values_.Length) {
-				values_[count_] = value;
-				++count_;
-			} else {
-				var newArray = new T[count_ * 2];
-				Array.Copy(values_, newArray, count_);
-				values_ = newArray;
-				values_[count_] = value;
-				++count_;
+			if (distanceHeap_.Length == count_) {
+				var newDistanceHeap = new long[distanceHeap_.Length << 1];
+				var newVertexHeap = new int[vertexHeap_.Length << 1];
+				Unsafe.CopyBlock(
+					ref Unsafe.As<long, byte>(ref newDistanceHeap[0]),
+					ref Unsafe.As<long, byte>(ref distanceHeap_[0]),
+					(uint)(8 * count_));
+				Unsafe.CopyBlock(
+					ref Unsafe.As<int, byte>(ref newVertexHeap[0]),
+					ref Unsafe.As<int, byte>(ref vertexHeap_[0]),
+					(uint)(4 * count_));
+				distanceHeap_ = newDistanceHeap;
+				vertexHeap_ = newVertexHeap;
 			}
-		}
 
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public void AddRange(ReadOnlySpan<T> values)
-		{
-			if (count_ + values.Length < values_.Length) {
-				values.CopyTo(values_.AsSpan().Slice(count_, values.Length));
-				count_ += values.Length;
-			} else {
-				var newArray = new T[count_ + values.Length];
-				values_.CopyTo(newArray.AsSpan().Slice(0, count_));
-				values.CopyTo(newArray.AsSpan().Slice(count_, values.Length));
-				values_ = newArray;
-				count_ += values.Length;
+			ref var dRef = ref distanceHeap_[0];
+			ref var vRef = ref vertexHeap_[0];
+			Unsafe.Add(ref dRef, count_) = distance;
+			Unsafe.Add(ref vRef, count_) = v;
+			++count_;
+
+			int c = count_ - 1;
+			while (c > 0) {
+				int p = (c - 1) >> 1;
+				var tempD = Unsafe.Add(ref dRef, p);
+				if (tempD <= distance) {
+					break;
+				} else {
+					Unsafe.Add(ref dRef, c) = tempD;
+					Unsafe.Add(ref vRef, c) = Unsafe.Add(ref vRef, p);
+					c = p;
+				}
 			}
+
+			Unsafe.Add(ref dRef, c) = distance;
+			Unsafe.Add(ref vRef, c) = v;
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public void Remove()
+		public (long distance, int v) Dequeue()
 		{
-			if (count_ > 0) {
-				--count_;
+			ref var dRef = ref distanceHeap_[0];
+			ref var vRef = ref vertexHeap_[0];
+			(long distance, int v) ret = (dRef, vRef);
+			int n = count_ - 1;
+
+			var distance = Unsafe.Add(ref dRef, n);
+			var vertex = Unsafe.Add(ref vRef, n);
+			int p = 0;
+			int c = (p << 1) + 1;
+			while (c < n) {
+				if (c != n - 1 && Unsafe.Add(ref dRef, c + 1) < Unsafe.Add(ref dRef, c)) {
+					++c;
+				}
+
+				var tempD = Unsafe.Add(ref dRef, c);
+				if (distance > tempD) {
+					Unsafe.Add(ref dRef, p) = tempD;
+					Unsafe.Add(ref vRef, p) = Unsafe.Add(ref vRef, c);
+					p = c;
+					c = (p << 1) + 1;
+				} else {
+					break;
+				}
 			}
+
+			Unsafe.Add(ref dRef, p) = distance;
+			Unsafe.Add(ref vRef, p) = vertex;
+			--count_;
+
+			return ret;
 		}
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public void Clear() => count_ = 0;
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public void Reverse() => Array.Reverse(values_, 0, count_);
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public Span<T> AsSpan() => values_.AsSpan().Slice(0, Count);
 	}
 
 	public struct ModInt
@@ -332,7 +386,7 @@ namespace AtCoder
 			Span<int> values, bool inverses = false)
 		{
 			var mods = new ModInt[values.Length];
-			for (int i = 0; i < mods.Length; i++) {
+			for (int i = 0; i < mods.Length; ++i) {
 				mods[i] = new ModInt(values[i]);
 			}
 
@@ -345,7 +399,7 @@ namespace AtCoder
 			Span<long> values, bool inverses = false)
 		{
 			var mods = new ModInt[values.Length];
-			for (int i = 0; i < mods.Length; i++) {
+			for (int i = 0; i < mods.Length; ++i) {
 				mods[i] = new ModInt(values[i]);
 			}
 
@@ -394,7 +448,7 @@ namespace AtCoder
 
 			if (inverses) {
 				s = Inverse(n);
-				for (int i = 0; i < n; i++) {
+				for (int i = 0; i < n; ++i) {
 					a[i] = a[i] * s;
 				}
 			}
@@ -427,7 +481,7 @@ namespace AtCoder
 					kp[i + 1] = kp[i] * s;
 				}
 
-				for (int y = 0; y < h; y++) {
+				for (int y = 0; y < h; ++y) {
 					int l = n / 2;
 					for (int i = 1; i < n; i <<= 1, l >>= 1) {
 						r = 0;
@@ -448,15 +502,15 @@ namespace AtCoder
 
 					if (inverses) {
 						s = Inverse(n);
-						for (int i = 0; i < n; i++) {
+						for (int i = 0; i < n; ++i) {
 							a[y, i] = a[y, i] * s;
 						}
 					}
 				}
 			}
 
-			for (int i = 0; i < h; i++) {
-				for (int j = 0; j < w; j++) {
+			for (int i = 0; i < h; ++i) {
+				for (int j = 0; j < w; ++j) {
 					b[h, w] = 0;
 				}
 			}
@@ -474,7 +528,7 @@ namespace AtCoder
 					kp[i + 1] = kp[i] * s;
 				}
 
-				for (int x = 0; x < w; x++) {
+				for (int x = 0; x < w; ++x) {
 					int l = n / 2;
 					for (int i = 1; i < n; i <<= 1, l >>= 1) {
 						r = 0;
@@ -495,7 +549,7 @@ namespace AtCoder
 
 					if (inverses) {
 						s = Inverse(n);
-						for (int i = 0; i < n; i++) {
+						for (int i = 0; i < n; ++i) {
 							a[i, x] = a[i, x] * s;
 						}
 					}
@@ -520,7 +574,7 @@ namespace AtCoder
 
 			var fa = NumberTheoreticTransform(aa);
 			var fb = NumberTheoreticTransform(bb);
-			for (int i = 0; i < nttLenght; i++) {
+			for (int i = 0; i < nttLenght; ++i) {
 				fa[i] *= fb[i];
 			}
 
