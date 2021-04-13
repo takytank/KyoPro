@@ -363,8 +363,11 @@ namespace AtCoder
 
 		public static implicit operator ModInt(long n) => new ModInt(n, true);
 
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static ModInt Inverse(ModInt value) => Pow(value, P - 2);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static ModInt Pow(ModInt value, long k) => Pow(value.value_, k);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static ModInt Pow(long value, long k)
 		{
 			long ret = 1;
@@ -380,208 +383,7 @@ namespace AtCoder
 			return new ModInt(ret);
 		}
 
-		public static Span<ModInt> NTT(Span<int> values, bool inverses = false)
-			=> NumberTheoreticTransform(values, inverses);
-		public static Span<ModInt> NumberTheoreticTransform(
-			Span<int> values, bool inverses = false)
-		{
-			var mods = new ModInt[values.Length];
-			for (int i = 0; i < mods.Length; ++i) {
-				mods[i] = new ModInt(values[i]);
-			}
-
-			return NumberTheoreticTransform(mods, inverses);
-		}
-
-		public static Span<ModInt> NTT(Span<long> values, bool inverses = false)
-			=> NumberTheoreticTransform(values, inverses);
-		public static Span<ModInt> NumberTheoreticTransform(
-			Span<long> values, bool inverses = false)
-		{
-			var mods = new ModInt[values.Length];
-			for (int i = 0; i < mods.Length; ++i) {
-				mods[i] = new ModInt(values[i]);
-			}
-
-			return NumberTheoreticTransform(mods, inverses);
-		}
-
-		public static Span<ModInt> NTT(Span<ModInt> values, bool inverses = false)
-			=> NumberTheoreticTransform(values, inverses);
-		public static Span<ModInt> NumberTheoreticTransform(
-			Span<ModInt> a, bool inverses = false)
-		{
-			int n = a.Length;
-			if (n == 1) {
-				return a;
-			}
-
-			var b = new ModInt[n].AsSpan();
-			int r = inverses
-				? (int)(P - 1 - (P - 1) / n)
-				: (int)((P - 1) / n);
-			ModInt s = Pow(ROOT, r);
-			var kp = new ModInt[n / 2 + 1];
-			kp.AsSpan().Fill(1);
-
-			for (int i = 0; i < n / 2; ++i) {
-				kp[i + 1] = kp[i] * s;
-			}
-
-			int l = n / 2;
-			for (int i = 1; i < n; i <<= 1, l >>= 1) {
-				r = 0;
-				for (int j = 0; j < l; ++j, r += i) {
-					s = kp[i * j];
-					for (int k = 0; k < i; ++k) {
-						var p = a[k + r];
-						var q = a[k + r + n / 2];
-						b[k + 2 * r] = p + q;
-						b[k + 2 * r + i] = (p - q) * s;
-					}
-				}
-
-				var temp = a;
-				a = b;
-				b = temp;
-			}
-
-			if (inverses) {
-				s = Inverse(n);
-				for (int i = 0; i < n; ++i) {
-					a[i] = a[i] * s;
-				}
-			}
-
-			return a;
-		}
-
-		public static ModInt[,] Ntt2D(ModInt[,] a, bool inverses = false)
-			=> NumberTheoreticTransform2D(a, inverses);
-		public static ModInt[,] NumberTheoreticTransform2D(ModInt[,] a, bool inverses = false)
-		{
-			int h = a.GetLength(0);
-			int w = a.GetLength(1);
-			if (h == 1 && w == 1) {
-				return a;
-			}
-
-			var b = new ModInt[h, w];
-
-			{
-				int n = w;
-				int r = inverses
-					? (int)(P - 1 - (P - 1) / n)
-					: (int)((P - 1) / n);
-				ModInt s = Pow(ROOT, r);
-				var kp = new ModInt[n / 2 + 1];
-				kp.AsSpan().Fill(1);
-
-				for (int i = 0; i < n / 2; ++i) {
-					kp[i + 1] = kp[i] * s;
-				}
-
-				for (int y = 0; y < h; ++y) {
-					int l = n / 2;
-					for (int i = 1; i < n; i <<= 1, l >>= 1) {
-						r = 0;
-						for (int j = 0; j < l; ++j, r += i) {
-							s = kp[i * j];
-							for (int k = 0; k < i; ++k) {
-								var p = a[y, k + r];
-								var q = a[y, k + r + n / 2];
-								b[y, k + 2 * r] = p + q;
-								b[y, k + 2 * r + i] = (p - q) * s;
-							}
-						}
-
-						var temp = a;
-						a = b;
-						b = temp;
-					}
-
-					if (inverses) {
-						s = Inverse(n);
-						for (int i = 0; i < n; ++i) {
-							a[y, i] = a[y, i] * s;
-						}
-					}
-				}
-			}
-
-			for (int i = 0; i < h; ++i) {
-				for (int j = 0; j < w; ++j) {
-					b[h, w] = 0;
-				}
-			}
-
-			{
-				int n = h;
-				int r = inverses
-					? (int)(P - 1 - (P - 1) / n)
-					: (int)((P - 1) / n);
-				ModInt s = Pow(ROOT, r);
-				var kp = new ModInt[n / 2 + 1];
-				kp.AsSpan().Fill(1);
-
-				for (int i = 0; i < n / 2; ++i) {
-					kp[i + 1] = kp[i] * s;
-				}
-
-				for (int x = 0; x < w; ++x) {
-					int l = n / 2;
-					for (int i = 1; i < n; i <<= 1, l >>= 1) {
-						r = 0;
-						for (int j = 0; j < l; ++j, r += i) {
-							s = kp[i * j];
-							for (int k = 0; k < i; ++k) {
-								var p = a[k + r, x];
-								var q = a[k + r + n / 2, x];
-								b[k + 2 * r, x] = p + q;
-								b[k + 2 * r + i, x] = (p - q) * s;
-							}
-						}
-
-						var temp = a;
-						a = b;
-						b = temp;
-					}
-
-					if (inverses) {
-						s = Inverse(n);
-						for (int i = 0; i < n; ++i) {
-							a[i, x] = a[i, x] * s;
-						}
-					}
-				}
-			}
-
-			return a;
-		}
-
-		public static Span<ModInt> Convolve(ReadOnlySpan<ModInt> a, ReadOnlySpan<ModInt> b)
-		{
-			int resultLength = a.Length + b.Length - 1;
-			int nttLenght = 1;
-			while (nttLenght < resultLength) {
-				nttLenght <<= 1;
-			}
-
-			var aa = new ModInt[nttLenght];
-			a.CopyTo(aa);
-			var bb = new ModInt[nttLenght];
-			b.CopyTo(bb);
-
-			var fa = NumberTheoreticTransform(aa);
-			var fb = NumberTheoreticTransform(bb);
-			for (int i = 0; i < nttLenght; ++i) {
-				fa[i] *= fb[i];
-			}
-
-			var convolved = NumberTheoreticTransform(fa, true);
-			return convolved.Slice(0, resultLength);
-		}
-
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public long ToLong() => value_;
 		public override string ToString() => value_.ToString();
 	}
@@ -875,29 +677,6 @@ namespace AtCoder
 		private class FakeList<T>
 		{
 			public T[] Array = null;
-		}
-
-		public static void Swap(this string str, int i, int j)
-		{
-			var span = str.AsWriteableSpan();
-			(span[i], span[j]) = (span[j], span[i]);
-		}
-
-		public static char Replace(this string str, int index, char c)
-		{
-			var span = str.AsWriteableSpan();
-			char old = span[index];
-			span[index] = c;
-			return old;
-		}
-
-		public static Span<char> AsWriteableSpan(this string str)
-		{
-			unsafe {
-				fixed (char* p = str) {
-					return MemoryMarshal.CreateSpan(ref *p, str.Length);
-				}
-			}
 		}
 	}
 
