@@ -36,7 +36,8 @@ namespace YukiCoder
 		public BitFlag OrBit(int bitNumber) => (flags_ | (1 << bitNumber));
 		public BitFlag AndBit(int bitNumber) => (flags_ & (1 << bitNumber));
 		public BitFlag XorBit(int bitNumber) => (flags_ ^ (1 << bitNumber));
-		public BitFlag ComplementOf(BitFlag sub) => flags_ & (~sub.flags_);
+		public BitFlag ComplementOf(BitFlag sub) => flags_ ^ sub.flags_;
+		public int PopCount() => BitOperations.PopCount((uint)flags_);
 
 		public static BitFlag operator ++(BitFlag src) => new BitFlag(src.flags_ + 1);
 		public static BitFlag operator --(BitFlag src) => new BitFlag(src.flags_ - 1);
@@ -155,10 +156,43 @@ namespace YukiCoder
 		}
 	}
 
+	public class JagList2<T> where T : struct
+	{
+		private readonly int n_;
+		private readonly List<T>[] tempValues_;
+		private T[][] values_;
+
+		public int Count => n_;
+		public List<T>[] Raw => tempValues_;
+		public T[][] Values => values_;
+		public T[] this[int index] => values_[index];
+
+		public JagList2(int n)
+		{
+			n_ = n;
+			tempValues_ = new List<T>[n];
+			for (int i = 0; i < n; ++i) {
+				tempValues_[i] = new List<T>();
+			}
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public void Add(int i, T value) => tempValues_[i].Add(value);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public void Build()
+		{
+			values_ = new T[n_][];
+			for (int i = 0; i < values_.Length; ++i) {
+				values_[i] = tempValues_[i].ToArray();
+			}
+		}
+	}
+
 	public struct ModInt
 	{
-		//public const long P = 1000000007;
-		public const long P = 998244353;
+		public const long P = 1000000007;
+		//public const long P = 998244353;
+		//public const long P = 2;
 		public const long ROOT = 3;
 
 		// (924844033, 5)
@@ -233,24 +267,15 @@ namespace YukiCoder
 		}
 
 		public static ModInt operator /(ModInt lhs, ModInt rhs)
-		{
-			long exp = P - 2;
-			while (exp > 0) {
-				if (exp % 2 > 0) {
-					lhs *= rhs;
-				}
-
-				rhs *= rhs;
-				exp /= 2;
-			}
-
-			return lhs;
-		}
+			=> lhs * Inverse(rhs);
 
 		public static implicit operator ModInt(long n) => new ModInt(n, true);
 
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static ModInt Inverse(ModInt value) => Pow(value, P - 2);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static ModInt Pow(ModInt value, long k) => Pow(value.value_, k);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static ModInt Pow(long value, long k)
 		{
 			long ret = 1;
@@ -266,232 +291,27 @@ namespace YukiCoder
 			return new ModInt(ret);
 		}
 
-		public static Span<ModInt> NTT(Span<int> values, bool inverses = false)
-			=> NumberTheoreticTransform(values, inverses);
-		public static Span<ModInt> NumberTheoreticTransform(
-			Span<int> values, bool inverses = false)
-		{
-			var mods = new ModInt[values.Length];
-			for (int i = 0; i < mods.Length; i++) {
-				mods[i] = new ModInt(values[i]);
-			}
-
-			return NumberTheoreticTransform(mods, inverses);
-		}
-
-		public static Span<ModInt> NTT(Span<long> values, bool inverses = false)
-			=> NumberTheoreticTransform(values, inverses);
-		public static Span<ModInt> NumberTheoreticTransform(
-			Span<long> values, bool inverses = false)
-		{
-			var mods = new ModInt[values.Length];
-			for (int i = 0; i < mods.Length; i++) {
-				mods[i] = new ModInt(values[i]);
-			}
-
-			return NumberTheoreticTransform(mods, inverses);
-		}
-
-		public static Span<ModInt> NTT(Span<ModInt> values, bool inverses = false)
-			=> NumberTheoreticTransform(values, inverses);
-		public static Span<ModInt> NumberTheoreticTransform(
-			Span<ModInt> a, bool inverses = false)
-		{
-			int n = a.Length;
-			if (n == 1) {
-				return a;
-			}
-
-			var b = new ModInt[n].AsSpan();
-			int r = inverses
-				? (int)(P - 1 - (P - 1) / n)
-				: (int)((P - 1) / n);
-			ModInt s = Pow(ROOT, r);
-			var kp = new ModInt[n / 2 + 1];
-			kp.AsSpan().Fill(1);
-
-			for (int i = 0; i < n / 2; ++i) {
-				kp[i + 1] = kp[i] * s;
-			}
-
-			int l = n / 2;
-			for (int i = 1; i < n; i <<= 1, l >>= 1) {
-				r = 0;
-				for (int j = 0; j < l; ++j, r += i) {
-					s = kp[i * j];
-					for (int k = 0; k < i; ++k) {
-						var p = a[k + r];
-						var q = a[k + r + n / 2];
-						b[k + 2 * r] = p + q;
-						b[k + 2 * r + i] = (p - q) * s;
-					}
-				}
-
-				var temp = a;
-				a = b;
-				b = temp;
-			}
-
-			if (inverses) {
-				s = Inverse(n);
-				for (int i = 0; i < n; i++) {
-					a[i] = a[i] * s;
-				}
-			}
-
-			return a;
-		}
-
-		public static ModInt[,] Ntt2D(ModInt[,] a, bool inverses = false)
-			=> NumberTheoreticTransform2D(a, inverses);
-		public static ModInt[,] NumberTheoreticTransform2D(ModInt[,] a, bool inverses = false)
-		{
-			int h = a.GetLength(0);
-			int w = a.GetLength(1);
-			if (h == 1 && w == 1) {
-				return a;
-			}
-
-			var b = new ModInt[h, w];
-
-			{
-				int n = w;
-				int r = inverses
-					? (int)(P - 1 - (P - 1) / n)
-					: (int)((P - 1) / n);
-				ModInt s = Pow(ROOT, r);
-				var kp = new ModInt[n / 2 + 1];
-				kp.AsSpan().Fill(1);
-
-				for (int i = 0; i < n / 2; ++i) {
-					kp[i + 1] = kp[i] * s;
-				}
-
-				for (int y = 0; y < h; y++) {
-					int l = n / 2;
-					for (int i = 1; i < n; i <<= 1, l >>= 1) {
-						r = 0;
-						for (int j = 0; j < l; ++j, r += i) {
-							s = kp[i * j];
-							for (int k = 0; k < i; ++k) {
-								var p = a[y, k + r];
-								var q = a[y, k + r + n / 2];
-								b[y, k + 2 * r] = p + q;
-								b[y, k + 2 * r + i] = (p - q) * s;
-							}
-						}
-
-						var temp = a;
-						a = b;
-						b = temp;
-					}
-
-					if (inverses) {
-						s = Inverse(n);
-						for (int i = 0; i < n; i++) {
-							a[y, i] = a[y, i] * s;
-						}
-					}
-				}
-			}
-
-			for (int i = 0; i < h; i++) {
-				for (int j = 0; j < w; j++) {
-					b[h, w] = 0;
-				}
-			}
-
-			{
-				int n = h;
-				int r = inverses
-					? (int)(P - 1 - (P - 1) / n)
-					: (int)((P - 1) / n);
-				ModInt s = Pow(ROOT, r);
-				var kp = new ModInt[n / 2 + 1];
-				kp.AsSpan().Fill(1);
-
-				for (int i = 0; i < n / 2; ++i) {
-					kp[i + 1] = kp[i] * s;
-				}
-
-				for (int x = 0; x < w; x++) {
-					int l = n / 2;
-					for (int i = 1; i < n; i <<= 1, l >>= 1) {
-						r = 0;
-						for (int j = 0; j < l; ++j, r += i) {
-							s = kp[i * j];
-							for (int k = 0; k < i; ++k) {
-								var p = a[k + r, x];
-								var q = a[k + r + n / 2, x];
-								b[k + 2 * r, x] = p + q;
-								b[k + 2 * r + i, x] = (p - q) * s;
-							}
-						}
-
-						var temp = a;
-						a = b;
-						b = temp;
-					}
-
-					if (inverses) {
-						s = Inverse(n);
-						for (int i = 0; i < n; i++) {
-							a[i, x] = a[i, x] * s;
-						}
-					}
-				}
-			}
-
-			return a;
-		}
-
-		public static Span<ModInt> Convolve(ReadOnlySpan<ModInt> a, ReadOnlySpan<ModInt> b)
-		{
-			int resultLength = a.Length + b.Length - 1;
-			int nttLenght = 1;
-			while (nttLenght < resultLength) {
-				nttLenght <<= 1;
-			}
-
-			var aa = new ModInt[nttLenght];
-			a.CopyTo(aa);
-			var bb = new ModInt[nttLenght];
-			b.CopyTo(bb);
-
-			var fa = NumberTheoreticTransform(aa);
-			var fb = NumberTheoreticTransform(bb);
-			for (int i = 0; i < nttLenght; i++) {
-				fa[i] *= fb[i];
-			}
-
-			var convolved = NumberTheoreticTransform(fa, true);
-			return convolved.Slice(0, resultLength);
-		}
-
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public long ToLong() => value_;
 		public override string ToString() => value_.ToString();
 	}
 
 	public static class Helper
 	{
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static int Pow(int n, int k)
-			=> (int)Pow((long)n, (long)k);
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static long Pow(long n, long k)
-		{
-			long ret = 1;
-			long mul = n;
-			while (k > 0) {
-				if ((k & 1) != 0) {
-					ret *= mul;
-				}
+		public static long INF => 1L << 60;
 
-				k >>= 1;
-				mul *= mul;
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static T Clamp<T>(this T value, T min, T max) where T : struct, IComparable<T>
+		{
+			if (value.CompareTo(min) <= 0) {
+				return min;
 			}
 
-			return ret;
+			if (value.CompareTo(max) >= 0) {
+				return max;
+			}
+
+			return value;
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -594,6 +414,37 @@ namespace YukiCoder
 		public static Span<T> AsSpan<T>(this T[,,,] array, int i, int j, int k)
 			=> MemoryMarshal.CreateSpan<T>(ref array[i, j, k, 0], array.GetLength(3));
 
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static T[] Merge<T>(ReadOnlySpan<T> first, ReadOnlySpan<T> second) where T : IComparable<T>
+		{
+			var ret = new T[first.Length + second.Length];
+			int p = 0;
+			int q = 0;
+			while (p < first.Length || q < second.Length) {
+				if (p == first.Length) {
+					ret[p + q] = second[q];
+					q++;
+					continue;
+				}
+
+				if (q == second.Length) {
+					ret[p + q] = first[p];
+					p++;
+					continue;
+				}
+
+				if (first[p].CompareTo(second[q]) < 0) {
+					ret[p + q] = first[p];
+					p++;
+				} else {
+					ret[p + q] = second[q];
+					q++;
+				}
+			}
+
+			return ret;
+		}
+
 		private static readonly int[] delta4_ = { 1, 0, -1, 0, 1 };
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static void DoIn4(int i, int j, int imax, int jmax, Action<int, int> action)
@@ -643,6 +494,29 @@ namespace YukiCoder
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static void Swap(this string str, int i, int j)
+		{
+			var span = str.AsWriteableSpan();
+			(span[i], span[j]) = (span[j], span[i]);
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static char Replace(this string str, int index, char c)
+		{
+			var span = str.AsWriteableSpan();
+			char old = span[index];
+			span[index] = c;
+			return old;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static Span<char> AsWriteableSpan(this string str)
+		{
+			var span = str.AsSpan();
+			return MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(span), span.Length);
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static string Join<T>(this IEnumerable<T> values, string separator = "")
 			=> string.Join(separator, values);
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -652,29 +526,16 @@ namespace YukiCoder
 
 	public static class Extensions
 	{
-		public static uint PopCount(uint bits)
-		{
-			bits = (bits & 0x55555555) + (bits >> 1 & 0x55555555);
-			bits = (bits & 0x33333333) + (bits >> 2 & 0x33333333);
-			bits = (bits & 0x0f0f0f0f) + (bits >> 4 & 0x0f0f0f0f);
-			bits = (bits & 0x00ff00ff) + (bits >> 8 & 0x00ff00ff);
-			return (bits & 0x0000ffff) + (bits >> 16 & 0x0000ffff);
-		}
-
-		public static int PopCount(ulong bits)
-		{
-			bits = ((bits & 0xaaaaaaaaaaaaaaaa) >> 1) + (bits & 0x5555555555555555);
-			bits = ((bits & 0xcccccccccccccccc) >> 2) + (bits & 0x3333333333333333);
-			bits = ((bits & 0xf0f0f0f0f0f0f0f0) >> 4) + (bits & 0x0f0f0f0f0f0f0f0f);
-			bits = ((bits & 0xff00ff00ff00ff00) >> 8) + (bits & 0x00ff00ff00ff00ff);
-			bits = ((bits & 0xffff0000ffff0000) >> 16) + (bits & 0x0000ffff0000ffff);
-			bits = ((bits & 0xffffffff00000000) >> 32) + (bits & 0x00000000ffffffff);
-			return (int)bits;
-		}
-
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static int PopCount(this BitFlag bit)
-			=> (int)PopCount((uint)bit.Flag);
+		public static Span<T> AsSpan<T>(this List<T> list)
+		{
+			return Unsafe.As<FakeList<T>>(list).Array.AsSpan(0, list.Count);
+		}
+
+		private class FakeList<T>
+		{
+			public T[] Array = null;
+		}
 	}
 
 	public class Scanner : IDisposable

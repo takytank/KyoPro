@@ -69,6 +69,11 @@
     <Compile Include="Lib\UnionFindTree.cs" />
     <Compile Include="Lib\Vector2.cs" />
   </ItemGroup>
-  <ItemGroup />
+  <ItemGroup>
+    <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.Mono280\TakyTank.KyoProLib.CSharp.Mono280.csproj">
+      <Project>{5158ccc4-5143-4fd2-8108-4ad772bc028e}</Project>
+      <Name>TakyTank.KyoProLib.CSharp.Mono280</Name>
+    </ProjectReference>
+  </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
