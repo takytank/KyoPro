@@ -6,7 +6,6 @@ using System.Runtime.Intrinsics.X86;
 using System.Text;
 using AtCoder.Temp.Lib;
 using TakyTank.KyoProLib.CSharp;
-using TakyTank.KyoProLib.CSharp.Core31;
 
 namespace AtCoder.Temp
 {
