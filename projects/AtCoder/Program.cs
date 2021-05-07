@@ -28,6 +28,7 @@ namespace AtCoder
 		public static BitFlag Begin() => 0;
 		public static BitFlag End(int bitCount) => 1 << bitCount;
 		public static BitFlag FromBit(int bitNumber) => 1 << bitNumber;
+		public static BitFlag Fill(int count) => (1 << count) - 1;
 
 		private readonly int flags_;
 		public int Flag => flags_;

@@ -1,6 +1,7 @@
 ﻿using System;
 using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Globalization;
 using System.IO;
 using System.Linq;
@@ -24,6 +25,7 @@ namespace YukiCoder
 		public static BitFlag Begin() => 0;
 		public static BitFlag End(int bitCount) => 1 << bitCount;
 		public static BitFlag FromBit(int bitNumber) => 1 << bitNumber;
+		public static BitFlag Fill(int count) => (1 << count) - 1;
 
 		private readonly int flags_;
 		public int Flag => flags_;
@@ -716,6 +718,30 @@ namespace YukiCoder
 			var array = new double[length];
 			for (int i = 0; i < length; ++i) {
 				array[i] = Double(offset);
+			}
+
+			return array;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public decimal Decimal() => decimal.Parse(Next(), CultureInfo.InvariantCulture);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public decimal Decimal(decimal offset) => Decimal() + offset;
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal) Decimal2(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal, decimal) Decimal3(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal, decimal, decimal) Decimal4(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public decimal[] ArrayDecimal(int length, decimal offset = 0)
+		{
+			var array = new decimal[length];
+			for (int i = 0; i < length; ++i) {
+				array[i] = Decimal(offset);
 			}
 
 			return array;
