@@ -26,6 +26,10 @@ Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AOJ", "projects\AOJ\AOJ.csp
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AOJ.Temp", "projects\AOJ.Temp\AOJ.Temp.csproj", "{6B2C228C-0503-4126-9EA9-AD82827FB8EB}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp.Core31", "submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.Core31\TakyTank.KyoProLib.CSharp.Core31.csproj", "{F958FC9B-4E7A-4094-97C4-E0AB1BFBCF86}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp.Csc360", "submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.Csc360\TakyTank.KyoProLib.CSharp.Csc360.csproj", "{BE8555F4-DF07-4F7A-9DE6-0D7202753D14}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -64,6 +68,14 @@ Global
 		{6B2C228C-0503-4126-9EA9-AD82827FB8EB}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6B2C228C-0503-4126-9EA9-AD82827FB8EB}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{6B2C228C-0503-4126-9EA9-AD82827FB8EB}.Release|Any CPU.Build.0 = Release|Any CPU
+		{F958FC9B-4E7A-4094-97C4-E0AB1BFBCF86}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{F958FC9B-4E7A-4094-97C4-E0AB1BFBCF86}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{F958FC9B-4E7A-4094-97C4-E0AB1BFBCF86}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{F958FC9B-4E7A-4094-97C4-E0AB1BFBCF86}.Release|Any CPU.Build.0 = Release|Any CPU
+		{BE8555F4-DF07-4F7A-9DE6-0D7202753D14}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{BE8555F4-DF07-4F7A-9DE6-0D7202753D14}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{BE8555F4-DF07-4F7A-9DE6-0D7202753D14}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{BE8555F4-DF07-4F7A-9DE6-0D7202753D14}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -71,6 +83,8 @@ Global
 	GlobalSection(NestedProjects) = preSolution
 		{ED270A92-9464-4AEE-9621-1BE797807E6E} = {24A87C9C-BBE8-4521-A3DC-EB7CC3CCC3DC}
 		{5158CCC4-5143-4FD2-8108-4AD772BC028E} = {24A87C9C-BBE8-4521-A3DC-EB7CC3CCC3DC}
+		{F958FC9B-4E7A-4094-97C4-E0AB1BFBCF86} = {24A87C9C-BBE8-4521-A3DC-EB7CC3CCC3DC}
+		{BE8555F4-DF07-4F7A-9DE6-0D7202753D14} = {24A87C9C-BBE8-4521-A3DC-EB7CC3CCC3DC}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {B669EA87-4E01-4AD2-B209-9ABFE8169968}
