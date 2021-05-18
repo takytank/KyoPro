@@ -30,6 +30,10 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp.C
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp.Csc360", "submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.Csc360\TakyTank.KyoProLib.CSharp.Csc360.csproj", "{BE8555F4-DF07-4F7A-9DE6-0D7202753D14}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MojaCoder", "projects\MojaCoder\MojaCoder.csproj", "{795E5CD5-91D9-4FDB-815B-5F95C9012056}"
+EndProject
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "MojaCoder.Temp", "projects\MojaCoder.Temp\MojaCoder.Temp.csproj", "{B8882425-9593-4F7E-8B42-D17303446D59}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -76,6 +80,14 @@ Global
 		{BE8555F4-DF07-4F7A-9DE6-0D7202753D14}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{BE8555F4-DF07-4F7A-9DE6-0D7202753D14}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{BE8555F4-DF07-4F7A-9DE6-0D7202753D14}.Release|Any CPU.Build.0 = Release|Any CPU
+		{795E5CD5-91D9-4FDB-815B-5F95C9012056}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{795E5CD5-91D9-4FDB-815B-5F95C9012056}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{795E5CD5-91D9-4FDB-815B-5F95C9012056}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{795E5CD5-91D9-4FDB-815B-5F95C9012056}.Release|Any CPU.Build.0 = Release|Any CPU
+		{B8882425-9593-4F7E-8B42-D17303446D59}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{B8882425-9593-4F7E-8B42-D17303446D59}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{B8882425-9593-4F7E-8B42-D17303446D59}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{B8882425-9593-4F7E-8B42-D17303446D59}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
