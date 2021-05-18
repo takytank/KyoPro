@@ -1,0 +1,54 @@
+﻿
+Microsoft Visual Studio Solution File, Format Version 12.00
+# Visual Studio Version 16
+VisualStudioVersion = 16.0.31205.134
+MinimumVisualStudioVersion = 10.0.40219.1
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "lib", "lib", "{A66EDAEC-8BA4-42AD-AF6C-F52193833DBC}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp", "submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp\TakyTank.KyoProLib.CSharp.csproj", "{34FD12FA-9349-4186-8BDA-69BDCC6DA3B9}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp.Csc360", "submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.Csc360\TakyTank.KyoProLib.CSharp.Csc360.csproj", "{DBD13473-5CAD-4990-BC5C-9FDEA0BCA1D9}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MojaCoder", "projects\MojaCoder\MojaCoder.csproj", "{FE4EA6E5-16DE-4E1C-B6D9-15F998FCEB46}"
+EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MojaCoder.Temp", "projects\MojaCoder.Temp\MojaCoder.Temp.csproj", "{032693B7-BF10-4462-B40A-51B28FF69F65}"
+EndProject
+Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{88DB8FAC-EFC4-4FEA-BEF5-6C1B57FB13C9}"
+	ProjectSection(SolutionItems) = preProject
+		.editorconfig = .editorconfig
+	EndProjectSection
+EndProject
+Global
+	GlobalSection(SolutionConfigurationPlatforms) = preSolution
+		Debug|Any CPU = Debug|Any CPU
+		Release|Any CPU = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(ProjectConfigurationPlatforms) = postSolution
+		{34FD12FA-9349-4186-8BDA-69BDCC6DA3B9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{34FD12FA-9349-4186-8BDA-69BDCC6DA3B9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{34FD12FA-9349-4186-8BDA-69BDCC6DA3B9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{34FD12FA-9349-4186-8BDA-69BDCC6DA3B9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{DBD13473-5CAD-4990-BC5C-9FDEA0BCA1D9}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{DBD13473-5CAD-4990-BC5C-9FDEA0BCA1D9}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{DBD13473-5CAD-4990-BC5C-9FDEA0BCA1D9}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{DBD13473-5CAD-4990-BC5C-9FDEA0BCA1D9}.Release|Any CPU.Build.0 = Release|Any CPU
+		{FE4EA6E5-16DE-4E1C-B6D9-15F998FCEB46}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{FE4EA6E5-16DE-4E1C-B6D9-15F998FCEB46}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{FE4EA6E5-16DE-4E1C-B6D9-15F998FCEB46}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{FE4EA6E5-16DE-4E1C-B6D9-15F998FCEB46}.Release|Any CPU.Build.0 = Release|Any CPU
+		{032693B7-BF10-4462-B40A-51B28FF69F65}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{032693B7-BF10-4462-B40A-51B28FF69F65}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{032693B7-BF10-4462-B40A-51B28FF69F65}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{032693B7-BF10-4462-B40A-51B28FF69F65}.Release|Any CPU.Build.0 = Release|Any CPU
+	EndGlobalSection
+	GlobalSection(SolutionProperties) = preSolution
+		HideSolutionNode = FALSE
+	EndGlobalSection
+	GlobalSection(NestedProjects) = preSolution
+		{34FD12FA-9349-4186-8BDA-69BDCC6DA3B9} = {A66EDAEC-8BA4-42AD-AF6C-F52193833DBC}
+		{DBD13473-5CAD-4990-BC5C-9FDEA0BCA1D9} = {A66EDAEC-8BA4-42AD-AF6C-F52193833DBC}
+	EndGlobalSection
+	GlobalSection(ExtensibilityGlobals) = postSolution
+		SolutionGuid = {2D23B89D-C90C-45CE-A925-23EE043FF664}
+	EndGlobalSection
+EndGlobal
