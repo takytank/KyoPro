@@ -285,8 +285,8 @@ namespace AtCoder
 
 	public struct ModInt
 	{
-		public const long P = 1000000007;
-		//public const long P = 998244353;
+		//public const long P = 1000000007;
+		public const long P = 998244353;
 		//public const long P = 2;
 		public const long ROOT = 3;
 
@@ -826,6 +826,30 @@ namespace AtCoder
 			var array = new double[length];
 			for (int i = 0; i < length; ++i) {
 				array[i] = Double(offset);
+			}
+
+			return array;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public decimal Decimal() => decimal.Parse(Next(), CultureInfo.InvariantCulture);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public decimal Decimal(decimal offset) => Decimal() + offset;
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal) Decimal2(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal, decimal) Decimal3(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal, decimal, decimal) Decimal4(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public decimal[] ArrayDecimal(int length, decimal offset = 0)
+		{
+			var array = new decimal[length];
+			for (int i = 0; i < length; ++i) {
+				array[i] = Decimal(offset);
 			}
 
 			return array;
