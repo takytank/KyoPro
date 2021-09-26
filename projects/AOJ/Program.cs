@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Numerics;
+using System.Runtime.CompilerServices;
 using System.Text;
 
 namespace AOJ
@@ -11,10 +12,13 @@ namespace AOJ
 	{
 		static void Main()
 		{
-			var cin = new Scanner2();
+			try {
+				var cin = new Scanner2();
+			} finally {
 #if DEBUG
-			Console.ReadLine();
+				Console.ReadLine();
 #endif
+			}
 		}
 	}
 
@@ -299,6 +303,21 @@ namespace AOJ
 		{
 			return int.Parse(Next());
 		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public int Int(int offset) => Int() + offset;
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (int, int) Int2(int offset = 0)
+			=> (Int(offset), Int(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (int, int, int) Int3(int offset = 0)
+			=> (Int(offset), Int(offset), Int(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (int, int, int, int) Int4(int offset = 0)
+			=> (Int(offset), Int(offset), Int(offset), Int(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (int, int, int, int, int) Int5(int offset = 0)
+			=> (Int(offset), Int(offset), Int(offset), Int(offset), Int(offset));
 
 		public long Long() {
 			return long.Parse(Next());
