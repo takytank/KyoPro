@@ -78,6 +78,14 @@
       <Project>{5158ccc4-5143-4fd2-8108-4ad772bc028e}</Project>
       <Name>TakyTank.KyoProLib.CSharp.Mono280</Name>
     </ProjectReference>
+    <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V7\TakyTank.KyoProLib.CSharp.V7.csproj">
+      <Project>{fd9a5d30-32ec-468b-867c-3c67902ec42c}</Project>
+      <Name>TakyTank.KyoProLib.CSharp.V7</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp\TakyTank.KyoProLib.CSharp.csproj">
+      <Project>{d0b3182e-1711-42c9-9e9d-4647204a9b04}</Project>
+      <Name>TakyTank.KyoProLib.CSharp</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>
