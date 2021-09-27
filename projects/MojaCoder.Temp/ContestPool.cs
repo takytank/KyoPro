@@ -2,6 +2,7 @@
 using System.Collections.Generic;
 using System.Text;
 using TakyTank.KyoProLib.CSharp;
+using TakyTank.KyoProLib.CSharp.V7;
 
 namespace MojaCoder.Temp
 {

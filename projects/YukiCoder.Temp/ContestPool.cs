@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using TakyTank.KyoProLib.CSharp;
+using TakyTank.KyoProLib.CSharp.V8;
 
 namespace YukiCoder.Temp
 {
