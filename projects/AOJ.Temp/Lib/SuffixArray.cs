@@ -80,7 +80,8 @@ namespace AOJ.Temp.Lib
 				}
 			}
 
-			Action<List<int>> Induce = lms2 => {
+			void Induce(List<int> lms2)
+			{
 				for (int i = 0; i < sa.Length; i++) {
 					sa[i] = -1;
 				}
@@ -116,7 +117,7 @@ namespace AOJ.Temp.Lib
 						sa[buf[s[v - 1] + 1]] = v - 1;
 					}
 				}
-			};
+			}
 
 			Induce(lms);
 
@@ -179,7 +180,8 @@ namespace AOJ.Temp.Lib
 			var sa = Enumerable.Range(0, n).ToArray();
 
 			var s = memory;
-			Comparison<int> compare = (l, r) => {
+			int Compare(int l, int r)
+			{
 				while (l < s.Length && r < s.Length) {
 					if (s[l] != s[r]) {
 						return s[l] - s[r];
@@ -190,9 +192,9 @@ namespace AOJ.Temp.Lib
 				}
 
 				return r - l;
-			};
+			}
 
-			Array.Sort(sa, compare);
+			Array.Sort(sa, Compare);
 			return sa;
 		}
 
@@ -206,7 +208,8 @@ namespace AOJ.Temp.Lib
 			Array.Copy(s, rnk, n);
 
 			for (int k = 1; k < n; k <<= 1) {
-				Comparison<int> compre = (x, y) => {
+				int Compre(int x, int y)
+				{
 					if (rnk[x] != rnk[y]) {
 						return rnk[x] - rnk[y];
 					}
@@ -215,12 +218,12 @@ namespace AOJ.Temp.Lib
 					int ry = y + k < n ? rnk[y + k] : -1;
 
 					return rx - ry;
-				};
+				}
 
-				Array.Sort(sa, compre);
+				Array.Sort(sa, Compre);
 				tmp[sa[0]] = 0;
 				for (int i = 1; i < sa.Length; ++i) {
-					tmp[sa[i]] = tmp[sa[i - 1]] + (compre(sa[i - 1], sa[i]) < 0 ? 1 : 0);
+					tmp[sa[i]] = tmp[sa[i - 1]] + (Compre(sa[i - 1], sa[i]) < 0 ? 1 : 0);
 				}
 
 				var tt = tmp;
