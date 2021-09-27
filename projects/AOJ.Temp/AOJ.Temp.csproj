@@ -48,6 +48,7 @@
     <Compile Include="ContestPool.cs" />
     <Compile Include="Lib\Helper.cs" />
     <Compile Include="Lib\Rerooting.cs" />
+    <Compile Include="Lib\SuffixArray.cs" />
     <Compile Include="Properties\AssemblyInfo.cs" />
     <Compile Include="Lib\BellmanFord.cs" />
     <Compile Include="Lib\BinarySearch.cs" />
@@ -74,10 +75,6 @@
     <Compile Include="Lib\Vector2.cs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.Mono280\TakyTank.KyoProLib.CSharp.Mono280.csproj">
-      <Project>{5158ccc4-5143-4fd2-8108-4ad772bc028e}</Project>
-      <Name>TakyTank.KyoProLib.CSharp.Mono280</Name>
-    </ProjectReference>
     <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V7\TakyTank.KyoProLib.CSharp.V7.csproj">
       <Project>{fd9a5d30-32ec-468b-867c-3c67902ec42c}</Project>
       <Name>TakyTank.KyoProLib.CSharp.V7</Name>

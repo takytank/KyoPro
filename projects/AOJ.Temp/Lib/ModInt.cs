@@ -8,68 +8,84 @@ namespace AOJ.Temp.Lib
 {
 	public struct ModInt
 	{
-		public static long P { get; set; }
-		static ModInt()
-		{
-			P = (long)1e9 + 7;;
-		}
+		//public const long P = 1000000007;
+		public const long P = 998244353;
+		public const long ROOT = 3;
 
-		public static ModInt Pow(ModInt value, long k)
-		{
-			return Pow(value.Value, k);
-		}
+		// (924844033, 5)
+		// (998244353, 3)
+		// (1012924417, 5)
+		// (167772161, 3)
+		// (469762049, 3)
+		// (1224736769, 3)
 
-		public static ModInt Pow(long value, long k)
-		{
-			long ret = 1;
-			for (k %= P - 1; k > 0; k >>= 1, value = value * value % P) {
-				if ((k & 1) == 1) {
-					ret = ret * value % P;
-				}
-			}
-			return new ModInt(ret);
-		}
-
-		public static ModInt Inverse(ModInt value)
-		{
-			return Pow(value, P - 2);
-		}
-
-		public long Value;
+		private long value_;
 
 		public ModInt(long value)
 		{
-			value %= P;
-			if (value < 0) {
-				value += P;
+			value_ = value;
+		}
+
+		public ModInt(long value, bool mods)
+		{
+			if (mods) {
+				value %= P;
+				if (value < 0) {
+					value += P;
+				}
 			}
 
-			Value = value;
+			value_ = value;
 		}
 
 		public static ModInt operator +(ModInt lhs, ModInt rhs)
 		{
-			lhs.Value += rhs.Value;
-			if (lhs.Value >= P) {
-				lhs.Value -= P;
-			}
+			lhs.value_ = (lhs.value_ + rhs.value_) % P;
+			return lhs;
+		}
+		public static ModInt operator +(long lhs, ModInt rhs)
+		{
+			rhs.value_ = (lhs + rhs.value_) % P;
+			return rhs;
+		}
+		public static ModInt operator +(ModInt lhs, long rhs)
+		{
+			lhs.value_ = (lhs.value_ + rhs) % P;
 			return lhs;
 		}
 
 		public static ModInt operator -(ModInt lhs, ModInt rhs)
 		{
-			lhs.Value -= rhs.Value;
-			if (lhs.Value < 0) {
-				lhs.Value += P;
-			}
-
+			lhs.value_ = (P + lhs.value_ - rhs.value_) % P;
+			return lhs;
+		}
+		public static ModInt operator -(long lhs, ModInt rhs)
+		{
+			rhs.value_ = (P + lhs - rhs.value_) % P;
+			return rhs;
+		}
+		public static ModInt operator -(ModInt lhs, long rhs)
+		{
+			lhs.value_ = (P + lhs.value_ - rhs) % P;
 			return lhs;
 		}
 
 		public static ModInt operator *(ModInt lhs, ModInt rhs)
 		{
-			return new ModInt(lhs.Value * rhs.Value % P);
+			lhs.value_ = lhs.value_ * rhs.value_ % P;
+			return lhs;
 		}
+		public static ModInt operator *(long lhs, ModInt rhs)
+		{
+			rhs.value_ = lhs * rhs.value_ % P;
+			return rhs;
+		}
+		public static ModInt operator *(ModInt lhs, long rhs)
+		{
+			lhs.value_ = lhs.value_ * rhs % P;
+			return lhs;
+		}
+
 		public static ModInt operator /(ModInt lhs, ModInt rhs)
 		{
 			long exp = P - 2;
@@ -83,21 +99,42 @@ namespace AOJ.Temp.Lib
 			}
 
 			return lhs;
-		 }
+		}
 
 		public static implicit operator ModInt(long n)
 		{
-			n %= P;
-			if (n < 0) {
-				n += P;
-			}
+			return new ModInt(n, true);
+		}
 
-			return new ModInt(n);
+		public static ModInt Inverse(ModInt value)
+		{
+			return Pow(value, P - 2);
+		}
+
+		public static ModInt Pow(ModInt value, long k)
+		{
+			return Pow(value.value_, k);
+		}
+
+		public static ModInt Pow(long value, long k)
+		{
+			long ret = 1;
+			for (k %= P - 1; k > 0; k >>= 1, value = value * value % P) {
+				if ((k & 1) == 1) {
+					ret = ret * value % P;
+				}
+			}
+			return new ModInt(ret);
+		}
+
+		public long ToLong()
+		{
+			return value_;
 		}
 
 		public override string ToString()
 		{
-			return Value.ToString();
+			return value_.ToString();
 		}
 	}
 
