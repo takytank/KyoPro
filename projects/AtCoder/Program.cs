@@ -45,9 +45,9 @@ namespace AtCoder
 		public bool Has(BitFlag target) => (flags_ & target.flags_) == target.flags_;
 		public bool Has(int target) => (flags_ & target) == target;
 		public bool HasBit(int bitNumber) => (flags_ & (1 << bitNumber)) != 0;
-		public BitFlag OrBit(int bitNumber) => (flags_ | (1 << bitNumber));
-		public BitFlag AndBit(int bitNumber) => (flags_ & (1 << bitNumber));
-		public BitFlag XorBit(int bitNumber) => (flags_ ^ (1 << bitNumber));
+		public BitFlag OrBit(int bitNumber) => flags_ | (1 << bitNumber);
+		public BitFlag AndBit(int bitNumber) => flags_ & (1 << bitNumber);
+		public BitFlag XorBit(int bitNumber) => flags_ ^ (1 << bitNumber);
 		public BitFlag ComplementOf(BitFlag sub) => flags_ ^ sub.flags_;
 		public int PopCount() => BitOperations.PopCount((uint)flags_);
 
@@ -89,14 +89,6 @@ namespace AtCoder
 		public static implicit operator int(BitFlag t) => t.flags_;
 
 		public override string ToString() => $"{Convert.ToString(flags_, 2).PadLeft(32, '0')} ({flags_})";
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public void ForEachSubBits(Action<BitFlag> action)
-		{
-			for (BitFlag sub = flags_; sub > 0; sub = --sub & flags_) {
-				action(sub);
-			}
-		}
 
 		public SubBitsEnumerator SubBits => new SubBitsEnumerator(flags_);
 		public struct SubBitsEnumerator : IEnumerable<BitFlag>
@@ -298,8 +290,8 @@ namespace AtCoder
 
 	public struct ModInt
 	{
-		//public const long P = 1000000007;
-		public const long P = 998244353;
+		public const long P = 1000000007;
+		//public const long P = 998244353;
 		//public const long P = 2;
 		public const long ROOT = 3;
 
@@ -406,7 +398,7 @@ namespace AtCoder
 
 	public static class Helper
 	{
-		public static long INF => 1L << 60;
+		public static long INF => 1L << 50;
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static T Clamp<T>(this T value, T min, T max) where T : struct, IComparable<T>
@@ -555,36 +547,35 @@ namespace AtCoder
 
 		private static readonly int[] delta4_ = { 1, 0, -1, 0, 1 };
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static void DoIn4(int i, int j, int imax, int jmax, Action<int, int> action)
+		public static IEnumerable<(int i, int j)> Adjacence4(int i, int j, int imax, int jmax)
 		{
 			for (int dn = 0; dn < 4; ++dn) {
 				int d4i = i + delta4_[dn];
 				int d4j = j + delta4_[dn + 1];
 				if ((uint)d4i < (uint)imax && (uint)d4j < (uint)jmax) {
-					action(d4i, d4j);
+					yield return (d4i, d4j);
 				}
 			}
 		}
 
 		private static readonly int[] delta8_ = { 1, 0, -1, 0, 1, 1, -1, -1, 1 };
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static void DoIn8(int i, int j, int imax, int jmax, Action<int, int> action)
+		public static IEnumerable<(int i, int j)> Adjacence8(int i, int j, int imax, int jmax)
 		{
 			for (int dn = 0; dn < 8; ++dn) {
 				int d8i = i + delta8_[dn];
 				int d8j = j + delta8_[dn + 1];
 				if ((uint)d8i < (uint)imax && (uint)d8j < (uint)jmax) {
-					action(d8i, d8j);
+					yield return (d8i, d8j);
 				}
 			}
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static void ForEachSubBits(int bit, Action<int> action)
+		public static IEnumerable<int> SubBitsOf(int bit)
 		{
-			for (int sub = bit; sub >= 0; --sub) {
-				sub &= bit;
-				action(sub);
+			for (int sub = bit; sub > 0; sub = --sub & bit) {
+				yield return sub;
 			}
 		}
 
