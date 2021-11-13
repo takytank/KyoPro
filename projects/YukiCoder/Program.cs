@@ -17,6 +17,7 @@ namespace YukiCoder
 		static void Main()
 		{
 			using var cin = new Scanner();
+			
 		}
 	}
 
@@ -27,17 +28,24 @@ namespace YukiCoder
 		public static BitFlag FromBit(int bitNumber) => 1 << bitNumber;
 		public static BitFlag Fill(int count) => (1 << count) - 1;
 
+		public static IEnumerable<BitFlag> All(int n)
+		{
+			for (var f = Begin(); f < End(n); ++f) {
+				yield return f;
+			}
+		}
+
 		private readonly int flags_;
 		public int Flag => flags_;
-		public bool this[int bitNumber] => (flags_ & (1 << bitNumber)) != 0;
+		public bool this[int bitNumber] => (flags_ & 1 << bitNumber) != 0;
 		public BitFlag(int flags) { flags_ = flags; }
 
 		public bool Has(BitFlag target) => (flags_ & target.flags_) == target.flags_;
 		public bool Has(int target) => (flags_ & target) == target;
-		public bool HasBit(int bitNumber) => (flags_ & (1 << bitNumber)) != 0;
-		public BitFlag OrBit(int bitNumber) => (flags_ | (1 << bitNumber));
-		public BitFlag AndBit(int bitNumber) => (flags_ & (1 << bitNumber));
-		public BitFlag XorBit(int bitNumber) => (flags_ ^ (1 << bitNumber));
+		public bool HasBit(int bitNumber) => (flags_ & 1 << bitNumber) != 0;
+		public BitFlag OrBit(int bitNumber) => flags_ | 1 << bitNumber;
+		public BitFlag AndBit(int bitNumber) => flags_ & 1 << bitNumber;
+		public BitFlag XorBit(int bitNumber) => flags_ ^ 1 << bitNumber;
 		public BitFlag ComplementOf(BitFlag sub) => flags_ ^ sub.flags_;
 		public int PopCount() => BitOperations.PopCount((uint)flags_);
 
@@ -55,6 +63,12 @@ namespace YukiCoder
 			=> new BitFlag(lhs.flags_ & rhs);
 		public static BitFlag operator &(int lhs, BitFlag rhs)
 			=> new BitFlag(lhs & rhs.flags_);
+		public static BitFlag operator ^(BitFlag lhs, BitFlag rhs)
+			=> new BitFlag(lhs.flags_ ^ rhs.flags_);
+		public static BitFlag operator ^(BitFlag lhs, int rhs)
+			=> new BitFlag(lhs.flags_ ^ rhs);
+		public static BitFlag operator ^(int lhs, BitFlag rhs)
+			=> new BitFlag(lhs ^ rhs.flags_);
 
 		public static bool operator <(BitFlag lhs, BitFlag rhs) => lhs.flags_ < rhs.flags_;
 		public static bool operator <(BitFlag lhs, int rhs) => lhs.flags_ < rhs;
@@ -77,7 +91,7 @@ namespace YukiCoder
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public void ForEachSubBits(Action<BitFlag> action)
 		{
-			for (BitFlag sub = (flags_ - 1) & flags_; sub > 0; sub = --sub & flags_) {
+			for (BitFlag sub = flags_; sub > 0; sub = --sub & flags_) {
 				action(sub);
 			}
 		}
@@ -103,7 +117,7 @@ namespace YukiCoder
 				public Enumerator(int flags)
 				{
 					src_ = flags;
-					Current = flags;
+					Current = flags + 1;
 				}
 
 				public void Dispose() { }
@@ -282,8 +296,8 @@ namespace YukiCoder
 
 	public struct ModInt
 	{
-		public const long P = 1000000007;
-		//public const long P = 998244353;
+		//public const long P = 1000000007;
+		public const long P = 998244353;
 		//public const long P = 2;
 		public const long ROOT = 3;
 
@@ -633,6 +647,7 @@ namespace YukiCoder
 	public class Scanner : IDisposable
 	{
 		private const int BUFFER_SIZE = 1024;
+		private const int ASCII_SPACE = 32;
 		private const int ASCII_CHAR_BEGIN = 33;
 		private const int ASCII_CHAR_END = 126;
 		private readonly string filePath_;
@@ -663,6 +678,18 @@ namespace YukiCoder
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public string NextLine()
+		{
+			var sb = new StringBuilder();
+			for (var b = Char(); b >= ASCII_SPACE && b <= ASCII_CHAR_END; b = (char)Read()) {
+				sb.Append(b);
+			}
+
+			return sb.ToString();
+		}
+
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public char Char()
 		{
 			byte b;
@@ -674,7 +701,7 @@ namespace YukiCoder
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public string Next()
+		public string String()
 		{
 			var sb = new StringBuilder();
 			for (var b = Char(); b >= ASCII_CHAR_BEGIN && b <= ASCII_CHAR_END; b = (char)Read()) {
@@ -689,7 +716,7 @@ namespace YukiCoder
 		{
 			var array = new string[length];
 			for (int i = 0; i < length; ++i) {
-				array[i] = Next();
+				array[i] = String();
 			}
 
 			return array;
@@ -708,6 +735,9 @@ namespace YukiCoder
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public (int, int, int, int) Int4(int offset = 0)
 			=> (Int(offset), Int(offset), Int(offset), Int(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (int, int, int, int, int) Int5(int offset = 0)
+			=> (Int(offset), Int(offset), Int(offset), Int(offset), Int(offset));
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public int[] ArrayInt(int length, int offset = 0)
 		{
@@ -755,6 +785,9 @@ namespace YukiCoder
 		public (long, long, long, long) Long4(long offset = 0)
 			=> (Long(offset), Long(offset), Long(offset), Long(offset));
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (long, long, long, long, long) Long5(long offset = 0)
+			=> (Long(offset), Long(offset), Long(offset), Long(offset), Long(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public long[] ArrayLong(int length, long offset = 0)
 		{
 			var array = new long[length];
@@ -779,6 +812,9 @@ namespace YukiCoder
 		public (BigInteger, BigInteger, BigInteger, BigInteger) Big4(long offset = 0)
 			=> (Big(offset), Big(offset), Big(offset), Big(offset));
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (BigInteger, BigInteger, BigInteger, BigInteger, BigInteger) Big5(long offset = 0)
+			=> (Big(offset), Big(offset), Big(offset), Big(offset), Big(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public BigInteger[] ArrayBig(int length, long offset = 0)
 		{
 			var array = new BigInteger[length];
@@ -790,7 +826,7 @@ namespace YukiCoder
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public double Double() => double.Parse(Next(), CultureInfo.InvariantCulture);
+		public double Double() => double.Parse(String(), CultureInfo.InvariantCulture);
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public double Double(double offset) => Double() + offset;
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -803,6 +839,9 @@ namespace YukiCoder
 		public (double, double, double, double) Double4(double offset = 0)
 			=> (Double(offset), Double(offset), Double(offset), Double(offset));
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (double, double, double, double, double) Double5(double offset = 0)
+			=> (Double(offset), Double(offset), Double(offset), Double(offset), Double(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public double[] ArrayDouble(int length, double offset = 0)
 		{
 			var array = new double[length];
@@ -814,7 +853,7 @@ namespace YukiCoder
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public decimal Decimal() => decimal.Parse(Next(), CultureInfo.InvariantCulture);
+		public decimal Decimal() => decimal.Parse(String(), CultureInfo.InvariantCulture);
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public decimal Decimal(decimal offset) => Decimal() + offset;
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -826,6 +865,9 @@ namespace YukiCoder
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public (decimal, decimal, decimal, decimal) Decimal4(decimal offset = 0)
 			=> (Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal, decimal, decimal, decimal) Decimal5(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset));
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public decimal[] ArrayDecimal(int length, decimal offset = 0)
 		{
