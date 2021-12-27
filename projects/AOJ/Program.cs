@@ -1,5 +1,7 @@
 ﻿using System;
+using System.Collections;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.IO;
 using System.Linq;
 using System.Numerics;
@@ -14,6 +16,7 @@ namespace AOJ
 		{
 			try {
 				var cin = new Scanner2();
+
 			} finally {
 #if DEBUG
 				Console.ReadLine();

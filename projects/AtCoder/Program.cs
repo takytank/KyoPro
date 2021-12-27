@@ -71,6 +71,8 @@ namespace AtCoder
 			=> new BitFlag(lhs.flags_ ^ rhs);
 		public static BitFlag operator ^(int lhs, BitFlag rhs)
 			=> new BitFlag(lhs ^ rhs.flags_);
+		public static BitFlag operator <<(BitFlag bit, int shift) => bit.flags_ << shift;
+		public static BitFlag operator >>(BitFlag bit, int shift) => bit.flags_ >> shift;
 
 		public static bool operator <(BitFlag lhs, BitFlag rhs) => lhs.flags_ < rhs.flags_;
 		public static bool operator <(BitFlag lhs, int rhs) => lhs.flags_ < rhs;
@@ -441,6 +443,36 @@ namespace AtCoder
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static long BinarySearchOKNG(long ok, long ng, Func<long, bool> satisfies)
+		{
+			while (ng - ok > 1) {
+				long mid = (ok + ng) / 2;
+				if (satisfies(mid)) {
+					ok = mid;
+				} else {
+					ng = mid;
+				}
+			}
+
+			return ok;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static long BinarySearchNGOK(long ng, long ok, Func<long, bool> satisfies)
+		{
+			while (ok - ng > 1) {
+				long mid = (ok + ng) / 2;
+				if (satisfies(mid)) {
+					ok = mid;
+				} else {
+					ng = mid;
+				}
+			}
+
+			return ok;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static T[] Array1<T>(int n, T initialValue) where T : struct
 			=> new T[n].Fill(initialValue);
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -689,7 +721,7 @@ namespace AtCoder
 		public string NextLine()
 		{
 			var sb = new StringBuilder();
-			for (var b = Char(); b >= ASCII_SPACE && b <= ASCII_CHAR_END ; b = (char)Read()) {
+			for (var b = Char(); b >= ASCII_SPACE && b <= ASCII_CHAR_END; b = (char)Read()) {
 				sb.Append(b);
 			}
 

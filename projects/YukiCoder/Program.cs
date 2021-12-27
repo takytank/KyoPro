@@ -17,7 +17,6 @@ namespace YukiCoder
 		static void Main()
 		{
 			using var cin = new Scanner();
-			
 		}
 	}
 
@@ -37,15 +36,15 @@ namespace YukiCoder
 
 		private readonly int flags_;
 		public int Flag => flags_;
-		public bool this[int bitNumber] => (flags_ & 1 << bitNumber) != 0;
+		public bool this[int bitNumber] => (flags_ & (1 << bitNumber)) != 0;
 		public BitFlag(int flags) { flags_ = flags; }
 
 		public bool Has(BitFlag target) => (flags_ & target.flags_) == target.flags_;
 		public bool Has(int target) => (flags_ & target) == target;
-		public bool HasBit(int bitNumber) => (flags_ & 1 << bitNumber) != 0;
-		public BitFlag OrBit(int bitNumber) => flags_ | 1 << bitNumber;
-		public BitFlag AndBit(int bitNumber) => flags_ & 1 << bitNumber;
-		public BitFlag XorBit(int bitNumber) => flags_ ^ 1 << bitNumber;
+		public bool HasBit(int bitNumber) => (flags_ & (1 << bitNumber)) != 0;
+		public BitFlag OrBit(int bitNumber) => flags_ | (1 << bitNumber);
+		public BitFlag AndBit(int bitNumber) => flags_ & (1 << bitNumber);
+		public BitFlag XorBit(int bitNumber) => flags_ ^ (1 << bitNumber);
 		public BitFlag ComplementOf(BitFlag sub) => flags_ ^ sub.flags_;
 		public int PopCount() => BitOperations.PopCount((uint)flags_);
 
@@ -69,6 +68,8 @@ namespace YukiCoder
 			=> new BitFlag(lhs.flags_ ^ rhs);
 		public static BitFlag operator ^(int lhs, BitFlag rhs)
 			=> new BitFlag(lhs ^ rhs.flags_);
+		public static BitFlag operator <<(BitFlag bit, int shift) => bit.flags_ << shift;
+		public static BitFlag operator >>(BitFlag bit, int shift) => bit.flags_ >> shift;
 
 		public static bool operator <(BitFlag lhs, BitFlag rhs) => lhs.flags_ < rhs.flags_;
 		public static bool operator <(BitFlag lhs, int rhs) => lhs.flags_ < rhs;
@@ -87,14 +88,6 @@ namespace YukiCoder
 		public static implicit operator int(BitFlag t) => t.flags_;
 
 		public override string ToString() => $"{Convert.ToString(flags_, 2).PadLeft(32, '0')} ({flags_})";
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public void ForEachSubBits(Action<BitFlag> action)
-		{
-			for (BitFlag sub = flags_; sub > 0; sub = --sub & flags_) {
-				action(sub);
-			}
-		}
 
 		public SubBitsEnumerator SubBits => new SubBitsEnumerator(flags_);
 		public struct SubBitsEnumerator : IEnumerable<BitFlag>
@@ -404,7 +397,7 @@ namespace YukiCoder
 
 	public static class Helper
 	{
-		public static long INF => 1L << 60;
+		public static long INF => 1L << 50;
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static T Clamp<T>(this T value, T min, T max) where T : struct, IComparable<T>
@@ -444,6 +437,36 @@ namespace YukiCoder
 				target = value;
 				onUpdated(value);
 			}
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static long BinarySearchOKNG(long ok, long ng, Func<long, bool> satisfies)
+		{
+			while (ng - ok > 1) {
+				long mid = (ok + ng) / 2;
+				if (satisfies(mid)) {
+					ok = mid;
+				} else {
+					ng = mid;
+				}
+			}
+
+			return ok;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static long BinarySearchNGOK(long ng, long ok, Func<long, bool> satisfies)
+		{
+			while (ok - ng > 1) {
+				long mid = (ok + ng) / 2;
+				if (satisfies(mid)) {
+					ok = mid;
+				} else {
+					ng = mid;
+				}
+			}
+
+			return ok;
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -553,36 +576,35 @@ namespace YukiCoder
 
 		private static readonly int[] delta4_ = { 1, 0, -1, 0, 1 };
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static void DoIn4(int i, int j, int imax, int jmax, Action<int, int> action)
+		public static IEnumerable<(int i, int j)> Adjacence4(int i, int j, int imax, int jmax)
 		{
 			for (int dn = 0; dn < 4; ++dn) {
 				int d4i = i + delta4_[dn];
 				int d4j = j + delta4_[dn + 1];
 				if ((uint)d4i < (uint)imax && (uint)d4j < (uint)jmax) {
-					action(d4i, d4j);
+					yield return (d4i, d4j);
 				}
 			}
 		}
 
 		private static readonly int[] delta8_ = { 1, 0, -1, 0, 1, 1, -1, -1, 1 };
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static void DoIn8(int i, int j, int imax, int jmax, Action<int, int> action)
+		public static IEnumerable<(int i, int j)> Adjacence8(int i, int j, int imax, int jmax)
 		{
 			for (int dn = 0; dn < 8; ++dn) {
 				int d8i = i + delta8_[dn];
 				int d8j = j + delta8_[dn + 1];
 				if ((uint)d8i < (uint)imax && (uint)d8j < (uint)jmax) {
-					action(d8i, d8j);
+					yield return (d8i, d8j);
 				}
 			}
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static void ForEachSubBits(int bit, Action<int> action)
+		public static IEnumerable<int> SubBitsOf(int bit)
 		{
-			for (int sub = bit; sub >= 0; --sub) {
-				sub &= bit;
-				action(sub);
+			for (int sub = bit; sub > 0; sub = --sub & bit) {
+				yield return sub;
 			}
 		}
 
@@ -594,6 +616,21 @@ namespace YukiCoder
 				var tmp = chars[i];
 				chars[i] = chars[j];
 				chars[j] = tmp;
+			}
+
+			return new string(chars);
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static string Exchange(string src, char a, char b)
+		{
+			var chars = src.ToCharArray();
+			for (int i = 0; i < chars.Length; i++) {
+				if (chars[i] == a) {
+					chars[i] = b;
+				} else if (chars[i] == b) {
+					chars[i] = a;
+				}
 			}
 
 			return new string(chars);

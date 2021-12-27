@@ -156,7 +156,7 @@ namespace AtCoder.Heuristic
 
 	public static class Helper
 	{
-		public static long INF => 1L << 60;
+		public static long INF => 1L << 50;
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static T Clamp<T>(this T value, T min, T max) where T : struct, IComparable<T>
@@ -196,6 +196,36 @@ namespace AtCoder.Heuristic
 				target = value;
 				onUpdated(value);
 			}
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static long BinarySearchOKNG(long ok, long ng, Func<long, bool> satisfies)
+		{
+			while (ng - ok > 1) {
+				long mid = (ok + ng) / 2;
+				if (satisfies(mid)) {
+					ok = mid;
+				} else {
+					ng = mid;
+				}
+			}
+
+			return ok;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static long BinarySearchNGOK(long ng, long ok, Func<long, bool> satisfies)
+		{
+			while (ok - ng > 1) {
+				long mid = (ok + ng) / 2;
+				if (satisfies(mid)) {
+					ok = mid;
+				} else {
+					ng = mid;
+				}
+			}
+
+			return ok;
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -305,36 +335,35 @@ namespace AtCoder.Heuristic
 
 		private static readonly int[] delta4_ = { 1, 0, -1, 0, 1 };
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static void DoIn4(int i, int j, int imax, int jmax, Action<int, int> action)
+		public static IEnumerable<(int i, int j)> Adjacence4(int i, int j, int imax, int jmax)
 		{
 			for (int dn = 0; dn < 4; ++dn) {
 				int d4i = i + delta4_[dn];
 				int d4j = j + delta4_[dn + 1];
 				if ((uint)d4i < (uint)imax && (uint)d4j < (uint)jmax) {
-					action(d4i, d4j);
+					yield return (d4i, d4j);
 				}
 			}
 		}
 
 		private static readonly int[] delta8_ = { 1, 0, -1, 0, 1, 1, -1, -1, 1 };
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static void DoIn8(int i, int j, int imax, int jmax, Action<int, int> action)
+		public static IEnumerable<(int i, int j)> Adjacence8(int i, int j, int imax, int jmax)
 		{
 			for (int dn = 0; dn < 8; ++dn) {
 				int d8i = i + delta8_[dn];
 				int d8j = j + delta8_[dn + 1];
 				if ((uint)d8i < (uint)imax && (uint)d8j < (uint)jmax) {
-					action(d8i, d8j);
+					yield return (d8i, d8j);
 				}
 			}
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static void ForEachSubBits(int bit, Action<int> action)
+		public static IEnumerable<int> SubBitsOf(int bit)
 		{
-			for (int sub = bit; sub >= 0; --sub) {
-				sub &= bit;
-				action(sub);
+			for (int sub = bit; sub > 0; sub = --sub & bit) {
+				yield return sub;
 			}
 		}
 

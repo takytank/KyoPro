@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Numerics;
 using System.Runtime.Intrinsics.X86;
@@ -12,8 +13,6 @@ namespace AtCoder.Temp
 {
 	class ContestPool
 	{
-		//const long INF = 1L << 60;
-
 		public static void A()
 		{
 			using var cin = new Scanner();
