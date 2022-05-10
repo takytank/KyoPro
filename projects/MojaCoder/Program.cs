@@ -12,7 +12,7 @@ namespace MojaCoder
 {
 	class Program
 	{
-		static void Main(string[] args)
+		static void Main()
 		{
 			using var cin = new Scanner();
 		}
@@ -23,6 +23,14 @@ namespace MojaCoder
 		public static BitFlag Begin() => 0;
 		public static BitFlag End(int bitCount) => 1 << bitCount;
 		public static BitFlag FromBit(int bitNumber) => 1 << bitNumber;
+		public static BitFlag Fill(int count) => (1 << count) - 1;
+
+		public static IEnumerable<BitFlag> All(int n)
+		{
+			for (var f = Begin(); f < End(n); ++f) {
+				yield return f;
+			}
+		}
 
 		private readonly int flags_;
 		public int Flag => flags_;
@@ -32,10 +40,10 @@ namespace MojaCoder
 		public bool Has(BitFlag target) => (flags_ & target.flags_) == target.flags_;
 		public bool Has(int target) => (flags_ & target) == target;
 		public bool HasBit(int bitNumber) => (flags_ & (1 << bitNumber)) != 0;
-		public BitFlag OrBit(int bitNumber) => (flags_ | (1 << bitNumber));
-		public BitFlag AndBit(int bitNumber) => (flags_ & (1 << bitNumber));
-		public BitFlag XorBit(int bitNumber) => (flags_ ^ (1 << bitNumber));
-		public BitFlag ComplementOf(BitFlag sub) => flags_ & (~sub.flags_);
+		public BitFlag OrBit(int bitNumber) => flags_ | (1 << bitNumber);
+		public BitFlag AndBit(int bitNumber) => flags_ & (1 << bitNumber);
+		public BitFlag XorBit(int bitNumber) => flags_ ^ (1 << bitNumber);
+		public BitFlag ComplementOf(BitFlag sub) => flags_ ^ sub.flags_;
 
 		public static BitFlag operator ++(BitFlag src) => new BitFlag(src.flags_ + 1);
 		public static BitFlag operator --(BitFlag src) => new BitFlag(src.flags_ - 1);
@@ -51,6 +59,14 @@ namespace MojaCoder
 			=> new BitFlag(lhs.flags_ & rhs);
 		public static BitFlag operator &(int lhs, BitFlag rhs)
 			=> new BitFlag(lhs & rhs.flags_);
+		public static BitFlag operator ^(BitFlag lhs, BitFlag rhs)
+			=> new BitFlag(lhs.flags_ ^ rhs.flags_);
+		public static BitFlag operator ^(BitFlag lhs, int rhs)
+			=> new BitFlag(lhs.flags_ ^ rhs);
+		public static BitFlag operator ^(int lhs, BitFlag rhs)
+			=> new BitFlag(lhs ^ rhs.flags_);
+		public static BitFlag operator <<(BitFlag bit, int shift) => bit.flags_ << shift;
+		public static BitFlag operator >>(BitFlag bit, int shift) => bit.flags_ >> shift;
 
 		public static bool operator <(BitFlag lhs, BitFlag rhs) => lhs.flags_ < rhs.flags_;
 		public static bool operator <(BitFlag lhs, int rhs) => lhs.flags_ < rhs;
@@ -69,14 +85,6 @@ namespace MojaCoder
 		public static implicit operator int(BitFlag t) => t.flags_;
 
 		public override string ToString() => $"{Convert.ToString(flags_, 2).PadLeft(32, '0')} ({flags_})";
-
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public void ForEachSubBits(Action<BitFlag> action)
-		{
-			for (BitFlag sub = (flags_ - 1) & flags_; sub > 0; sub = --sub & flags_) {
-				action(sub);
-			}
-		}
 
 		public SubBitsEnumerator SubBits => new SubBitsEnumerator(flags_);
 		public struct SubBitsEnumerator : IEnumerable<BitFlag>
@@ -99,7 +107,7 @@ namespace MojaCoder
 				public Enumerator(int flags)
 				{
 					src_ = flags;
-					Current = flags;
+					Current = flags + 1;
 				}
 
 				public void Dispose() { }
@@ -113,6 +121,22 @@ namespace MojaCoder
 
 	public class HashMap<TKey, TValue> : Dictionary<TKey, TValue>
 	{
+		public static HashMap<TKey, TValue> Merge(
+			HashMap<TKey, TValue> src1,
+			HashMap<TKey, TValue> src2,
+			Func<TValue, TValue, TValue> mergeValues)
+		{
+			if (src1.Count < src2.Count) {
+				(src1, src2) = (src2, src1);
+			}
+
+			foreach (var key in src2.Keys) {
+				src1[key] = mergeValues(src1[key], src2[key]);
+			}
+
+			return src1;
+		}
+
 		private readonly Func<TKey, TValue> initialzier_;
 		public HashMap(Func<TKey, TValue> initialzier)
 			: base()
@@ -158,6 +182,7 @@ namespace MojaCoder
 	{
 		//public const long P = 1000000007;
 		public const long P = 998244353;
+		//public const long P = 2;
 		public const long ROOT = 3;
 
 		// (924844033, 5)
@@ -232,24 +257,15 @@ namespace MojaCoder
 		}
 
 		public static ModInt operator /(ModInt lhs, ModInt rhs)
-		{
-			long exp = P - 2;
-			while (exp > 0) {
-				if (exp % 2 > 0) {
-					lhs *= rhs;
-				}
-
-				rhs *= rhs;
-				exp /= 2;
-			}
-
-			return lhs;
-		}
+			=> lhs * Inverse(rhs);
 
 		public static implicit operator ModInt(long n) => new ModInt(n, true);
 
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static ModInt Inverse(ModInt value) => Pow(value, P - 2);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static ModInt Pow(ModInt value, long k) => Pow(value.value_, k);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static ModInt Pow(long value, long k)
 		{
 			long ret = 1;
@@ -265,232 +281,27 @@ namespace MojaCoder
 			return new ModInt(ret);
 		}
 
-		public static Span<ModInt> NTT(Span<int> values, bool inverses = false)
-			=> NumberTheoreticTransform(values, inverses);
-		public static Span<ModInt> NumberTheoreticTransform(
-			Span<int> values, bool inverses = false)
-		{
-			var mods = new ModInt[values.Length];
-			for (int i = 0; i < mods.Length; i++) {
-				mods[i] = new ModInt(values[i]);
-			}
-
-			return NumberTheoreticTransform(mods, inverses);
-		}
-
-		public static Span<ModInt> NTT(Span<long> values, bool inverses = false)
-			=> NumberTheoreticTransform(values, inverses);
-		public static Span<ModInt> NumberTheoreticTransform(
-			Span<long> values, bool inverses = false)
-		{
-			var mods = new ModInt[values.Length];
-			for (int i = 0; i < mods.Length; i++) {
-				mods[i] = new ModInt(values[i]);
-			}
-
-			return NumberTheoreticTransform(mods, inverses);
-		}
-
-		public static Span<ModInt> NTT(Span<ModInt> values, bool inverses = false)
-			=> NumberTheoreticTransform(values, inverses);
-		public static Span<ModInt> NumberTheoreticTransform(
-			Span<ModInt> a, bool inverses = false)
-		{
-			int n = a.Length;
-			if (n == 1) {
-				return a;
-			}
-
-			var b = new ModInt[n].AsSpan();
-			int r = inverses
-				? (int)(P - 1 - (P - 1) / n)
-				: (int)((P - 1) / n);
-			ModInt s = Pow(ROOT, r);
-			var kp = new ModInt[n / 2 + 1];
-			kp.AsSpan().Fill(1);
-
-			for (int i = 0; i < n / 2; ++i) {
-				kp[i + 1] = kp[i] * s;
-			}
-
-			int l = n / 2;
-			for (int i = 1; i < n; i <<= 1, l >>= 1) {
-				r = 0;
-				for (int j = 0; j < l; ++j, r += i) {
-					s = kp[i * j];
-					for (int k = 0; k < i; ++k) {
-						var p = a[k + r];
-						var q = a[k + r + n / 2];
-						b[k + 2 * r] = p + q;
-						b[k + 2 * r + i] = (p - q) * s;
-					}
-				}
-
-				var temp = a;
-				a = b;
-				b = temp;
-			}
-
-			if (inverses) {
-				s = Inverse(n);
-				for (int i = 0; i < n; i++) {
-					a[i] = a[i] * s;
-				}
-			}
-
-			return a;
-		}
-
-		public static ModInt[,] Ntt2D(ModInt[,] a, bool inverses = false)
-			=> NumberTheoreticTransform2D(a, inverses);
-		public static ModInt[,] NumberTheoreticTransform2D(ModInt[,] a, bool inverses = false)
-		{
-			int h = a.GetLength(0);
-			int w = a.GetLength(1);
-			if (h == 1 && w == 1) {
-				return a;
-			}
-
-			var b = new ModInt[h, w];
-
-			{
-				int n = w;
-				int r = inverses
-					? (int)(P - 1 - (P - 1) / n)
-					: (int)((P - 1) / n);
-				ModInt s = Pow(ROOT, r);
-				var kp = new ModInt[n / 2 + 1];
-				kp.AsSpan().Fill(1);
-
-				for (int i = 0; i < n / 2; ++i) {
-					kp[i + 1] = kp[i] * s;
-				}
-
-				for (int y = 0; y < h; y++) {
-					int l = n / 2;
-					for (int i = 1; i < n; i <<= 1, l >>= 1) {
-						r = 0;
-						for (int j = 0; j < l; ++j, r += i) {
-							s = kp[i * j];
-							for (int k = 0; k < i; ++k) {
-								var p = a[y, k + r];
-								var q = a[y, k + r + n / 2];
-								b[y, k + 2 * r] = p + q;
-								b[y, k + 2 * r + i] = (p - q) * s;
-							}
-						}
-
-						var temp = a;
-						a = b;
-						b = temp;
-					}
-
-					if (inverses) {
-						s = Inverse(n);
-						for (int i = 0; i < n; i++) {
-							a[y, i] = a[y, i] * s;
-						}
-					}
-				}
-			}
-
-			for (int i = 0; i < h; i++) {
-				for (int j = 0; j < w; j++) {
-					b[h, w] = 0;
-				}
-			}
-
-			{
-				int n = h;
-				int r = inverses
-					? (int)(P - 1 - (P - 1) / n)
-					: (int)((P - 1) / n);
-				ModInt s = Pow(ROOT, r);
-				var kp = new ModInt[n / 2 + 1];
-				kp.AsSpan().Fill(1);
-
-				for (int i = 0; i < n / 2; ++i) {
-					kp[i + 1] = kp[i] * s;
-				}
-
-				for (int x = 0; x < w; x++) {
-					int l = n / 2;
-					for (int i = 1; i < n; i <<= 1, l >>= 1) {
-						r = 0;
-						for (int j = 0; j < l; ++j, r += i) {
-							s = kp[i * j];
-							for (int k = 0; k < i; ++k) {
-								var p = a[k + r, x];
-								var q = a[k + r + n / 2, x];
-								b[k + 2 * r, x] = p + q;
-								b[k + 2 * r + i, x] = (p - q) * s;
-							}
-						}
-
-						var temp = a;
-						a = b;
-						b = temp;
-					}
-
-					if (inverses) {
-						s = Inverse(n);
-						for (int i = 0; i < n; i++) {
-							a[i, x] = a[i, x] * s;
-						}
-					}
-				}
-			}
-
-			return a;
-		}
-
-		public static Span<ModInt> Convolve(ReadOnlySpan<ModInt> a, ReadOnlySpan<ModInt> b)
-		{
-			int resultLength = a.Length + b.Length - 1;
-			int nttLenght = 1;
-			while (nttLenght < resultLength) {
-				nttLenght <<= 1;
-			}
-
-			var aa = new ModInt[nttLenght];
-			a.CopyTo(aa);
-			var bb = new ModInt[nttLenght];
-			b.CopyTo(bb);
-
-			var fa = NumberTheoreticTransform(aa);
-			var fb = NumberTheoreticTransform(bb);
-			for (int i = 0; i < nttLenght; i++) {
-				fa[i] *= fb[i];
-			}
-
-			var convolved = NumberTheoreticTransform(fa, true);
-			return convolved.Slice(0, resultLength);
-		}
-
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public long ToLong() => value_;
 		public override string ToString() => value_.ToString();
 	}
 
 	public static class Helper
 	{
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static int Pow(int n, int k)
-			=> (int)Pow((long)n, (long)k);
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static long Pow(long n, long k)
-		{
-			long ret = 1;
-			long mul = n;
-			while (k > 0) {
-				if ((k & 1) != 0) {
-					ret *= mul;
-				}
+		public static long INF => 1L << 50;
 
-				k >>= 1;
-				mul *= mul;
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static T Clamp<T>(this T value, T min, T max) where T : struct, IComparable<T>
+		{
+			if (value.CompareTo(min) <= 0) {
+				return min;
 			}
 
-			return ret;
+			if (value.CompareTo(max) >= 0) {
+				return max;
+			}
+
+			return value;
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -517,6 +328,36 @@ namespace MojaCoder
 				target = value;
 				onUpdated(value);
 			}
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static long BinarySearchOKNG(long ok, long ng, Func<long, bool> satisfies)
+		{
+			while (ng - ok > 1) {
+				long mid = (ok + ng) / 2;
+				if (satisfies(mid)) {
+					ok = mid;
+				} else {
+					ng = mid;
+				}
+			}
+
+			return ok;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static long BinarySearchNGOK(long ng, long ok, Func<long, bool> satisfies)
+		{
+			while (ok - ng > 1) {
+				long mid = (ok + ng) / 2;
+				if (satisfies(mid)) {
+					ok = mid;
+				} else {
+					ng = mid;
+				}
+			}
+
+			return ok;
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -593,38 +434,68 @@ namespace MojaCoder
 		public static Span<T> AsSpan<T>(this T[,,,] array, int i, int j, int k)
 			=> MemoryMarshal.CreateSpan<T>(ref array[i, j, k, 0], array.GetLength(3));
 
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static T[] Merge<T>(ReadOnlySpan<T> first, ReadOnlySpan<T> second) where T : IComparable<T>
+		{
+			var ret = new T[first.Length + second.Length];
+			int p = 0;
+			int q = 0;
+			while (p < first.Length || q < second.Length) {
+				if (p == first.Length) {
+					ret[p + q] = second[q];
+					q++;
+					continue;
+				}
+
+				if (q == second.Length) {
+					ret[p + q] = first[p];
+					p++;
+					continue;
+				}
+
+				if (first[p].CompareTo(second[q]) < 0) {
+					ret[p + q] = first[p];
+					p++;
+				} else {
+					ret[p + q] = second[q];
+					q++;
+				}
+			}
+
+			return ret;
+		}
+
 		private static readonly int[] delta4_ = { 1, 0, -1, 0, 1 };
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static void DoIn4(int i, int j, int imax, int jmax, Action<int, int> action)
+		public static IEnumerable<(int i, int j)> Adjacence4(int i, int j, int imax, int jmax)
 		{
 			for (int dn = 0; dn < 4; ++dn) {
 				int d4i = i + delta4_[dn];
 				int d4j = j + delta4_[dn + 1];
 				if ((uint)d4i < (uint)imax && (uint)d4j < (uint)jmax) {
-					action(d4i, d4j);
+					yield return (d4i, d4j);
 				}
 			}
 		}
 
 		private static readonly int[] delta8_ = { 1, 0, -1, 0, 1, 1, -1, -1, 1 };
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static void DoIn8(int i, int j, int imax, int jmax, Action<int, int> action)
+		public static IEnumerable<(int i, int j)> Adjacence8(int i, int j, int imax, int jmax)
 		{
 			for (int dn = 0; dn < 8; ++dn) {
 				int d8i = i + delta8_[dn];
 				int d8j = j + delta8_[dn + 1];
 				if ((uint)d8i < (uint)imax && (uint)d8j < (uint)jmax) {
-					action(d8i, d8j);
+					yield return (d8i, d8j);
 				}
 			}
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static void ForEachSubBits(int bit, Action<int> action)
+		public static IEnumerable<int> SubBitsOf(int bit)
 		{
-			for (int sub = bit; sub >= 0; --sub) {
-				sub &= bit;
-				action(sub);
+			for (int sub = bit; sub > 0; sub = --sub & bit) {
+				yield return sub;
 			}
 		}
 
@@ -642,6 +513,44 @@ namespace MojaCoder
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static string Exchange(string src, char a, char b)
+		{
+			var chars = src.ToCharArray();
+			for (int i = 0; i < chars.Length; i++) {
+				if (chars[i] == a) {
+					chars[i] = b;
+				} else if (chars[i] == b) {
+					chars[i] = a;
+				}
+			}
+
+			return new string(chars);
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static void Swap(this string str, int i, int j)
+		{
+			var span = str.AsWriteableSpan();
+			(span[i], span[j]) = (span[j], span[i]);
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static char Replace(this string str, int index, char c)
+		{
+			var span = str.AsWriteableSpan();
+			char old = span[index];
+			span[index] = c;
+			return old;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static Span<char> AsWriteableSpan(this string str)
+		{
+			var span = str.AsSpan();
+			return MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(span), span.Length);
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public static string Join<T>(this IEnumerable<T> values, string separator = "")
 			=> string.Join(separator, values);
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -651,34 +560,22 @@ namespace MojaCoder
 
 	public static class Extensions
 	{
-		public static uint PopCount(uint bits)
-		{
-			bits = (bits & 0x55555555) + (bits >> 1 & 0x55555555);
-			bits = (bits & 0x33333333) + (bits >> 2 & 0x33333333);
-			bits = (bits & 0x0f0f0f0f) + (bits >> 4 & 0x0f0f0f0f);
-			bits = (bits & 0x00ff00ff) + (bits >> 8 & 0x00ff00ff);
-			return (bits & 0x0000ffff) + (bits >> 16 & 0x0000ffff);
-		}
-
-		public static int PopCount(ulong bits)
-		{
-			bits = ((bits & 0xaaaaaaaaaaaaaaaa) >> 1) + (bits & 0x5555555555555555);
-			bits = ((bits & 0xcccccccccccccccc) >> 2) + (bits & 0x3333333333333333);
-			bits = ((bits & 0xf0f0f0f0f0f0f0f0) >> 4) + (bits & 0x0f0f0f0f0f0f0f0f);
-			bits = ((bits & 0xff00ff00ff00ff00) >> 8) + (bits & 0x00ff00ff00ff00ff);
-			bits = ((bits & 0xffff0000ffff0000) >> 16) + (bits & 0x0000ffff0000ffff);
-			bits = ((bits & 0xffffffff00000000) >> 32) + (bits & 0x00000000ffffffff);
-			return (int)bits;
-		}
-
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public static int PopCount(this BitFlag bit)
-			=> (int)PopCount((uint)bit.Flag);
+		public static Span<T> AsSpan<T>(this List<T> list)
+		{
+			return Unsafe.As<FakeList<T>>(list).Array.AsSpan(0, list.Count);
+		}
+
+		private class FakeList<T>
+		{
+			public T[] Array = null;
+		}
 	}
 
 	public class Scanner : IDisposable
 	{
 		private const int BUFFER_SIZE = 1024;
+		private const int ASCII_SPACE = 32;
 		private const int ASCII_CHAR_BEGIN = 33;
 		private const int ASCII_CHAR_END = 126;
 		private readonly string filePath_;
@@ -709,6 +606,18 @@ namespace MojaCoder
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public string NextLine()
+		{
+			var sb = new StringBuilder();
+			for (var b = Char(); b >= ASCII_SPACE && b <= ASCII_CHAR_END; b = (char)Read()) {
+				sb.Append(b);
+			}
+
+			return sb.ToString();
+		}
+
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public char Char()
 		{
 			byte b;
@@ -720,7 +629,7 @@ namespace MojaCoder
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public string Next()
+		public string String()
 		{
 			var sb = new StringBuilder();
 			for (var b = Char(); b >= ASCII_CHAR_BEGIN && b <= ASCII_CHAR_END; b = (char)Read()) {
@@ -735,7 +644,7 @@ namespace MojaCoder
 		{
 			var array = new string[length];
 			for (int i = 0; i < length; ++i) {
-				array[i] = Next();
+				array[i] = String();
 			}
 
 			return array;
@@ -754,6 +663,9 @@ namespace MojaCoder
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public (int, int, int, int) Int4(int offset = 0)
 			=> (Int(offset), Int(offset), Int(offset), Int(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (int, int, int, int, int) Int5(int offset = 0)
+			=> (Int(offset), Int(offset), Int(offset), Int(offset), Int(offset));
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public int[] ArrayInt(int length, int offset = 0)
 		{
@@ -801,6 +713,9 @@ namespace MojaCoder
 		public (long, long, long, long) Long4(long offset = 0)
 			=> (Long(offset), Long(offset), Long(offset), Long(offset));
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (long, long, long, long, long) Long5(long offset = 0)
+			=> (Long(offset), Long(offset), Long(offset), Long(offset), Long(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public long[] ArrayLong(int length, long offset = 0)
 		{
 			var array = new long[length];
@@ -812,7 +727,7 @@ namespace MojaCoder
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public double Double() => double.Parse(Next(), CultureInfo.InvariantCulture);
+		public double Double() => double.Parse(String(), CultureInfo.InvariantCulture);
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public double Double(double offset) => Double() + offset;
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -825,11 +740,41 @@ namespace MojaCoder
 		public (double, double, double, double) Double4(double offset = 0)
 			=> (Double(offset), Double(offset), Double(offset), Double(offset));
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (double, double, double, double, double) Double5(double offset = 0)
+			=> (Double(offset), Double(offset), Double(offset), Double(offset), Double(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public double[] ArrayDouble(int length, double offset = 0)
 		{
 			var array = new double[length];
 			for (int i = 0; i < length; ++i) {
 				array[i] = Double(offset);
+			}
+
+			return array;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public decimal Decimal() => decimal.Parse(String(), CultureInfo.InvariantCulture);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public decimal Decimal(decimal offset) => Decimal() + offset;
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal) Decimal2(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal, decimal) Decimal3(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal, decimal, decimal) Decimal4(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal, decimal, decimal, decimal) Decimal5(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public decimal[] ArrayDecimal(int length, decimal offset = 0)
+		{
+			var array = new decimal[length];
+			for (int i = 0; i < length; ++i) {
+				array[i] = Decimal(offset);
 			}
 
 			return array;
