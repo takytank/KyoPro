@@ -14,6 +14,7 @@ namespace YukiCoder
 {
 	class Program
 	{
+		[MethodImpl(MethodImplOptions.AggressiveOptimization)]
 		static void Main()
 		{
 			using var cin = new Scanner();
@@ -305,8 +306,8 @@ namespace YukiCoder
 
 	public struct ModInt
 	{
-		//public const long P = 1000000007;
-		public const long P = 998244353;
+		public const long P = 1000000007;
+		//public const long P = 998244353;
 		//public const long P = 2;
 		public const long ROOT = 3;
 

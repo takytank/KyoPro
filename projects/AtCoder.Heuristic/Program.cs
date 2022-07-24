@@ -15,6 +15,7 @@ namespace AtCoder.Heuristic
 {
 	class Program
 	{
+		[MethodImpl(MethodImplOptions.AggressiveOptimization)]
 		static void Main()
 		{
 			using var cin = new Scanner();
