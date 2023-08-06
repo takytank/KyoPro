@@ -34,6 +34,8 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp.V
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp.V8", "submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V8\TakyTank.KyoProLib.CSharp.V8.csproj", "{0ACD9CEE-430E-4ED3-BE81-4E1CE99B91A0}"
 EndProject
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp.V11", "submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V11\TakyTank.KyoProLib.CSharp.V11.csproj", "{889FA1DE-08AA-405B-B2E2-362879797A0E}"
+EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
 		Debug|Any CPU = Debug|Any CPU
@@ -88,6 +90,10 @@ Global
 		{0ACD9CEE-430E-4ED3-BE81-4E1CE99B91A0}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{0ACD9CEE-430E-4ED3-BE81-4E1CE99B91A0}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{0ACD9CEE-430E-4ED3-BE81-4E1CE99B91A0}.Release|Any CPU.Build.0 = Release|Any CPU
+		{889FA1DE-08AA-405B-B2E2-362879797A0E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
+		{889FA1DE-08AA-405B-B2E2-362879797A0E}.Debug|Any CPU.Build.0 = Debug|Any CPU
+		{889FA1DE-08AA-405B-B2E2-362879797A0E}.Release|Any CPU.ActiveCfg = Release|Any CPU
+		{889FA1DE-08AA-405B-B2E2-362879797A0E}.Release|Any CPU.Build.0 = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(SolutionProperties) = preSolution
 		HideSolutionNode = FALSE
@@ -96,6 +102,7 @@ Global
 		{ED270A92-9464-4AEE-9621-1BE797807E6E} = {24A87C9C-BBE8-4521-A3DC-EB7CC3CCC3DC}
 		{6B7903CD-4B70-4150-8E15-1BEE2F464D30} = {24A87C9C-BBE8-4521-A3DC-EB7CC3CCC3DC}
 		{0ACD9CEE-430E-4ED3-BE81-4E1CE99B91A0} = {24A87C9C-BBE8-4521-A3DC-EB7CC3CCC3DC}
+		{889FA1DE-08AA-405B-B2E2-362879797A0E} = {24A87C9C-BBE8-4521-A3DC-EB7CC3CCC3DC}
 	EndGlobalSection
 	GlobalSection(ExtensibilityGlobals) = postSolution
 		SolutionGuid = {B669EA87-4E01-4AD2-B209-9ABFE8169968}
