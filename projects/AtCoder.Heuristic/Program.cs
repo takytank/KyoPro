@@ -1,11 +1,9 @@
 ﻿using System;
 using System.Collections.Generic;
 using System.Diagnostics;
-using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Linq;
-using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
@@ -18,7 +16,122 @@ namespace AtCoder.Heuristic
 		[MethodImpl(MethodImplOptions.AggressiveOptimization)]
 		static void Main()
 		{
-			using var cin = new Scanner();
+			HeuristicHelper.RunCases(
+				runCaseCount: 300,
+				testCaseCount: 150,
+				isParallel: true,
+				i => Run(i),
+				(locker, i, ret) => {
+					var (score, loop, up, sc) = ret;
+					lock (locker) {
+						Console.WriteLine($"{i:d4}: loop={loop:d5} up={up:d3} sc={sc:d5} score={score:d12}");
+					}
+
+					return (score, loop, up);
+				});
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveOptimization)]
+		static (long score, int loop, int up, int sc)
+			Run(int caseNumber)
+		{
+			var (isDebug, sw, sb, rnd) = HeuristicHelper.Initialize();
+			using var cin = HeuristicHelper.CreateScanner(@$"D:\AtCoder\AHC021\tools\in\", caseNumber);
+
+			return (0, 0, 0, 0);
+		}
+	}
+
+	public class HeuristicHelper
+	{
+		public static void RunCases<T>(
+			int runCaseCount,
+			double testCaseCount,
+			bool isParallel,
+			Func<int, T> run,
+			Func<object, int, T, (long score, int loop, int up)> outputCaseInformation,
+			Action addOutput = null)
+		{
+#if DEBUG
+			object locker = new object();
+			long scoreSum = 0;
+			double scoreLogSum = 0;
+			long loopSum = 0;
+			long upSum = 0;
+			long scoreMin = long.MaxValue;
+			long scoreMax = long.MinValue;
+			if (isParallel) {
+				Parallel.For(0, runCaseCount, i => {
+					RunCases(i);
+				});
+			} else {
+				for (int i = 0; i < runCaseCount; i++) {
+					RunCases(i);
+				}
+			}
+
+			void RunCases(int i)
+			{
+				var ret = run(i);
+				var (score, loop, up) = outputCaseInformation(locker, i, ret);
+				Console.Out.Flush();
+				lock (locker) {
+					scoreSum += score;
+					scoreLogSum += Math.Log10(score);
+					loopSum += loop;
+					upSum += up;
+					scoreMin = Math.Min(score, scoreMin);
+					scoreMax = Math.Max(score, scoreMax);
+				}
+			}
+
+			scoreSum = (long)(scoreSum / (runCaseCount / testCaseCount));
+			scoreLogSum /= runCaseCount / testCaseCount;
+			Console.WriteLine("");
+
+			Console.WriteLine("");
+			Console.WriteLine($"sum: {scoreSum}");
+			Console.WriteLine($"ave: {scoreSum / testCaseCount}");
+			Console.WriteLine($"min: {scoreMin}");
+			Console.WriteLine($"max: {scoreMax}");
+			Console.WriteLine($"log: {scoreLogSum / testCaseCount}");
+			Console.WriteLine($"loop ave.: {loopSum / (double)runCaseCount:f3}");
+			Console.WriteLine($"up ave.: {upSum / (double)runCaseCount:f3}");
+
+			addOutput?.Invoke();
+
+			Console.Out.Flush();
+#else
+			run(-1);
+#endif
+		}
+
+		public static (bool isDebug, Stopwatch sw, StringBuilder sb, Random rnd) Initialize()
+		{
+			var sw = new Stopwatch();
+			sw.Start();
+
+			bool isDebug = false;
+#if DEBUG
+			isDebug = true;
+#endif
+			var sb = new StringBuilder();
+			var rnd = new Random();
+
+			return (isDebug, sw, sb, rnd);
+		}
+
+		public static Scanner CreateScanner(
+			string caseDirectory, int caseNumber)
+		{
+#if DEBUG
+			var cin = caseNumber >= 0
+				? new Scanner($"{caseDirectory}{caseNumber:d4}.txt")
+				: new Scanner();
+#else
+			var cin = new Scanner();
+#endif
+			return cin;
 		}
 	}
 
