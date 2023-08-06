@@ -9,7 +9,7 @@ using AtCoder.Temp.Lib;
 using TakyTank.KyoProLib.CSharp;
 using TakyTank.KyoProLib.CSharp.V8;
 
-namespace AtCoder.Temp
+namespace AtCoder8.Temp
 {
 	class ContestPool
 	{

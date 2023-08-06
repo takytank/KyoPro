@@ -4,7 +4,7 @@ using System.Linq;
 using System.Text;
 using TakyTank.KyoProLib.CSharp;
 
-namespace AtCoder.Temp
+namespace AtCoder8.Temp
 {
 	class MarathonPool
 	{

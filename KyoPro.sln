@@ -3,13 +3,13 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.32112.339
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AtCoder", "projects\AtCoder\AtCoder.csproj", "{9943ADA9-F0EE-4037-BAD2-BCDA9328F69C}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AtCoder8", "projects\AtCoder8\AtCoder8.csproj", "{9943ADA9-F0EE-4037-BAD2-BCDA9328F69C}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "lib", "lib", "{24A87C9C-BBE8-4521-A3DC-EB7CC3CCC3DC}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp", "submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp\TakyTank.KyoProLib.CSharp.csproj", "{ED270A92-9464-4AEE-9621-1BE797807E6E}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AtCoder.Temp", "projects\AtCoder.Temp\AtCoder.Temp.csproj", "{F1D74799-ABDB-41AF-87AC-0BD8ABE3A111}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AtCoder8.Temp", "projects\AtCoder8.Temp\AtCoder8.Temp.csproj", "{F1D74799-ABDB-41AF-87AC-0BD8ABE3A111}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{D93410B3-DCEE-4108-B371-963CCDF95610}"
 	ProjectSection(SolutionItems) = preProject
@@ -28,7 +28,7 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MojaCoder", "projects\MojaC
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MojaCoder.Temp", "projects\MojaCoder.Temp\MojaCoder.Temp.csproj", "{B8882425-9593-4F7E-8B42-D17303446D59}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AtCoder.Heuristic", "projects\AtCoder.Heuristic\AtCoder.Heuristic.csproj", "{724D5521-7277-4797-AACC-30E1F3051A09}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AtCoder8.Heuristic", "projects\AtCoder8.Heuristic\AtCoder8.Heuristic.csproj", "{724D5521-7277-4797-AACC-30E1F3051A09}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp.V7", "submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V7\TakyTank.KyoProLib.CSharp.V7.csproj", "{6B7903CD-4B70-4150-8E15-1BEE2F464D30}"
 EndProject

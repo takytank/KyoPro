@@ -1,137 +1,219 @@
 ﻿using System;
+using System.Buffers.Text;
+using System.Collections;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.Diagnostics.CodeAnalysis;
 using System.Globalization;
 using System.IO;
 using System.Linq;
+using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
+using System.Runtime.Intrinsics.X86;
 using System.Text;
-using System.Threading.Tasks;
 
-namespace AtCoder.Heuristic
+namespace AtCoder8
 {
 	class Program
 	{
 		[MethodImpl(MethodImplOptions.AggressiveOptimization)]
 		static void Main()
 		{
-			HeuristicHelper.RunCases(
-				runCaseCount: 300,
-				testCaseCount: 150,
-				isParallel: true,
-				i => Run(i),
-				(locker, i, ret) => {
-					var (score, loop, up, sc) = ret;
-					lock (locker) {
-						Console.WriteLine($"{i:d4}: loop={loop:d5} up={up:d3} sc={sc:d5} score={score:d12}");
-					}
-
-					return (score, loop, up);
-				});
-		}
-
-		[MethodImpl(MethodImplOptions.AggressiveOptimization)]
-		static (long score, int loop, int up, int sc)
-			Run(int caseNumber)
-		{
-			var (isDebug, sw, sb, rnd) = HeuristicHelper.Initialize();
-			using var cin = HeuristicHelper.CreateScanner(@$"D:\AtCoder\AHC021\tools\in\", caseNumber);
-
-			return (0, 0, 0, 0);
+			using var cin = new Scanner();
 		}
 	}
 
-	public class HeuristicHelper
+	public struct BitFlag
 	{
-		public static void RunCases<T>(
-			int runCaseCount,
-			double testCaseCount,
-			bool isParallel,
-			Func<int, T> run,
-			Func<object, int, T, (long score, int loop, int up)> outputCaseInformation,
-			Action addOutput = null)
-		{
-#if DEBUG
-			object locker = new object();
-			long scoreSum = 0;
-			double scoreLogSum = 0;
-			long loopSum = 0;
-			long upSum = 0;
-			long scoreMin = long.MaxValue;
-			long scoreMax = long.MinValue;
-			if (isParallel) {
-				Parallel.For(0, runCaseCount, i => {
-					RunCases(i);
-				});
-			} else {
-				for (int i = 0; i < runCaseCount; i++) {
-					RunCases(i);
-				}
-			}
+		public static BitFlag Begin() => 0;
+		public static BitFlag End(int bitCount) => 1 << bitCount;
+		public static BitFlag FromBit(int bitNumber) => 1 << bitNumber;
+		public static BitFlag Fill(int count) => (1 << count) - 1;
 
-			void RunCases(int i)
+		public static IEnumerable<BitFlag> All(int n)
+		{
+			for (var f = Begin(); f < End(n); ++f) {
+				yield return f;
+			}
+		}
+
+		private readonly int flags_;
+		public int Flag => flags_;
+		public bool this[int bitNumber] => (flags_ & (1 << bitNumber)) != 0;
+		public BitFlag(int flags) { flags_ = flags; }
+
+		public bool Has(BitFlag target) => (flags_ & target.flags_) == target.flags_;
+		public bool Has(int target) => (flags_ & target) == target;
+		public bool HasBit(int bitNumber) => (flags_ & (1 << bitNumber)) != 0;
+		public BitFlag OrBit(int bitNumber) => flags_ | (1 << bitNumber);
+		public BitFlag AndBit(int bitNumber) => flags_ & (1 << bitNumber);
+		public BitFlag XorBit(int bitNumber) => flags_ ^ (1 << bitNumber);
+		public BitFlag ComplementOf(BitFlag sub) => flags_ ^ sub.flags_;
+		public int PopCount() => BitOperations.PopCount((uint)flags_);
+
+		public static BitFlag operator ++(BitFlag src) => new BitFlag(src.flags_ + 1);
+		public static BitFlag operator --(BitFlag src) => new BitFlag(src.flags_ - 1);
+		public static BitFlag operator |(BitFlag lhs, BitFlag rhs)
+			=> new BitFlag(lhs.flags_ | rhs.flags_);
+		public static BitFlag operator |(BitFlag lhs, int rhs)
+			=> new BitFlag(lhs.flags_ | rhs);
+		public static BitFlag operator |(int lhs, BitFlag rhs)
+			=> new BitFlag(lhs | rhs.flags_);
+		public static BitFlag operator &(BitFlag lhs, BitFlag rhs)
+			=> new BitFlag(lhs.flags_ & rhs.flags_);
+		public static BitFlag operator &(BitFlag lhs, int rhs)
+			=> new BitFlag(lhs.flags_ & rhs);
+		public static BitFlag operator &(int lhs, BitFlag rhs)
+			=> new BitFlag(lhs & rhs.flags_);
+		public static BitFlag operator ^(BitFlag lhs, BitFlag rhs)
+			=> new BitFlag(lhs.flags_ ^ rhs.flags_);
+		public static BitFlag operator ^(BitFlag lhs, int rhs)
+			=> new BitFlag(lhs.flags_ ^ rhs);
+		public static BitFlag operator ^(int lhs, BitFlag rhs)
+			=> new BitFlag(lhs ^ rhs.flags_);
+		public static BitFlag operator <<(BitFlag bit, int shift) => bit.flags_ << shift;
+		public static BitFlag operator >>(BitFlag bit, int shift) => bit.flags_ >> shift;
+
+		public static bool operator <(BitFlag lhs, BitFlag rhs) => lhs.flags_ < rhs.flags_;
+		public static bool operator <(BitFlag lhs, int rhs) => lhs.flags_ < rhs;
+		public static bool operator <(int lhs, BitFlag rhs) => lhs < rhs.flags_;
+		public static bool operator >(BitFlag lhs, BitFlag rhs) => lhs.flags_ > rhs.flags_;
+		public static bool operator >(BitFlag lhs, int rhs) => lhs.flags_ > rhs;
+		public static bool operator >(int lhs, BitFlag rhs) => lhs > rhs.flags_;
+		public static bool operator <=(BitFlag lhs, BitFlag rhs) => lhs.flags_ <= rhs.flags_;
+		public static bool operator <=(BitFlag lhs, int rhs) => lhs.flags_ <= rhs;
+		public static bool operator <=(int lhs, BitFlag rhs) => lhs <= rhs.flags_;
+		public static bool operator >=(BitFlag lhs, BitFlag rhs) => lhs.flags_ >= rhs.flags_;
+		public static bool operator >=(BitFlag lhs, int rhs) => lhs.flags_ >= rhs;
+		public static bool operator >=(int lhs, BitFlag rhs) => lhs >= rhs.flags_;
+
+		public static implicit operator BitFlag(int t) => new BitFlag(t);
+		public static implicit operator int(BitFlag t) => t.flags_;
+
+		public override string ToString() => $"{Convert.ToString(flags_, 2).PadLeft(32, '0')} ({flags_})";
+
+		public SubBitsEnumerator SubBits => new SubBitsEnumerator(flags_);
+		public struct SubBitsEnumerator : IEnumerable<BitFlag>
+		{
+			private readonly int flags_;
+			public SubBitsEnumerator(int flags)
 			{
-				var ret = run(i);
-				var (score, loop, up) = outputCaseInformation(locker, i, ret);
-				Console.Out.Flush();
-				lock (locker) {
-					scoreSum += score;
-					scoreLogSum += Math.Log10(score);
-					loopSum += loop;
-					upSum += up;
-					scoreMin = Math.Min(score, scoreMin);
-					scoreMax = Math.Max(score, scoreMax);
+				flags_ = flags;
+			}
+
+			IEnumerator<BitFlag> IEnumerable<BitFlag>.GetEnumerator() => new Enumerator(flags_);
+			IEnumerator IEnumerable.GetEnumerator() => new Enumerator(flags_);
+			public Enumerator GetEnumerator() => new Enumerator(flags_);
+			public struct Enumerator : IEnumerator<BitFlag>
+			{
+				private readonly int src_;
+				public BitFlag Current { get; private set; }
+				object IEnumerator.Current => Current;
+
+				public Enumerator(int flags)
+				{
+					src_ = flags;
+					Current = flags + 1;
+				}
+
+				public void Dispose() { }
+				[MethodImpl(MethodImplOptions.AggressiveInlining)]
+				public bool MoveNext() => (Current = --Current & src_) > 0;
+				[MethodImpl(MethodImplOptions.AggressiveInlining)]
+				public void Reset() => Current = src_;
+			}
+		}
+	}
+
+	public class HashMap<TKey, TValue> : Dictionary<TKey, TValue>
+	{
+		public static HashMap<TKey, TValue> Merge(
+			HashMap<TKey, TValue> src1,
+			HashMap<TKey, TValue> src2,
+			Func<TValue, TValue, TValue> mergeValues)
+		{
+			if (src1.Count < src2.Count) {
+				(src1, src2) = (src2, src1);
+			}
+
+			foreach (var key in src2.Keys) {
+				src1[key] = mergeValues(src1[key], src2[key]);
+			}
+
+			return src1;
+		}
+
+		private readonly Func<TKey, TValue> initialzier_;
+		public HashMap(Func<TKey, TValue> initialzier)
+			: base()
+		{
+			initialzier_ = initialzier;
+		}
+
+		public HashMap(Func<TKey, TValue> initialzier, int capacity)
+			: base(capacity)
+		{
+			initialzier_ = initialzier;
+		}
+
+		new public TValue this[TKey key]
+		{
+			get
+			{
+				if (TryGetValue(key, out TValue value)) {
+					return value;
+				} else {
+					var init = initialzier_(key);
+					base[key] = init;
+					return init;
 				}
 			}
 
-			scoreSum = (long)(scoreSum / (runCaseCount / testCaseCount));
-			scoreLogSum /= runCaseCount / testCaseCount;
-			Console.WriteLine("");
-
-			Console.WriteLine("");
-			Console.WriteLine($"sum: {scoreSum}");
-			Console.WriteLine($"ave: {scoreSum / testCaseCount}");
-			Console.WriteLine($"min: {scoreMin}");
-			Console.WriteLine($"max: {scoreMax}");
-			Console.WriteLine($"log: {scoreLogSum / testCaseCount}");
-			Console.WriteLine($"loop ave.: {loopSum / (double)runCaseCount:f3}");
-			Console.WriteLine($"up ave.: {upSum / (double)runCaseCount:f3}");
-
-			addOutput?.Invoke();
-
-			Console.Out.Flush();
-#else
-			run(-1);
-#endif
+			set { base[key] = value; }
 		}
 
-		public static (bool isDebug, Stopwatch sw, StringBuilder sb, Random rnd) Initialize()
+		public HashMap<TKey, TValue> Merge(
+			HashMap<TKey, TValue> src,
+			Func<TValue, TValue, TValue> mergeValues)
 		{
-			var sw = new Stopwatch();
-			sw.Start();
+			foreach (var key in src.Keys) {
+				this[key] = mergeValues(this[key], src[key]);
+			}
 
-			bool isDebug = false;
-#if DEBUG
-			isDebug = true;
-#endif
-			var sb = new StringBuilder();
-			var rnd = new Random();
+			return this;
+		}
+	}
 
-			return (isDebug, sw, sb, rnd);
+	public class JagList2<T> where T : struct
+	{
+		private readonly int n_;
+		private readonly List<T>[] tempValues_;
+		private T[][] values_;
+
+		public int Count => n_;
+		public List<T>[] Raw => tempValues_;
+		public T[][] Values => values_;
+		public T[] this[int index] => values_[index];
+
+		public JagList2(int n)
+		{
+			n_ = n;
+			tempValues_ = new List<T>[n];
+			for (int i = 0; i < n; ++i) {
+				tempValues_[i] = new List<T>();
+			}
 		}
 
-		public static Scanner CreateScanner(
-			string caseDirectory, int caseNumber)
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public void Add(int i, T value) => tempValues_[i].Add(value);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public void Build()
 		{
-#if DEBUG
-			var cin = caseNumber >= 0
-				? new Scanner($"{caseDirectory}{caseNumber:d4}.txt")
-				: new Scanner();
-#else
-			var cin = new Scanner();
-#endif
-			return cin;
+			values_ = new T[n_][];
+			for (int i = 0; i < values_.Length; ++i) {
+				values_[i] = tempValues_[i].ToArray();
+			}
 		}
 	}
 
@@ -225,47 +307,112 @@ namespace AtCoder.Heuristic
 		}
 	}
 
-	public class HashMap<TKey, TValue> : Dictionary<TKey, TValue>
+	public struct ModInt
 	{
-		private readonly Func<TKey, TValue> initialzier_;
-		public HashMap(Func<TKey, TValue> initialzier)
-			: base()
-		{
-			initialzier_ = initialzier;
-		}
+		//public const long P = 1000000007;
+		public const long P = 998244353;
+		//public const long P = 2;
+		public const long ROOT = 3;
 
-		public HashMap(Func<TKey, TValue> initialzier, int capacity)
-			: base(capacity)
-		{
-			initialzier_ = initialzier;
-		}
+		// (924844033, 5)
+		// (998244353, 3)
+		// (1012924417, 5)
+		// (167772161, 3)
+		// (469762049, 3)
+		// (1224736769, 3)
 
-		new public TValue this[TKey key]
+		private long value_;
+
+		public static ModInt New(long value, bool mods) => new ModInt(value, mods);
+		public ModInt(long value) => value_ = value;
+		public ModInt(long value, bool mods)
 		{
-			get
-			{
-				if (TryGetValue(key, out TValue value)) {
-					return value;
-				} else {
-					var init = initialzier_(key);
-					base[key] = init;
-					return init;
+			if (mods) {
+				value %= P;
+				if (value < 0) {
+					value += P;
 				}
 			}
 
-			set { base[key] = value; }
+			value_ = value;
 		}
 
-		public HashMap<TKey, TValue> Merge(
-			HashMap<TKey, TValue> src,
-			Func<TValue, TValue, TValue> mergeValues)
+		public static ModInt operator +(ModInt lhs, ModInt rhs)
 		{
-			foreach (var key in src.Keys) {
-				this[key] = mergeValues(this[key], src[key]);
+			lhs.value_ = (lhs.value_ + rhs.value_) % P;
+			return lhs;
+		}
+		public static ModInt operator +(long lhs, ModInt rhs)
+		{
+			rhs.value_ = (lhs + rhs.value_) % P;
+			return rhs;
+		}
+		public static ModInt operator +(ModInt lhs, long rhs)
+		{
+			lhs.value_ = (lhs.value_ + rhs) % P;
+			return lhs;
+		}
+
+		public static ModInt operator -(ModInt lhs, ModInt rhs)
+		{
+			lhs.value_ = (P + lhs.value_ - rhs.value_) % P;
+			return lhs;
+		}
+		public static ModInt operator -(long lhs, ModInt rhs)
+		{
+			rhs.value_ = (P + lhs - rhs.value_) % P;
+			return rhs;
+		}
+		public static ModInt operator -(ModInt lhs, long rhs)
+		{
+			lhs.value_ = (P + lhs.value_ - rhs) % P;
+			return lhs;
+		}
+
+		public static ModInt operator *(ModInt lhs, ModInt rhs)
+		{
+			lhs.value_ = lhs.value_ * rhs.value_ % P;
+			return lhs;
+		}
+		public static ModInt operator *(long lhs, ModInt rhs)
+		{
+			rhs.value_ = lhs * rhs.value_ % P;
+			return rhs;
+		}
+		public static ModInt operator *(ModInt lhs, long rhs)
+		{
+			lhs.value_ = lhs.value_ * rhs % P;
+			return lhs;
+		}
+
+		public static ModInt operator /(ModInt lhs, ModInt rhs)
+			=> lhs * Inverse(rhs);
+
+		public static implicit operator ModInt(long n) => new ModInt(n, true);
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static ModInt Inverse(ModInt value) => Pow(value, P - 2);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static ModInt Pow(ModInt value, long k) => Pow(value.value_, k);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public static ModInt Pow(long value, long k)
+		{
+			long ret = 1;
+			while (k > 0) {
+				if ((k & 1) != 0) {
+					ret = ret * value % P;
+				}
+
+				value = value * value % P;
+				k >>= 1;
 			}
 
-			return this;
+			return new ModInt(ret);
 		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public long ToLong() => value_;
+		public override string ToString() => value_.ToString();
 	}
 
 	public static class Helper
@@ -557,6 +704,7 @@ namespace AtCoder.Heuristic
 	public class Scanner : IDisposable
 	{
 		private const int BUFFER_SIZE = 1024;
+		private const int ASCII_SPACE = 32;
 		private const int ASCII_CHAR_BEGIN = 33;
 		private const int ASCII_CHAR_END = 126;
 		private readonly string filePath_;
@@ -587,6 +735,18 @@ namespace AtCoder.Heuristic
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public string NextLine()
+		{
+			var sb = new StringBuilder();
+			for (var b = Char(); b >= ASCII_SPACE && b <= ASCII_CHAR_END; b = (char)Read()) {
+				sb.Append(b);
+			}
+
+			return sb.ToString();
+		}
+
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public char Char()
 		{
 			byte b;
@@ -598,7 +758,7 @@ namespace AtCoder.Heuristic
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public string Next()
+		public string String()
 		{
 			var sb = new StringBuilder();
 			for (var b = Char(); b >= ASCII_CHAR_BEGIN && b <= ASCII_CHAR_END; b = (char)Read()) {
@@ -613,7 +773,7 @@ namespace AtCoder.Heuristic
 		{
 			var array = new string[length];
 			for (int i = 0; i < length; ++i) {
-				array[i] = Next();
+				array[i] = String();
 			}
 
 			return array;
@@ -682,6 +842,9 @@ namespace AtCoder.Heuristic
 		public (long, long, long, long) Long4(long offset = 0)
 			=> (Long(offset), Long(offset), Long(offset), Long(offset));
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (long, long, long, long, long) Long5(long offset = 0)
+			=> (Long(offset), Long(offset), Long(offset), Long(offset), Long(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public long[] ArrayLong(int length, long offset = 0)
 		{
 			var array = new long[length];
@@ -693,7 +856,34 @@ namespace AtCoder.Heuristic
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public double Double() => double.Parse(Next(), CultureInfo.InvariantCulture);
+		public BigInteger Big() => new BigInteger(Long());
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public BigInteger Big(long offset) => Big() + offset;
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (BigInteger, BigInteger) Big2(long offset = 0)
+			=> (Big(offset), Big(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (BigInteger, BigInteger, BigInteger) Big3(long offset = 0)
+			=> (Big(offset), Big(offset), Big(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (BigInteger, BigInteger, BigInteger, BigInteger) Big4(long offset = 0)
+			=> (Big(offset), Big(offset), Big(offset), Big(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (BigInteger, BigInteger, BigInteger, BigInteger, BigInteger) Big5(long offset = 0)
+			=> (Big(offset), Big(offset), Big(offset), Big(offset), Big(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public BigInteger[] ArrayBig(int length, long offset = 0)
+		{
+			var array = new BigInteger[length];
+			for (int i = 0; i < length; ++i) {
+				array[i] = Big(offset);
+			}
+
+			return array;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public double Double() => double.Parse(String(), CultureInfo.InvariantCulture);
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public double Double(double offset) => Double() + offset;
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -706,11 +896,41 @@ namespace AtCoder.Heuristic
 		public (double, double, double, double) Double4(double offset = 0)
 			=> (Double(offset), Double(offset), Double(offset), Double(offset));
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (double, double, double, double, double) Double5(double offset = 0)
+			=> (Double(offset), Double(offset), Double(offset), Double(offset), Double(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
 		public double[] ArrayDouble(int length, double offset = 0)
 		{
 			var array = new double[length];
 			for (int i = 0; i < length; ++i) {
 				array[i] = Double(offset);
+			}
+
+			return array;
+		}
+
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public decimal Decimal() => decimal.Parse(String(), CultureInfo.InvariantCulture);
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public decimal Decimal(decimal offset) => Decimal() + offset;
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal) Decimal2(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal, decimal) Decimal3(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal, decimal, decimal) Decimal4(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public (decimal, decimal, decimal, decimal, decimal) Decimal5(decimal offset = 0)
+			=> (Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset));
+		[MethodImpl(MethodImplOptions.AggressiveInlining)]
+		public decimal[] ArrayDecimal(int length, decimal offset = 0)
+		{
+			var array = new decimal[length];
+			for (int i = 0; i < length; ++i) {
+				array[i] = Decimal(offset);
 			}
 
 			return array;
