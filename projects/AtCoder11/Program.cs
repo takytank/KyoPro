@@ -1,9 +1,12 @@
 ﻿using System.Collections;
+using System.Diagnostics;
 using System.Globalization;
+using System.Net.Http.Headers;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using MathNet.Numerics.Distributions;
 
 namespace AtCoder11;
 
@@ -16,7 +19,7 @@ public class Program
 	}
 }
 
-public struct BitFlag
+public readonly struct BitFlag
 {
 	public static BitFlag Begin() => 0;
 	public static BitFlag End(int bitCount) => 1 << bitCount;
@@ -44,26 +47,26 @@ public struct BitFlag
 	public BitFlag ComplementOf(BitFlag sub) => flags_ ^ sub.flags_;
 	public int PopCount() => BitOperations.PopCount((uint)flags_);
 
-	public static BitFlag operator ++(BitFlag src) => new BitFlag(src.flags_ + 1);
-	public static BitFlag operator --(BitFlag src) => new BitFlag(src.flags_ - 1);
+	public static BitFlag operator ++(BitFlag src) => new(src.flags_ + 1);
+	public static BitFlag operator --(BitFlag src) => new(src.flags_ - 1);
 	public static BitFlag operator |(BitFlag lhs, BitFlag rhs)
-		=> new BitFlag(lhs.flags_ | rhs.flags_);
+		=> new(lhs.flags_ | rhs.flags_);
 	public static BitFlag operator |(BitFlag lhs, int rhs)
-		=> new BitFlag(lhs.flags_ | rhs);
+		=> new(lhs.flags_ | rhs);
 	public static BitFlag operator |(int lhs, BitFlag rhs)
-		=> new BitFlag(lhs | rhs.flags_);
+		=> new(lhs | rhs.flags_);
 	public static BitFlag operator &(BitFlag lhs, BitFlag rhs)
-		=> new BitFlag(lhs.flags_ & rhs.flags_);
+		=> new(lhs.flags_ & rhs.flags_);
 	public static BitFlag operator &(BitFlag lhs, int rhs)
-		=> new BitFlag(lhs.flags_ & rhs);
+		=> new(lhs.flags_ & rhs);
 	public static BitFlag operator &(int lhs, BitFlag rhs)
-		=> new BitFlag(lhs & rhs.flags_);
+		=> new(lhs & rhs.flags_);
 	public static BitFlag operator ^(BitFlag lhs, BitFlag rhs)
-		=> new BitFlag(lhs.flags_ ^ rhs.flags_);
+		=> new(lhs.flags_ ^ rhs.flags_);
 	public static BitFlag operator ^(BitFlag lhs, int rhs)
-		=> new BitFlag(lhs.flags_ ^ rhs);
+		=> new(lhs.flags_ ^ rhs);
 	public static BitFlag operator ^(int lhs, BitFlag rhs)
-		=> new BitFlag(lhs ^ rhs.flags_);
+		=> new(lhs ^ rhs.flags_);
 	public static BitFlag operator <<(BitFlag bit, int shift) => bit.flags_ << shift;
 	public static BitFlag operator >>(BitFlag bit, int shift) => bit.flags_ >> shift;
 
@@ -80,13 +83,13 @@ public struct BitFlag
 	public static bool operator >=(BitFlag lhs, int rhs) => lhs.flags_ >= rhs;
 	public static bool operator >=(int lhs, BitFlag rhs) => lhs >= rhs.flags_;
 
-	public static implicit operator BitFlag(int t) => new BitFlag(t);
+	public static implicit operator BitFlag(int t) => new(t);
 	public static implicit operator int(BitFlag t) => t.flags_;
 
 	public override string ToString() => $"{Convert.ToString(flags_, 2).PadLeft(32, '0')} ({flags_})";
 
-	public SubBitsEnumerator SubBits => new SubBitsEnumerator(flags_);
-	public struct SubBitsEnumerator : IEnumerable<BitFlag>
+	public SubBitsEnumerator SubBits => new(flags_);
+	public readonly struct SubBitsEnumerator : IEnumerable<BitFlag>
 	{
 		private readonly int flags_;
 		public SubBitsEnumerator(int flags)
@@ -96,12 +99,12 @@ public struct BitFlag
 
 		IEnumerator<BitFlag> IEnumerable<BitFlag>.GetEnumerator() => new Enumerator(flags_);
 		IEnumerator IEnumerable.GetEnumerator() => new Enumerator(flags_);
-		public Enumerator GetEnumerator() => new Enumerator(flags_);
+		public Enumerator GetEnumerator() => new(flags_);
 		public struct Enumerator : IEnumerator<BitFlag>
 		{
 			private readonly int src_;
 			public BitFlag Current { get; private set; }
-			object IEnumerator.Current => Current;
+			readonly object IEnumerator.Current => Current;
 
 			public Enumerator(int flags)
 			{
@@ -109,7 +112,7 @@ public struct BitFlag
 				Current = flags + 1;
 			}
 
-			public void Dispose() { }
+			public readonly void Dispose() { }
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
 			public bool MoveNext() => (Current = --Current & src_) > 0;
 			[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -315,7 +318,7 @@ public struct ModInt
 
 	private long value_;
 
-	public static ModInt New(long value, bool mods) => new ModInt(value, mods);
+	public static ModInt New(long value, bool mods) => new(value, mods);
 	public ModInt(long value) => value_ = value;
 	public ModInt(long value, bool mods)
 	{
@@ -380,7 +383,7 @@ public struct ModInt
 	public static ModInt operator /(ModInt lhs, ModInt rhs)
 		=> lhs * Inverse(rhs);
 
-	public static implicit operator ModInt(long n) => new ModInt(n, true);
+	public static implicit operator ModInt(long n) => new(n, true);
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static ModInt Inverse(ModInt value) => Pow(value, P - 2);
@@ -403,8 +406,8 @@ public struct ModInt
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public long ToLong() => value_;
-	public override string ToString() => value_.ToString();
+	public readonly long ToLong() => value_;
+	public readonly override string ToString() => value_.ToString();
 }
 
 public static class Helper
@@ -625,9 +628,7 @@ public static class Helper
 	{
 		var chars = src.ToCharArray();
 		for (int i = 0, j = chars.Length - 1; i < j; ++i, --j) {
-			var tmp = chars[i];
-			chars[i] = chars[j];
-			chars[j] = tmp;
+			(chars[j], chars[i]) = (chars[i], chars[j]);
 		}
 
 		return new string(chars);
@@ -724,6 +725,7 @@ public class Scanner : IDisposable
 	{
 		Console.Out.Flush();
 		stream_.Dispose();
+		GC.SuppressFinalize(this);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -848,7 +850,7 @@ public class Scanner : IDisposable
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public BigInteger Big() => new BigInteger(Long());
+	public BigInteger Big() => new(Long());
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public BigInteger Big(long offset) => Big() + offset;
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]

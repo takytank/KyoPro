@@ -1,4 +1,5 @@
-﻿using TakyTank.KyoProLib.CSharp.V11;
+﻿/*
+using TakyTank.KyoProLib.CSharp.V11;
 
 namespace AtCoder11.Temp;
 
@@ -89,3 +90,4 @@ class ContestPool
 		using var cin = new Scanner();
 	}
 }
+*/

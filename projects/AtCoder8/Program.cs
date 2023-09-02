@@ -24,7 +24,7 @@ namespace AtCoder8
 		}
 	}
 
-	public struct BitFlag
+	public readonly struct BitFlag
 	{
 		public static BitFlag Begin() => 0;
 		public static BitFlag End(int bitCount) => 1 << bitCount;
@@ -94,7 +94,7 @@ namespace AtCoder8
 		public override string ToString() => $"{Convert.ToString(flags_, 2).PadLeft(32, '0')} ({flags_})";
 
 		public SubBitsEnumerator SubBits => new SubBitsEnumerator(flags_);
-		public struct SubBitsEnumerator : IEnumerable<BitFlag>
+		public readonly struct SubBitsEnumerator : IEnumerable<BitFlag>
 		{
 			private readonly int flags_;
 			public SubBitsEnumerator(int flags)
@@ -109,7 +109,7 @@ namespace AtCoder8
 			{
 				private readonly int src_;
 				public BitFlag Current { get; private set; }
-				object IEnumerator.Current => Current;
+				readonly object IEnumerator.Current => Current;
 
 				public Enumerator(int flags)
 				{
@@ -117,7 +117,7 @@ namespace AtCoder8
 					Current = flags + 1;
 				}
 
-				public void Dispose() { }
+				public readonly void Dispose() { }
 				[MethodImpl(MethodImplOptions.AggressiveInlining)]
 				public bool MoveNext() => (Current = --Current & src_) > 0;
 				[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -411,8 +411,8 @@ namespace AtCoder8
 		}
 
 		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		public long ToLong() => value_;
-		public override string ToString() => value_.ToString();
+		public readonly long ToLong() => value_;
+		public readonly override string ToString() => value_.ToString();
 	}
 
 	public static class Helper
@@ -633,9 +633,7 @@ namespace AtCoder8
 		{
 			var chars = src.ToCharArray();
 			for (int i = 0, j = chars.Length - 1; i < j; ++i, --j) {
-				var tmp = chars[i];
-				chars[i] = chars[j];
-				chars[j] = tmp;
+				(chars[j], chars[i]) = (chars[i], chars[j]);
 			}
 
 			return new string(chars);

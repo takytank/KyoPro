@@ -1,10 +1,14 @@
 ﻿using System.Collections;
 using System.Diagnostics;
+using System.Diagnostics.Metrics;
 using System.Globalization;
+using System.Net.Sockets;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
+using static System.Formats.Asn1.AsnWriter;
+using static Microsoft.ML.Transforms.Text.LatentDirichletAllocationTransformer.ModelParameters;
 
 namespace AtCoder11.Heyrustuc;
 
@@ -15,30 +19,32 @@ public class Program
 	{
 		HeuristicHelper.RunCases(
 			runCaseCount: 300,
-			testCaseCount: 150,
+			testCaseCount: 300,
 			isParallel: true,
 			i => Run(i),
 			(locker, i, ret) => {
-				var (score, loop, up, sc) = ret;
+				var (score, loop, up) = ret;
 				lock (locker) {
-					Console.WriteLine($"{i:d4}: loop={loop:d5} up={up:d3} sc={sc:d5} score={score:d12}");
+					Console.WriteLine($"{i:d4}: loop={loop:d5} up={up:d3} score={score:d12}");
 				}
 
 				return (score, loop, up);
+			},
+			(tc, rc) => {
 			});
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveOptimization)]
-	static (long score, int loop, int up, int sc)
+	static (long score, int loop, int up)
 		Run(int caseNumber)
 	{
 		var (isDebug, sw, sb, rnd) = HeuristicHelper.Initialize();
-		using var cin = HeuristicHelper.CreateScanner(@$"D:\AtCoder\AHC021\tools\in\", caseNumber);
+		using var cin = HeuristicHelper.CreateScanner(@$"D:\AtCoder\toyota2023final\tools\in\", caseNumber);
 
-		return (0, 0, 0, 0);
+
+		return (0, 1, 0);
 	}
 }
-
 
 public class HeuristicHelper
 {
@@ -48,10 +54,10 @@ public class HeuristicHelper
 		bool isParallel,
 		Func<int, T> run,
 		Func<object, int, T, (long score, int loop, int up)> outputCaseInformation,
-		Action addOutput = null)
+		Action<double, int> addOutput = null)
 	{
 #if DEBUG
-		object locker = new object();
+		object locker = new();
 		long scoreSum = 0;
 		double scoreLogSum = 0;
 		long loopSum = 0;
@@ -96,7 +102,7 @@ public class HeuristicHelper
 		Console.WriteLine($"loop ave.: {loopSum / (double)runCaseCount:f3}");
 		Console.WriteLine($"up ave.: {upSum / (double)runCaseCount:f3}");
 
-		addOutput?.Invoke();
+		addOutput?.Invoke(testCaseCount, runCaseCount);
 
 		Console.Out.Flush();
 #else
@@ -484,9 +490,7 @@ public static class Helper
 	{
 		var chars = src.ToCharArray();
 		for (int i = 0, j = chars.Length - 1; i < j; ++i, --j) {
-			var tmp = chars[i];
-			chars[i] = chars[j];
-			chars[j] = tmp;
+			(chars[j], chars[i]) = (chars[i], chars[j]);
 		}
 
 		return new string(chars);
@@ -582,6 +586,7 @@ public class Scanner : IDisposable
 	{
 		Console.Out.Flush();
 		stream_.Dispose();
+		GC.SuppressFinalize(this);
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
