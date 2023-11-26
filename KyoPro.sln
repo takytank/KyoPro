@@ -3,13 +3,9 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio Version 17
 VisualStudioVersion = 17.0.32112.339
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AtCoder8", "projects\AtCoder8\AtCoder8.csproj", "{9943ADA9-F0EE-4037-BAD2-BCDA9328F69C}"
-EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "lib", "lib", "{24A87C9C-BBE8-4521-A3DC-EB7CC3CCC3DC}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp", "submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp\TakyTank.KyoProLib.CSharp.csproj", "{ED270A92-9464-4AEE-9621-1BE797807E6E}"
-EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AtCoder8.Temp", "projects\AtCoder8.Temp\AtCoder8.Temp.csproj", "{F1D74799-ABDB-41AF-87AC-0BD8ABE3A111}"
 EndProject
 Project("{2150E333-8FDC-42A3-9474-1A3956D46DE8}") = "Solution Items", "Solution Items", "{D93410B3-DCEE-4108-B371-963CCDF95610}"
 	ProjectSection(SolutionItems) = preProject
@@ -28,19 +24,17 @@ Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MojaCoder", "projects\MojaC
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "MojaCoder.Temp", "projects\MojaCoder.Temp\MojaCoder.Temp.csproj", "{B8882425-9593-4F7E-8B42-D17303446D59}"
 EndProject
-Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AtCoder8.Heuristic", "projects\AtCoder8.Heuristic\AtCoder8.Heuristic.csproj", "{724D5521-7277-4797-AACC-30E1F3051A09}"
-EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp.V7", "submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V7\TakyTank.KyoProLib.CSharp.V7.csproj", "{6B7903CD-4B70-4150-8E15-1BEE2F464D30}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp.V8", "submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V8\TakyTank.KyoProLib.CSharp.V8.csproj", "{0ACD9CEE-430E-4ED3-BE81-4E1CE99B91A0}"
 EndProject
 Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "TakyTank.KyoProLib.CSharp.V11", "submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V11\TakyTank.KyoProLib.CSharp.V11.csproj", "{889FA1DE-08AA-405B-B2E2-362879797A0E}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AtCoder11", "projects\AtCoder11\AtCoder11.csproj", "{7F0D9E82-8632-473A-A3CE-1717FEE3DB03}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AtCoder11", "projects\AtCoder11\AtCoder11.csproj", "{7F0D9E82-8632-473A-A3CE-1717FEE3DB03}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AtCoder11.Heuristic", "projects\AtCoder11.Heuristic\AtCoder11.Heuristic.csproj", "{15B71DE2-5782-4293-8E28-AAF04EA7005F}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AtCoder11.Heuristic", "projects\AtCoder11.Heuristic\AtCoder11.Heuristic.csproj", "{15B71DE2-5782-4293-8E28-AAF04EA7005F}"
 EndProject
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "AtCoder11.Temp", "projects\AtCoder11.Temp\AtCoder11.Temp.csproj", "{5DCAE96A-2D44-4E43-94BF-62BEF758ED42}"
+Project("{9A19103F-16F7-4668-BE54-9A1E7A4F7556}") = "AtCoder11.Temp", "projects\AtCoder11.Temp\AtCoder11.Temp.csproj", "{5DCAE96A-2D44-4E43-94BF-62BEF758ED42}"
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
@@ -48,18 +42,10 @@ Global
 		Release|Any CPU = Release|Any CPU
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{9943ADA9-F0EE-4037-BAD2-BCDA9328F69C}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{9943ADA9-F0EE-4037-BAD2-BCDA9328F69C}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{9943ADA9-F0EE-4037-BAD2-BCDA9328F69C}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{9943ADA9-F0EE-4037-BAD2-BCDA9328F69C}.Release|Any CPU.Build.0 = Release|Any CPU
 		{ED270A92-9464-4AEE-9621-1BE797807E6E}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{ED270A92-9464-4AEE-9621-1BE797807E6E}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{ED270A92-9464-4AEE-9621-1BE797807E6E}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{ED270A92-9464-4AEE-9621-1BE797807E6E}.Release|Any CPU.Build.0 = Release|Any CPU
-		{F1D74799-ABDB-41AF-87AC-0BD8ABE3A111}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{F1D74799-ABDB-41AF-87AC-0BD8ABE3A111}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{F1D74799-ABDB-41AF-87AC-0BD8ABE3A111}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{F1D74799-ABDB-41AF-87AC-0BD8ABE3A111}.Release|Any CPU.Build.0 = Release|Any CPU
 		{AA4D4954-090B-4F4F-894F-B2F2F049F50B}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{AA4D4954-090B-4F4F-894F-B2F2F049F50B}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{AA4D4954-090B-4F4F-894F-B2F2F049F50B}.Release|Any CPU.ActiveCfg = Release|Any CPU
@@ -84,10 +70,6 @@ Global
 		{B8882425-9593-4F7E-8B42-D17303446D59}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{B8882425-9593-4F7E-8B42-D17303446D59}.Release|Any CPU.ActiveCfg = Release|Any CPU
 		{B8882425-9593-4F7E-8B42-D17303446D59}.Release|Any CPU.Build.0 = Release|Any CPU
-		{724D5521-7277-4797-AACC-30E1F3051A09}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
-		{724D5521-7277-4797-AACC-30E1F3051A09}.Debug|Any CPU.Build.0 = Debug|Any CPU
-		{724D5521-7277-4797-AACC-30E1F3051A09}.Release|Any CPU.ActiveCfg = Release|Any CPU
-		{724D5521-7277-4797-AACC-30E1F3051A09}.Release|Any CPU.Build.0 = Release|Any CPU
 		{6B7903CD-4B70-4150-8E15-1BEE2F464D30}.Debug|Any CPU.ActiveCfg = Debug|Any CPU
 		{6B7903CD-4B70-4150-8E15-1BEE2F464D30}.Debug|Any CPU.Build.0 = Debug|Any CPU
 		{6B7903CD-4B70-4150-8E15-1BEE2F464D30}.Release|Any CPU.ActiveCfg = Release|Any CPU

@@ -17,6 +17,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V11\TakyTank.KyoProLib.CSharp.V11.csproj" />
+    <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V8\TakyTank.KyoProLib.CSharp.V8.csproj" />
+    <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp\TakyTank.KyoProLib.CSharp.csproj" />
   </ItemGroup>
 
 </Project>
