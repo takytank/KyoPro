@@ -1,6 +1,4 @@
-﻿using TakyTank.KyoProLib.CSharp;
-using TakyTank.KyoProLib.CSharp.V8;
-using TakyTank.KyoProLib.CSharp.V11;
+﻿using TakyTank.KyoProLib.CSharp.V11;
 
 namespace AtCoder11.Temp;
 
@@ -8,86 +6,88 @@ class ContestPool
 {
 	public static void A()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void B()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void C()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void D()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void E()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void F()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void G()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void H()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void I()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
+
 	}
 
 	public static void J()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void K()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
+
 	}
 
 	public static void L()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void M()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void N()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void O()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void P()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 
 	public static void Q()
 	{
-		using var cin = new Scanner();
+		using var io = new IOManager();
 	}
 }

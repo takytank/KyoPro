@@ -1,11 +1,9 @@
 ﻿using System.Collections;
-using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Text;
-using MathNet.Numerics.Distributions;
 
 namespace AtCoder11;
 
@@ -14,8 +12,7 @@ public class Program
 	[MethodImpl(MethodImplOptions.AggressiveOptimization)]
 	static void Main()
 	{
-		using var cin = new Scanner();
-
+		using var io = new IOManager();
 	}
 }
 
@@ -318,7 +315,7 @@ public struct ModInt
 
 	private long value_;
 
-	public static ModInt New(long value, bool mods) => new(value, mods);
+	public static ModInt New(long value, bool mods = true) => new(value, mods);
 	public ModInt(long value) => value_ = value;
 	public ModInt(long value, bool mods)
 	{
@@ -694,37 +691,63 @@ public static class Extensions
 	}
 }
 
-public class Scanner : IDisposable
+public class IOManager : IDisposable
 {
 	private const int BUFFER_SIZE = 1024;
 	private const int ASCII_SPACE = 32;
 	private const int ASCII_CHAR_BEGIN = 33;
 	private const int ASCII_CHAR_END = 126;
-	private readonly string filePath_;
-	private readonly Stream stream_;
-	private readonly byte[] buf_ = new byte[BUFFER_SIZE];
-	private int length_ = 0;
-	private int index_ = 0;
-	private bool isEof_ = false;
+	private readonly byte[] _buf = new byte[BUFFER_SIZE];
+	private readonly bool _isStdIn;
+	private readonly Stream _reader;
+	private readonly bool _isStdOut;
+	private readonly TextWriter _writer;
+	private int _length = 0;
+	private int _index = 0;
+	private bool _isEof = false;
 
-	public Scanner(string file = "")
+	public IOManager(string inFilePath = "", string outFilePath = "")
 	{
-		if (string.IsNullOrWhiteSpace(file)) {
-			stream_ = Console.OpenStandardInput();
+		// Console.Readline をすると UTF-16 の string 型で読み込まれるが、
+		// 競プロの入力は基本的に ASCII の範囲なので、メモリも時間も倍食ってしまう。
+		// byte[] で入力して手動で変換出来るように、TextReader ではなく Stream を使う。
+		if (string.IsNullOrWhiteSpace(inFilePath)) {
+			_isStdIn = true;
+			_reader = Console.OpenStandardInput();
 		} else {
-			filePath_ = file;
-			stream_ = new FileStream(file, FileMode.Open);
+			_reader = new FileStream(inFilePath, FileMode.Open);
 		}
 
-		Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) {
-			AutoFlush = false
-		});
+		// Console.WriteLine も同様であるのだが、今のところ出力速度が問題になったことがなく、
+		// ファイル出力時のエンコード処理の方が面倒そうなので TextWriter を使う。
+		string outPath = GetOutFilePath(inFilePath, outFilePath);
+		if (string.IsNullOrWhiteSpace(outPath)) {
+			// 毎回 flush すると、10^6 回出力したときに TLE してしまう。
+			// 自動 flush は無効にしておき、Dispose 時に flush するようにする。
+			Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) {
+				AutoFlush = false
+			});
+
+			_isStdOut = true;
+			_writer = Console.Out;
+		} else {
+			_writer = new StreamWriter(outPath);
+		}
 	}
 
 	public void Dispose()
 	{
-		Console.Out.Flush();
-		stream_.Dispose();
+		_writer.Flush();
+		// Console.In や Console.Out は Dispose してはいけない。
+		if (_isStdIn == false) {
+			_reader.Dispose();
+		}
+
+		if (_isStdOut == false) {
+			_writer.Dispose();
+		}
+
+		// Dispose パターンは面倒なのでサボり。
 		GC.SuppressFinalize(this);
 	}
 
@@ -739,6 +762,17 @@ public class Scanner : IDisposable
 		return sb.ToString();
 	}
 
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public T[] Repeat<T>(int count, Func<IOManager, T> read)
+	{
+		var array = new T[count];
+		for (int i = 0; i < count; ++i) {
+			// キャプチャーを避けるために自身を引数として渡す。
+			array[i] = read(this);
+		}
+
+		return array;
+	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public char Char()
@@ -805,21 +839,23 @@ public class Scanner : IDisposable
 	{
 		long ret = 0;
 		byte b;
-		bool ng = false;
+		bool negative = false;
+		// 空白その他の読み飛ばし。+も読み飛ばしてしまって問題無い。
 		do {
 			b = Read();
 		} while (b != '-' && (b < '0' || '9' < b));
 
 		if (b == '-') {
-			ng = true;
+			negative = true;
 			b = Read();
 		}
 
+		// 下に一桁ずつ加えていく。
 		for (; true; b = Read()) {
 			if (b < '0' || '9' < b) {
-				return ng ? -ret : ret;
+				return negative ? -ret : ret;
 			} else {
-				ret = ret * 10 + b - '0';
+				ret = ret * 10 + (b - '0');
 			}
 		}
 	}
@@ -850,7 +886,7 @@ public class Scanner : IDisposable
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public BigInteger Big() => new(Long());
+	public BigInteger Big() => BigInteger.Parse(String());
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public BigInteger Big(long offset) => Big() + offset;
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -930,29 +966,98 @@ public class Scanner : IDisposable
 		return array;
 	}
 
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void WriteLine() => _writer.WriteLine();
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void WriteLine(bool value) => _writer.WriteLine(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void WriteLine(char value) => _writer.WriteLine(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void WriteLine(decimal value) => _writer.WriteLine(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void WriteLine(double value) => _writer.WriteLine(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void WriteLine(float value) => _writer.WriteLine(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void WriteLine(int value) => _writer.WriteLine(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void WriteLine(uint value) => _writer.WriteLine(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void WriteLine(long value) => _writer.WriteLine(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void WriteLine(ulong value) => _writer.WriteLine(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void WriteLine(BigInteger value) => _writer.WriteLine(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void WriteLine(string value) => _writer.WriteLine(value);
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Write(bool value) => _writer.Write(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Write(char value) => _writer.Write(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Write(decimal value) => _writer.Write(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Write(double value) => _writer.Write(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Write(float value) => _writer.Write(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Write(int value) => _writer.Write(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Write(uint value) => _writer.Write(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Write(long value) => _writer.Write(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Write(ulong value) => _writer.Write(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Write(BigInteger value) => _writer.Write(value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Write(string value) => _writer.Write(value);
+
 	private byte Read()
 	{
-		if (isEof_) {
+		if (_isEof) {
 			throw new EndOfStreamException();
 		}
 
-		if (index_ >= length_) {
-			index_ = 0;
-			if ((length_ = stream_.Read(buf_, 0, BUFFER_SIZE)) <= 0) {
-				isEof_ = true;
+		if (_index >= _length) {
+			_index = 0;
+			if ((_length = _reader.Read(_buf, 0, BUFFER_SIZE)) <= 0) {
+				_isEof = true;
 				return 0;
 			}
 		}
 
-		return buf_[index_++];
+		return _buf[_index++];
 	}
 
-	public void Save(string text)
+	private static string GetOutFilePath(string inFilePath, string outFilePath)
 	{
-		if (string.IsNullOrWhiteSpace(filePath_)) {
-			return;
+		if (string.IsNullOrWhiteSpace(outFilePath) == false) {
+			return outFilePath;
 		}
 
-		File.WriteAllText(filePath_ + "_output.txt", text);
+		if (string.IsNullOrWhiteSpace(inFilePath)) {
+			return inFilePath;
+		}
+
+
+		string directory = Path.GetDirectoryName(inFilePath);
+		string title = Path.GetFileNameWithoutExtension(inFilePath);
+		string ext = Path.GetExtension(inFilePath);
+		if (directory.EndsWith(@"in")) {
+			// AHCで配布される tools の in フォルダーの横に out フォルダーを作る
+			directory = directory[..^2] + @"out";
+		}
+
+		// ビジュアライザーの一括読み込みは、1234.txt 又は xxx_1234.txt のような形式に対応している。
+		// 出力フォルダーにかかわらず、出力ファイルであることが分かるようにしておく。
+		title = "out_" + title;
+
+		if (Directory.Exists(directory) == false) {
+			Directory.CreateDirectory(directory);
+		}
+
+		return Path.Combine(directory, title + ext);
 	}
 }
