@@ -1,4 +1,5 @@
-﻿using System.Collections;
+﻿using System.Buffers;
+using System.Collections;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -482,6 +483,44 @@ public static class Helper
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static int LowerBound<T>(Span<T> array, T value) where T : IComparable<T>
+	=> LowerBound(array, -1, array.Length, value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static int LowerBound<T>(Span<T> array, int ng, int ok, T value)
+		where T : IComparable<T>
+	{
+		while (ok - ng > 1) {
+			int mid = (ok + ng) / 2;
+			if (array[mid].CompareTo(value) >= 0) {
+				ok = mid;
+			} else {
+				ng = mid;
+			}
+		}
+
+		return ok;
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static int UpperBound<T>(Span<T> array, T value) where T : IComparable<T>
+		=> UpperBound(array, -1, array.Length, value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static int UpperBound<T>(Span<T> array, int ng, int ok, T value)
+		where T : IComparable<T>
+	{
+		while (ok - ng > 1) {
+			int mid = (ok + ng) / 2;
+			if (array[mid].CompareTo(value) > 0) {
+				ok = mid;
+			} else {
+				ng = mid;
+			}
+		}
+
+		return ok;
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static T[] Array1<T>(int n, T initialValue) where T : struct
 		=> new T[n].Fill(initialValue);
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -663,9 +702,27 @@ public static class Helper
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static Span<char> AsWriteableSpan(this string str)
+	public static Span<char> ReverseInPlace(this string str)
+		=> str.ReverseInPlace(0, str.Length);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static Span<char> ReverseInPlace(this string str, int l, int r)
 	{
-		var span = str.AsSpan();
+		var span = str.AsWriteableSpan(l, r);
+		for (int i = 0, j = span.Length - 1; i < j; ++i, --j) {
+			(span[j], span[i]) = (span[i], span[j]);
+		}
+
+		return MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(span), span.Length);
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static Span<char> AsWriteableSpan(this string str)
+		=> str.AsWriteableSpan(0, str.Length);
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public static Span<char> AsWriteableSpan(this string str, int l, int r)
+	{
+		var span = str.AsSpan(l, r - l);
 		return MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(span), span.Length);
 	}
 
@@ -769,6 +826,20 @@ public class IOManager : IDisposable
 		for (int i = 0; i < count; ++i) {
 			// キャプチャーを避けるために自身を引数として渡す。
 			array[i] = read(this);
+		}
+
+		return array;
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public T[,] Repeat<T>(int height, int width, Func<IOManager, T> read)
+	{
+		var array = new T[height, width];
+		for (int i = 0; i < height; ++i) {
+			for (int j = 0; j < width; ++j) {
+				// キャプチャーを避けるために自身を引数として渡す。
+				array[i, j] = read(this);
+			}
 		}
 
 		return array;
@@ -1014,6 +1085,37 @@ public class IOManager : IDisposable
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public void Write(string value) => _writer.Write(value);
 
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void YesNo(bool ok, bool isUpper = false)
+	{
+		_writer.WriteLine(
+			isUpper == false
+				? ok ? "Yes" : "No"
+				: ok ? "YES" : "NO");
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void JoinNL<T>(IEnumerable<T> values) => Join(values, Environment.NewLine);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Join<T>(IEnumerable<T> values, string separator = " ")
+		=> _writer.WriteLine(string.Join(separator, values));
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void JoinNL<T>(T[,] valuess) => Join(valuess, Environment.NewLine);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Join<T>(T[,] valuess, string separator = " ")
+	{
+		int height = valuess.GetLength(0);
+		int width = valuess.GetLength(1);
+		for (int i = 0; i < height; i++) {
+			_writer.WriteLine(
+				string.Join(separator, MemoryMarshal.CreateSpan<T>(ref valuess[i, 0], width).ToArray()));
+		}
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Flush() => _writer.Flush();
+
 	private byte Read()
 	{
 		if (_isEof) {
@@ -1045,14 +1147,18 @@ public class IOManager : IDisposable
 		string directory = Path.GetDirectoryName(inFilePath);
 		string title = Path.GetFileNameWithoutExtension(inFilePath);
 		string ext = Path.GetExtension(inFilePath);
-		if (directory.EndsWith(@"in")) {
-			// AHCで配布される tools の in フォルダーの横に out フォルダーを作る
-			directory = directory[..^2] + @"out";
+		string directoryName = Path.GetFileName(directory);
+		string parentDirectory = Path.GetDirectoryName(directory);
+		if (directoryName.Contains(@"in")) {
+			// AHCで配布される tools の in フォルダーの横に out フォルダーを作る。
+			// mastersのinAにも対応出来るようにReplaceする。
+			directoryName = directoryName.Replace("in", "out");
+			directory = Path.Combine(parentDirectory, directoryName);
+		} else {
+			// ビジュアライザーの一括読み込みは、1234.txt 又は xxx_1234.txt のような形式に対応している。
+			// 入力と同じフォルダーの場合は、出力ファイルであることが分かるようにしておく。
+			title = "out_" + title;
 		}
-
-		// ビジュアライザーの一括読み込みは、1234.txt 又は xxx_1234.txt のような形式に対応している。
-		// 出力フォルダーにかかわらず、出力ファイルであることが分かるようにしておく。
-		title = "out_" + title;
 
 		if (Directory.Exists(directory) == false) {
 			Directory.CreateDirectory(directory);
