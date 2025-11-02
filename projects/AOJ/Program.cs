@@ -1,12 +1,8 @@
 ﻿using System;
-using System.Collections;
 using System.Collections.Generic;
-using System.Diagnostics;
 using System.IO;
 using System.Linq;
-using System.Numerics;
 using System.Runtime.CompilerServices;
-using System.Text;
 
 namespace AOJ
 {
@@ -40,7 +36,8 @@ namespace AOJ
 
 		private long value_;
 
-		public ModInt(long value) {
+		public ModInt(long value)
+		{
 			value_ = value;
 		}
 
@@ -213,7 +210,7 @@ namespace AOJ
 			}
 		}
 
-		public static T[] Array<T>(int n, Func<int, T> init) 
+		public static T[] Array<T>(int n, Func<int, T> init)
 		{
 			return Enumerable.Range(0, n).Select(x => init(x)).ToArray();
 		}
@@ -322,7 +319,8 @@ namespace AOJ
 		public (int, int, int, int, int) Int5(int offset = 0)
 			=> (Int(offset), Int(offset), Int(offset), Int(offset), Int(offset));
 
-		public long Long() {
+		public long Long()
+		{
 			return long.Parse(Next());
 		}
 
