@@ -1,5 +1,5 @@
 <Project>
   <PropertyGroup>
-    <NoWarn>NETSDK1138</NoWarn>
+    <NoWarn>NETSDK1138,IDE0290,IDE0300,IDE0305</NoWarn>
   </PropertyGroup>
 </Project>
