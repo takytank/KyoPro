@@ -1,0 +1,26 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net9.0</TargetFramework>
+    <LangVersion>13</LangVersion>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>annotations</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <InvariantGlobalization>true</InvariantGlobalization>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="ac-library-csharp" Version="3.9.2-atcoder1" />
+    <PackageReference Include="MathNet.Numerics" Version="5.0.0" />
+    <!--<PackageReference Include="Microsoft.ML" Version="4.0.2" />
+    <PackageReference Include="Microsoft.ML.LightGbm" Version="4.0.2" />-->
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V13\TakyTank.KyoProLib.CSharp.V13.csproj" />
+    <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V11\TakyTank.KyoProLib.CSharp.V11.csproj" />
+    <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V8\TakyTank.KyoProLib.CSharp.V8.csproj" />
+    <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp\TakyTank.KyoProLib.CSharp.csproj" />
+  </ItemGroup>
+  
+</Project>
