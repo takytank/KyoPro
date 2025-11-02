@@ -46,6 +46,8 @@
   </ItemGroup>
   <ItemGroup>
     <Compile Include="ContestPool.cs" />
+    <Compile Include="Lib\BitFlag.cs" />
+    <Compile Include="Lib\Convolution.cs" />
     <Compile Include="Lib\Helper.cs" />
     <Compile Include="Lib\Rerooting.cs" />
     <Compile Include="Lib\SuffixArray.cs" />
@@ -75,10 +77,6 @@
     <Compile Include="Lib\Vector2.cs" />
   </ItemGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp.V7\TakyTank.KyoProLib.CSharp.V7.csproj">
-      <Project>{fd9a5d30-32ec-468b-867c-3c67902ec42c}</Project>
-      <Name>TakyTank.KyoProLib.CSharp.V7</Name>
-    </ProjectReference>
     <ProjectReference Include="..\..\submodules\KyoProLib\projects\TakyTank.KyoProLib.CSharp\TakyTank.KyoProLib.CSharp.csproj">
       <Project>{d0b3182e-1711-42c9-9e9d-4647204a9b04}</Project>
       <Name>TakyTank.KyoProLib.CSharp</Name>
