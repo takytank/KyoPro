@@ -47,7 +47,7 @@ public class Program
 		Run(int caseNumber)
 	{
 		var (isDebug, sw, rnd) = HeuristicHelper.Initialize();
-		using var io = HeuristicHelper.CreateIO(@$"D:\AtCoder\AHC055\tools\in\", caseNumber);
+		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC056\tools\in\", caseNumber);
 
 		var input = new Input(io, isDebug);
 		var info = new Information();
