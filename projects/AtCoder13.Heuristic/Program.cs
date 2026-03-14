@@ -26,7 +26,8 @@ public class Program
 						$"{i:d4}:",
 						$"N={input.N:d3}",
 						$"loop={info.Loop:d8}",
-						$"up={info.Up:d4}",
+						$"up0={info.Ups[0]:d5}",
+						$"up1={info.Ups[1]:d5}",
 						$"score={info.Score:d5}",
 						$"elapsed={info.Elapsed:d4}",
 					};
@@ -65,7 +66,7 @@ public class Program
 	static State Plan1(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
 	{
 		var state = new State(isDebug, input);
-		CreateSimpleZigzag2(state, input);
+		CreateZigzagGreedy(state, input);
 
 		return state;
 	}
@@ -160,7 +161,7 @@ public class Program
 	static State Plan3(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
 	{
 		var state = new State(isDebug, input);
-		CreateSimpleZigzag2(state, input);
+		CreateZigzagGreedy(state, input);
 
 		int n = input.N;
 		var map = new int[n, n];
@@ -173,6 +174,12 @@ public class Program
 		const double startTemp = 1e6;
 		const double endTemp = 1e1;
 		const double limit = 1900.0;
+		const int twoOptMaxLen = 100;
+
+		// 近傍: 候補なしの場合は diff = long.MinValue を返す
+		// diff: スコア差分（採択判定用）
+		// apply: 採択時に実行する状態更新
+		Func<(long diff, Action apply)> neighbor = NeighborUpDown;
 
 		while (true) {
 			long elapsed = sw.ElapsedMilliseconds;
@@ -185,16 +192,37 @@ public class Program
 			double progress = elapsed / limit;
 			double temp = Math.Pow(startTemp, 1.0 - progress) * Math.Pow(endTemp, progress);
 
+			int way = rnd.Next(0, 2);
+			neighbor = way == 0 ? NeighborUpDown : NeighborTwoOpt;
+
+			var (diff, apply) = neighbor();
+			if (diff == long.MinValue) {
+				continue;
+			}
+
+			if (diff >= 0 || rnd.NextDouble() < Math.Exp(diff / temp)) {
+				if (diff > 0) {
+					++info.Up;
+					++info.Ups[way];
+				}
+
+				apply();
+			}
+		}
+
+		return state;
+
+		(long diff, Action apply) NeighborUpDown()
+		{
 			int p = rnd.Next(0, nn);
 			var (pi, pj) = state.Tour[p];
-			var (qi, qj) = (pi, pj);
+			int qi, qj;
 			if (pi == 0) {
 				(qi, qj) = (pi + 1, pj);
 			} else if (pi == n - 1) {
 				(qi, qj) = (pi - 1, pj);
 			} else {
 				if (rnd.Next(0, 2) == 0) {
-					// 上
 					(qi, qj) = (pi - 1, pj);
 				} else {
 					(qi, qj) = (pi + 1, pj);
@@ -203,21 +231,69 @@ public class Program
 
 			int q = map[qi, qj];
 
-			bool ok = CheckPrevAndNext(p, q)
-				&& CheckPrevAndNext(q, p);
-			if (!ok) {
-				continue;
+			if (!CheckPrevAndNext(p, q) || !CheckPrevAndNext(q, p)) {
+				return (long.MinValue, null);
 			}
 
 			long diff = CalculateRev(p, q) - Calculate(p, q);
-			if (diff >= 0 || rnd.NextDouble() < Math.Exp(diff / temp)) {
-				if (diff > 0) {
-					++info.Up;
-				}
-
+			return (diff, () => {
 				(state.Tour[p], state.Tour[q]) = (state.Tour[q], state.Tour[p]);
 				(map[pi, pj], map[qi, qj]) = (map[qi, qj], map[pi, pj]);
 			}
+			);
+		}
+
+		(long diff, Action apply) NeighborTwoOpt()
+		{
+			// ランダムに区間 [l+1, r] を選択して反転する 2-opt 近傍
+			// 反転後の繋ぎ目: Tour[l]-Tour[r] と Tour[l+1]-Tour[r+1] が隣接であること
+			int l = rnd.Next(0, nn - 1);
+			int len = rnd.Next(2, twoOptMaxLen + 1);
+			int r = l + len;
+			if (r >= nn) {
+				return (long.MinValue, null);
+			}
+
+			// 繋ぎ目の隣接チェック
+			// Tour[l] と Tour[r] が隣接するか（反転後 l->r の繋ぎ）
+			if (!CheckNear(l, r)) {
+				return (long.MinValue, null);
+			}
+
+			// Tour[l+1] と Tour[r+1] が隣接するか（反転後 r->r+1 の繋ぎ）
+			if (r + 1 < nn && !CheckNear(l + 1, r + 1)) {
+				return (long.MinValue, null);
+			}
+
+			// スコア差分: 区間 [l+1, r] の各要素 k が位置 (l+1+r-k) に移動する
+			// diff = Σ_{k=l+1}^{r} (l+1+r-k - k) * A[Tour[k]]
+			//      = Σ_{k=l+1}^{r} (l+1+r-2k) * A[Tour[k]]
+			long diff = 0;
+			var tourSpan = state.Tour.AsSpan();
+			for (int k = l + 1; k <= r; k++) {
+				var (ki, kj) = tourSpan[k];
+				diff += (long)(l + 1 + r - 2 * k) * input.A[ki, kj];
+			}
+
+			return (diff, () => {
+				// 区間 [l+1, r] を反転し、map も更新
+				int lo = l + 1;
+				int hi = r;
+				while (lo < hi) {
+					var tmp = state.Tour[lo];
+					state.Tour[lo] = state.Tour[hi];
+					state.Tour[hi] = tmp;
+					map[state.Tour[lo].i, state.Tour[lo].j] = lo;
+					map[state.Tour[hi].i, state.Tour[hi].j] = hi;
+					lo++;
+					hi--;
+				}
+
+				if (lo == hi) {
+					map[state.Tour[lo].i, state.Tour[lo].j] = lo;
+				}
+			}
+			);
 		}
 
 		bool CheckNear(int p, int q)
@@ -254,8 +330,6 @@ public class Program
 			var (qi, qj) = state.Tour[q];
 			return input.A[pi, pj] * q + input.A[qi, qj] * p;
 		}
-
-		return state;
 	}
 
 	static void CreateSimpleZigzag(State state, Input input)
@@ -543,6 +617,7 @@ public class Information
 	public int Up { get; set; } = 0;
 	public long Elapsed { get; set; } = 0;
 
+	public int[] Ups { get; set; } = new int[10];
 }
 
 public class Input
