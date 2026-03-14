@@ -31,6 +31,7 @@ public class Program
 						$"loop={info.Loop:d8}",
 						$"up0={info.Ups[0]:d5}",
 						$"up1={info.Ups[1]:d5}",
+						$"up2={info.Ups[2]:d5}",
 						$"score={info.Score:d5}",
 						$"elapsed={info.Elapsed:d4}",
 					};
@@ -194,8 +195,12 @@ public class Program
 			double progress = elapsed / limit;
 			double temp = Math.Pow(startTemp, 1.0 - progress) * Math.Pow(endTemp, progress);
 
-			int way = rnd.Next(0, 2);
-			var neighbor = way == 0 ? neighborSwap : NeighborTwoOpt;
+			int way = rnd.Next(0, 3);
+			Func<(long diff, Action apply)> neighbor = way switch {
+				0 => neighborSwap,
+				1 => NeighborTwoOpt,
+				_ => NeighborOrOpt,
+			};
 
 			var (diff, apply) = neighbor();
 			if (diff == long.MinValue) {
@@ -324,6 +329,148 @@ public class Program
 
 				if (lo == hi) {
 					map[state.Tour[lo].i, state.Tour[lo].j] = lo;
+				}
+			}
+			);
+		}
+
+		// Tour[s] を取り出して位置 q の直後（s<q の場合）または直前（s>q の場合）に挿入する Or-Opt 近傍。
+		// 取り出し後: Tour[s-1] と Tour[s+1] が隣接している必要がある。
+		// 挿入後:     Tour[q] と Tour[s] が隣接し、Tour[s] と Tour[q+1] が隣接している必要がある（s<q の場合）。
+		(long diff, Action apply) NeighborOrOpt()
+		{
+			int s = rnd.Next(0, nn);
+			var (si, sj) = state.Tour[s];
+
+			// Tour[s] を取り出した後、Tour[s-1] と Tour[s+1] が隣接しているか
+			if (s > 0 && s < nn - 1) {
+				if (!CheckNear(s - 1, s + 1)) {
+					return (long.MinValue, null);
+				}
+			}
+
+			// 挿入先: Tour[s] の実グリッド上の近傍セルのうち、
+			// map値が s と異なるものをランダムに1つ選ぶ。
+			// 8近傍から候補を列挙する。
+			Span<int> candidates = stackalloc int[8];
+			int cnt = 0;
+			for (int di = -1; di <= 1; di++) {
+				for (int dj = -1; dj <= 1; dj++) {
+					if (di == 0 && dj == 0) {
+						continue;
+					}
+
+					int ni = si + di;
+					int nj = sj + dj;
+					if ((uint)ni >= (uint)n || (uint)nj >= (uint)n) {
+						continue;
+					}
+
+					int q = map[ni, nj];
+					if (q == s) {
+						continue;
+					}
+
+					// s<q の場合: s の直後、q の直後に挿入 → Tour[q] と Tour[s] が隣接、Tour[s] と Tour[q+1] が隣接
+					// s>q の場合: q の直後、s の直前に挿入 → Tour[q] と Tour[s] が隣接、Tour[s] と Tour[q+1] が隣接
+					// 共通: Tour[q] (= (ni,nj)) は既に Tour[s] と隣接している。
+					// Tour[s] と Tour[q+1] の隣接チェックだけ追加で必要。
+					if (s < q) {
+						// [s+1..q] を左に1シフト → Tour[q] の後ろが Tour[q+1]
+						// 挿入後: ...Tour[q], Tour[s], Tour[q+1]...
+						if (q + 1 < nn) {
+							var (ri, rj) = state.Tour[q + 1];
+							if (Math.Abs(si - ri) > 1 || Math.Abs(sj - rj) > 1) {
+								continue;
+							}
+						}
+
+						// 取り出し後の繋ぎ目チェック（s==0 または s==nn-1 は端なのでOK）
+						if (s == 0 || s == nn - 1) {
+							candidates[cnt++] = q;
+						} else {
+							var (pi, pj) = state.Tour[s - 1];
+							var (ni2, nj2) = state.Tour[s + 1];
+							if (Math.Abs(pi - ni2) <= 1 && Math.Abs(pj - nj2) <= 1) {
+								candidates[cnt++] = q;
+							}
+						}
+					} else {
+						// q < s: [q+1..s-1] を右に1シフト → Tour[q] の後ろが Tour[s]
+						// 挿入後: ...Tour[q], Tour[s], Tour[q+1]...
+						if (q + 1 < nn) {
+							var (ri, rj) = state.Tour[q + 1];
+							if (Math.Abs(si - ri) > 1 || Math.Abs(sj - rj) > 1) {
+								continue;
+							}
+						}
+
+						if (s == 0 || s == nn - 1) {
+							candidates[cnt++] = q;
+						} else {
+							var (pi, pj) = state.Tour[s - 1];
+							var (ni2, nj2) = state.Tour[s + 1];
+							if (Math.Abs(pi - ni2) <= 1 && Math.Abs(pj - nj2) <= 1) {
+								candidates[cnt++] = q;
+							}
+						}
+					}
+				}
+			}
+
+			if (cnt == 0) {
+				return (long.MinValue, null);
+			}
+
+			int insertAfter = candidates[rnd.Next(0, cnt)];
+
+			// スコア差分計算
+			// Tour[s] が位置 s から insertAfter (s<insertAfter) または insertAfter+1 (s>insertAfter) に移動する。
+			// s < insertAfter の場合:
+			//   Tour[s] は s → insertAfter へ移動（+insertAfter - s）
+			//   Tour[s+1..insertAfter] は各々 -1 ずつ移動
+			// s > insertAfter の場合:
+			//   Tour[s] は s → insertAfter+1 へ移動（-(s - insertAfter - 1)）
+			//   Tour[insertAfter+1..s-1] は各々 +1 ずつ移動
+			long diff;
+			var tourSpan = state.Tour.AsSpan();
+			if (s < insertAfter) {
+				// Tour[s] のスコア変化: A[s] * (insertAfter - s)
+				diff = (long)(insertAfter - s) * input.A[si, sj];
+				// Tour[s+1..insertAfter] のスコア変化: 各 -1
+				for (int k = s + 1; k <= insertAfter; k++) {
+					var (ki, kj) = tourSpan[k];
+					diff -= input.A[ki, kj];
+				}
+			} else {
+				// Tour[s] のスコア変化: A[s] * (insertAfter + 1 - s) = A[s] * -(s - insertAfter - 1)
+				diff = (long)(insertAfter + 1 - s) * input.A[si, sj];
+				// Tour[insertAfter+1..s-1] のスコア変化: 各 +1
+				for (int k = insertAfter + 1; k < s; k++) {
+					var (ki, kj) = tourSpan[k];
+					diff += input.A[ki, kj];
+				}
+			}
+
+			return (diff, () => {
+				// Tour から s を取り出し、insertAfter の後ろに挿入してシフト、map を更新
+				var cell = state.Tour[s];
+				if (s < insertAfter) {
+					for (int k = s; k < insertAfter; k++) {
+						state.Tour[k] = state.Tour[k + 1];
+						map[state.Tour[k].i, state.Tour[k].j] = k;
+					}
+
+					state.Tour[insertAfter] = cell;
+					map[cell.i, cell.j] = insertAfter;
+				} else {
+					for (int k = s; k > insertAfter + 1; k--) {
+						state.Tour[k] = state.Tour[k - 1];
+						map[state.Tour[k].i, state.Tour[k].j] = k;
+					}
+
+					state.Tour[insertAfter + 1] = cell;
+					map[cell.i, cell.j] = insertAfter + 1;
 				}
 			}
 			);
@@ -1927,7 +2074,7 @@ public class IOManager : IDisposable
 		byte b;
 		do {
 			b = Read();
-		} while (b < ASCII_CHAR_BEGIN || ASCII_CHAR_END < b);
+		} while (b < ASCII_CHAR_BEGIN || b > ASCII_CHAR_END);
 
 		return (char)b;
 	}
