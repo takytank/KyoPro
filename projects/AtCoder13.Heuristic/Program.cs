@@ -16,7 +16,7 @@ public class Program
 	{
 		HeuristicHelper.RunCases(
 			runCaseCount: 100,
-			testCaseCount: 150,
+			testCaseCount: 100,
 			isParallel: false,
 			i => Run(i),
 			(locker, i, ret) => {
@@ -24,7 +24,7 @@ public class Program
 				lock (locker) {
 					var status = new List<string> {
 						$"{i:d4}:",
-						//$"N={input.N:d2}",
+						$"N={input.N:d3}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
 						$"score={info.Score:d5}",
@@ -47,14 +47,180 @@ public class Program
 		Run(int caseNumber)
 	{
 		var (isDebug, sw, rnd) = HeuristicHelper.Initialize();
-		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC056\tools\in\", caseNumber);
+		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC062\tools\in\", caseNumber);
 
 		var input = new Input(io, isDebug);
 		var info = new Information();
 
+		var state = Plan1(rnd, isDebug, input, info);
+
+		input.Output(state);
+		info.Score = state.Calculate();
+
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
+	}
+
+	static State Plan1(Random rnd, bool isDebug, Input input, Information info)
+	{
+		var state = new State(isDebug, input);
+		CreateZigzagGreedy(state, input);
+
+		return state;
+	}
+
+	static void CreateZigzagGreedy(State state, Input input)
+	{
+		int n = input.N;
+		var a = input.A;
+
+		var done = new bool[n, n];
+
+		// 往路
+		for (int i = 0; i < n; i += 2) {
+			// 右移動
+			for (int j = 0; j < n; j++) {
+				if (j == 0) {
+					// 一番左は上
+					MoveU(i, j);
+				} else if (j == n - 1) {
+					// 一番右は下
+					MoveD(i, j);
+				} else {
+					// この行と一個下の人口が少ない方
+					if (a[i, j] >= a[i + 1, j]) {
+						MoveD(i, j);
+					} else {
+						MoveU(i, j);
+					}
+				}
+			}
+
+			i += 2;
+
+			// 左移動
+			if (i < n - 2) {
+				for (int j = n - 1; j >= 0; j--) {
+					if (j == n - 1) {
+						// 一番右は上
+						MoveU(i, j);
+					} else if (j == 0) {
+						// 一番左は下
+						MoveD(i, j);
+					} else {
+						// この行と一個下の人口が少ない方
+						if (a[i, j] >= a[i + 1, j]) {
+							MoveD(i, j);
+						} else {
+							MoveU(i, j);
+						}
+					}
+				}
+			} else {
+				// 最下層はジグザグに折り返すしかない
+				for (int j = n - 1; j >= 0; j--) {
+					if (j % 2 != 0) {
+						// 上 -> 下
+						MoveU(i, j);
+						MoveD(i, j);
+					} else {
+						MoveD(i, j);
+						MoveU(i, j);
+					}
+				}
+			}
+		}
+
+		// 復路
+		for (int i = n - 4; i >= 0; i -= 2) {
+			// 右移動
+			for (int j = 0; j < n; j++) {
+				// まだ辿って無い方
+				if (done[i, j] == false) {
+					MoveU(i, j);
+				} else {
+					MoveD(i, j);
+				}
+			}
+
+			i -= 2;
+
+			if (i >= 0) {
+				// 左移動
+				for (int j = n - 1; j >= 0; j--) {
+					// まだ辿って無い方
+					if (done[i, j] == false) {
+						MoveU(i, j);
+					} else {
+						MoveD(i, j);
+					}
+				}
+			}
+		}
+
+		void MoveU(int i, int j)
+		{
+			state.Move(i, j);
+			done[i, j] = true;
+		}
+
+		void MoveD(int i, int j)
+		{
+			state.Move(i + 1, j);
+			done[i + 1, j] = true;
+		}
+	}
+}
+
+public class State
+{
+	private Input _input;
+	private bool _isDebug;
+
+	public List<(int i, int j)> Tour { get; set; } = [];
+
+	public State(bool isDebug, Input input)
+	{
+		_isDebug = isDebug;
+		_input = input;
+	}
+
+	public void Move(int i, int j)
+	{
+		Tour.Add((i, j));
+	}
+
+	public long Calculate()
+	{
+		int n = _input.N;
+		int nn = n * n;
+		if (Tour.Count != nn) {
+			throw new Exception("Tour count is not N x N");
+		}
+
+		var (pi, pj) = Tour[0];
+		var set = new HashSet<(int i, int j)>();
+		double v = 0;
+		long k = 0;
+		foreach (var (i, j) in Tour) {
+			if (set.Contains((i, j))) {
+				throw new Exception($"turn {k} : ({i}, {j}) is already visited");
+			}
+
+			if (Math.Abs(pi - i) > 1 || Math.Abs(pj - j) > 1) {
+				throw new Exception($"turn {k} : ({i}, {j}) is too far from ({pi}, {pj})");
+			}
+
+			v += k * _input.A[i, j];
+
+			(pi, pj) = (i, j);
+			set.Add((i, j));
+			++k;
+		}
+
+		long score = (long)Math.Round(v / nn);
+		return score;
 	}
 }
 
@@ -72,11 +238,23 @@ public class Input
 {
 	private readonly IOManager _io;
 	private readonly bool _isDebug;
+	public int N { get; set; }
+	public int[,] A { get; set; }
 
 	public Input(IOManager io, bool isDebug)
 	{
 		_io = io;
 		_isDebug = isDebug;
+
+		N = io.Int();
+		A = io.Repeat<int>(N, N, io => io.Int());
+	}
+
+	public void Output(State state)
+	{
+		foreach (var (i, j) in state.Tour) {
+			_io.WriteLine($"{i} {j}");
+		}
 	}
 }
 
