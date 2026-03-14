@@ -32,6 +32,7 @@ public class Program
 						$"up0={info.Ups[0]:d5}",
 						$"up1={info.Ups[1]:d5}",
 						$"up2={info.Ups[2]:d5}",
+						$"up3={info.Ups[3]:d5}",
 						$"score={info.Score:d5}",
 						$"elapsed={info.Elapsed:d4}",
 					};
@@ -195,11 +196,12 @@ public class Program
 			double progress = elapsed / limit;
 			double temp = Math.Pow(startTemp, 1.0 - progress) * Math.Pow(endTemp, progress);
 
-			int way = rnd.Next(0, 3);
+			int way = rnd.Next(0, 4);
 			Func<(long diff, Action apply)> neighbor = way switch {
 				0 => neighborSwap,
 				1 => NeighborTwoOpt,
-				_ => NeighborOrOpt,
+				2 => NeighborOrOpt,
+				_ => NeighborOrOpt2,
 			};
 
 			var (diff, apply) = neighbor();
@@ -471,6 +473,133 @@ public class Program
 
 					state.Tour[insertAfter + 1] = cell;
 					map[cell.i, cell.j] = insertAfter + 1;
+				}
+			}
+			);
+		}
+
+		// Tour[s], Tour[s+1] の2セルのペアを取り出して insertAfter の直後に挿入する Or-Opt(2) 近傍。
+		// 取り出し後: Tour[s-1] と Tour[s+2] が隣接している必要がある。
+		// 挿入後:     Tour[q]→Tour[s]→Tour[s+1]→Tour[q+1] の連鎖が全て隣接している必要がある。
+		(long diff, Action apply) NeighborOrOpt2()
+		{
+			if (nn < 3) {
+				return (long.MinValue, null);
+			}
+
+			int s = rnd.Next(0, nn - 1);
+			var (s0i, s0j) = state.Tour[s];
+			var (s1i, s1j) = state.Tour[s + 1];
+
+			// 取り出し後の繋ぎ目チェック
+			if (s > 0 && s + 1 < nn - 1) {
+				var (pi, pj) = state.Tour[s - 1];
+				var (ni2, nj2) = state.Tour[s + 2];
+				if (Math.Abs(pi - ni2) > 1 || Math.Abs(pj - nj2) > 1) {
+					return (long.MinValue, null);
+				}
+			}
+
+			// 挿入先候補: Tour[s] の8近傍セルを insertAfter として列挙
+			// 挿入後チェック:
+			//   Tour[q] と Tour[s]   が隣接 → Tour[q]=(ni,nj) と (s0i,s0j) の隣接は自明（8近傍）
+			//   Tour[s] と Tour[s+1] が隣接 → 元々連続しているので保証済み
+			//   Tour[s+1] と Tour[q+1] が隣接 → 追加チェック必要
+			Span<int> candidates = stackalloc int[8];
+			int cnt = 0;
+			for (int di = -1; di <= 1; di++) {
+				for (int dj = -1; dj <= 1; dj++) {
+					if (di == 0 && dj == 0) {
+						continue;
+					}
+
+					int ni = s0i + di;
+					int nj = s0j + dj;
+					if ((uint)ni >= (uint)n || (uint)nj >= (uint)n) {
+						continue;
+					}
+
+					int q = map[ni, nj];
+					// q または q+1 が s, s+1 と重複するケースは除外
+					if (q == s || q == s + 1) {
+						continue;
+					}
+
+					if (q + 1 == s || q + 1 == s + 1) {
+						continue;
+					}
+
+					// Tour[s+1] と Tour[q+1] の隣接チェック
+					if (q + 1 < nn) {
+						var (ri, rj) = state.Tour[q + 1];
+						if (Math.Abs(s1i - ri) > 1 || Math.Abs(s1j - rj) > 1) {
+							continue;
+						}
+					}
+
+					candidates[cnt++] = q;
+				}
+			}
+
+			if (cnt == 0) {
+				return (long.MinValue, null);
+			}
+
+			int insertAfter = candidates[rnd.Next(0, cnt)];
+
+			// スコア差分計算
+			// Tour[s] と Tour[s+1] がペアで位置移動する。
+			// s < insertAfter の場合:
+			//   Tour[s]   : s     → insertAfter - 1 へ移動 (delta = insertAfter - 1 - s)
+			//   Tour[s+1] : s+1   → insertAfter     へ移動 (delta = insertAfter - 1 - s)
+			//   Tour[s+2..insertAfter] は各々 -2 ずつ移動
+			// s > insertAfter + 1 の場合:
+			//   Tour[s]   : s     → insertAfter + 1 へ移動 (delta = insertAfter + 1 - s)
+			//   Tour[s+1] : s+1   → insertAfter + 2 へ移動 (delta = insertAfter + 1 - s)
+			//   Tour[insertAfter+1..s-1] は各々 +2 ずつ移動
+			long diff;
+			var tourSpan = state.Tour.AsSpan();
+			if (s < insertAfter) {
+				int delta = insertAfter - 1 - s;
+				diff = (long)delta * (input.A[s0i, s0j] + input.A[s1i, s1j]);
+				for (int k = s + 2; k <= insertAfter; k++) {
+					var (ki, kj) = tourSpan[k];
+					diff -= 2L * input.A[ki, kj];
+				}
+			} else {
+				int delta = insertAfter + 1 - s;
+				diff = (long)delta * (input.A[s0i, s0j] + input.A[s1i, s1j]);
+				for (int k = insertAfter + 1; k < s; k++) {
+					var (ki, kj) = tourSpan[k];
+					diff += 2L * input.A[ki, kj];
+				}
+			}
+
+			return (diff, () => {
+				var cell0 = state.Tour[s];
+				var cell1 = state.Tour[s + 1];
+				if (s < insertAfter) {
+					// [s+2..insertAfter] を左に2シフト
+					for (int k = s; k < insertAfter - 1; k++) {
+						state.Tour[k] = state.Tour[k + 2];
+						map[state.Tour[k].i, state.Tour[k].j] = k;
+					}
+
+					state.Tour[insertAfter - 1] = cell0;
+					map[cell0.i, cell0.j] = insertAfter - 1;
+					state.Tour[insertAfter] = cell1;
+					map[cell1.i, cell1.j] = insertAfter;
+				} else {
+					// [insertAfter+1..s-1] を右に2シフト
+					for (int k = s + 1; k > insertAfter + 2; k--) {
+						state.Tour[k] = state.Tour[k - 2];
+						map[state.Tour[k].i, state.Tour[k].j] = k;
+					}
+
+					state.Tour[insertAfter + 1] = cell0;
+					map[cell0.i, cell0.j] = insertAfter + 1;
+					state.Tour[insertAfter + 2] = cell1;
+					map[cell1.i, cell1.j] = insertAfter + 2;
 				}
 			}
 			);
