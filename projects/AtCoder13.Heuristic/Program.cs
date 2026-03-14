@@ -52,7 +52,7 @@ public class Program
 		var input = new Input(io, isDebug);
 		var info = new Information();
 
-		var state = Plan2(rnd, sw, isDebug, input, info);
+		var state = Plan3(rnd, sw, isDebug, input, info);
 
 		input.Output(state);
 		info.Score = state.Calculate();
@@ -62,7 +62,7 @@ public class Program
 		return (input, info);
 	}
 
-	static State Plan2(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
+	static State Plan2(Random rnd, bool isDebug, Input input, Information info)
 	{
 		var state = new State(isDebug, input);
 		CreateZigzagGreedy(state, input);
@@ -75,8 +75,7 @@ public class Program
 		}
 
 		int nn = state.Tour.Count;
-		int limit = 1900;
-		while (sw.ElapsedMilliseconds < limit) {
+		for (int l = 0; l < 100000; l++) {
 			++info.Loop;
 
 			int p = rnd.Next(0, nn);
@@ -145,6 +144,106 @@ public class Program
 			return input.A[pi, pj] * q + input.A[qi, qj] * p;
 		}
 
+
+		return state;
+	}
+
+	static State Plan3(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
+	{
+		var state = new State(isDebug, input);
+		CreateZigzagGreedy(state, input);
+
+		int n = input.N;
+		var map = new int[n, n];
+		for (int t = 0; t < state.Tour.Count; t++) {
+			var (i, j) = state.Tour[t];
+			map[i, j] = t;
+		}
+
+		int nn = state.Tour.Count;
+		const double startTemp = 1e6;
+		const double endTemp = 1e1;
+		const double limit = 1900.0;
+
+		while (true) {
+			long elapsed = sw.ElapsedMilliseconds;
+			if (elapsed >= (long)limit) {
+				break;
+			}
+
+			++info.Loop;
+
+			double progress = elapsed / limit;
+			double temp = Math.Pow(startTemp, 1.0 - progress) * Math.Pow(endTemp, progress);
+
+			int p = rnd.Next(0, nn);
+			var (pi, pj) = state.Tour[p];
+			var (qi, qj) = (pi, pj);
+			if (pi == 0) {
+				(qi, qj) = (pi + 1, pj);
+			} else if (pi == n - 1) {
+				(qi, qj) = (pi - 1, pj);
+			} else {
+				if (rnd.Next(0, 2) == 0) {
+					(qi, qj) = (pi - 1, pj);
+				} else {
+					(qi, qj) = (pi + 1, pj);
+				}
+			}
+
+			int q = map[qi, qj];
+
+			bool ok = CheckPrevAndNext(p, q)
+				&& CheckPrevAndNext(q, p);
+			if (ok == false) {
+				continue;
+			}
+
+			long diff = CalculateRev(p, q) - Calculate(p, q);
+			if (diff >= 0 || rnd.NextDouble() < Math.Exp(diff / temp)) {
+				if (diff > 0) {
+					++info.Up;
+				}
+
+				(state.Tour[p], state.Tour[q]) = (state.Tour[q], state.Tour[p]);
+				(map[pi, pj], map[qi, qj]) = (map[qi, qj], map[pi, pj]);
+			}
+		}
+
+		bool CheckNear(int p, int q)
+		{
+			var (pi, pj) = state.Tour[p];
+			var (qi, qj) = state.Tour[q];
+			return Math.Abs(pi - qi) <= 1 && Math.Abs(pj - qj) <= 1;
+		}
+
+		bool CheckPrevAndNext(int p, int tag)
+		{
+			bool ok = true;
+			if (p > 0) {
+				ok &= CheckNear(p - 1, tag);
+			}
+
+			if (p < nn - 1) {
+				ok &= CheckNear(p + 1, tag);
+			}
+
+			return ok;
+		}
+
+		long Calculate(int p, int q)
+		{
+			var (pi, pj) = state.Tour[p];
+			var (qi, qj) = state.Tour[q];
+			return input.A[pi, pj] * p + input.A[qi, qj] * q;
+		}
+
+		long CalculateRev(int p, int q)
+		{
+			var (pi, pj) = state.Tour[p];
+			var (qi, qj) = state.Tour[q];
+			return input.A[pi, pj] * q + input.A[qi, qj] * p;
+		}
 
 		return state;
 	}
