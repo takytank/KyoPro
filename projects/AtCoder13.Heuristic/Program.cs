@@ -18,7 +18,7 @@ public class Program
 			runCaseCount: 100,
 			testCaseCount: 100,
 			isParallel: false,
-			i => Run(i),
+			i => Run(i + 1 - 1),
 			(locker, i, ret) => {
 				var (input, info) = ret;
 				lock (locker) {
@@ -62,12 +62,22 @@ public class Program
 		return (input, info);
 	}
 
-	static State Plan2(Random rnd, bool isDebug, Input input, Information info)
+	static State Plan1(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
+	{
+		var state = new State(isDebug, input);
+		CreateSimpleZigzag2(state, input);
+
+		return state;
+	}
+
+	static State Plan2(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
 	{
 		var state = new State(isDebug, input);
 		CreateZigzagGreedy(state, input);
 
 		int n = input.N;
+
+
 		var map = new int[n, n];
 		for (int t = 0; t < state.Tour.Count; t++) {
 			var (i, j) = state.Tour[t];
@@ -75,7 +85,7 @@ public class Program
 		}
 
 		int nn = state.Tour.Count;
-		for (int l = 0; l < 100000; l++) {
+		for (int l = 0; l < 10000; l++) {
 			++info.Loop;
 
 			int p = rnd.Next(0, nn);
@@ -144,14 +154,13 @@ public class Program
 			return input.A[pi, pj] * q + input.A[qi, qj] * p;
 		}
 
-
 		return state;
 	}
 
 	static State Plan3(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
 	{
 		var state = new State(isDebug, input);
-		CreateZigzagGreedy(state, input);
+		CreateSimpleZigzag2(state, input);
 
 		int n = input.N;
 		var map = new int[n, n];
@@ -185,6 +194,7 @@ public class Program
 				(qi, qj) = (pi - 1, pj);
 			} else {
 				if (rnd.Next(0, 2) == 0) {
+					// 上
 					(qi, qj) = (pi - 1, pj);
 				} else {
 					(qi, qj) = (pi + 1, pj);
@@ -195,7 +205,7 @@ public class Program
 
 			bool ok = CheckPrevAndNext(p, q)
 				&& CheckPrevAndNext(q, p);
-			if (ok == false) {
+			if (!ok) {
 				continue;
 			}
 
@@ -248,6 +258,121 @@ public class Program
 		return state;
 	}
 
+	static void CreateSimpleZigzag(State state, Input input)
+	{
+		for (int i = 0; i < input.N; i++) {
+			if (i % 2 == 0) {
+				for (int j = 0; j < input.N; j++) {
+					state.Move(i, j);
+				}
+			} else {
+				for (int j = input.N - 1; j >= 0; j--) {
+					state.Move(i, j);
+				}
+			}
+		}
+	}
+
+	static void CreateSimpleZigzag2(State state, Input input)
+	{
+		int n = input.N;
+		var a = input.A;
+
+		var done = new bool[n, n];
+
+		// 往路
+		for (int i = 0; i < n; i += 2) {
+			// 右移動
+			for (int j = 0; j < n; j++) {
+				if (j == 0) {
+					// 一番左は上
+					MoveU(i, j);
+				} else if (j == n - 1) {
+					// 一番右は下
+					MoveD(i, j);
+				} else {
+					MoveU(i, j);
+				}
+			}
+
+			i += 2;
+
+			// 左移動
+			if (i < n - 2) {
+				for (int j = n - 1; j >= 0; j--) {
+					if (j == n - 1) {
+						// 一番右は上
+						MoveU(i, j);
+					} else if (j == 0) {
+						// 一番左は下
+						MoveD(i, j);
+					} else {
+						MoveU(i, j);
+					}
+				}
+			} else {
+				// 最下層はジグザグに折り返すしかない
+				for (int j = n - 1; j >= 0; j--) {
+					if (j == n - 1) {
+						// 上 -> 下
+						MoveU(i, j);
+						MoveD(i, j);
+					} else if (j == 0) {
+						MoveD(i, j);
+						MoveU(i, j);
+					} else {
+						if (a[i, j] >= a[i + 1, j]) {
+							MoveD(i, j);
+							MoveU(i, j);
+						} else {
+							MoveU(i, j);
+							MoveD(i, j);
+						}
+					}
+				}
+			}
+		}
+
+		// 復路
+		for (int i = n - 4; i >= 0; i -= 2) {
+			// 右移動
+			for (int j = 0; j < n; j++) {
+				// まだ辿って無い方
+				if (done[i, j] == false) {
+					MoveU(i, j);
+				} else {
+					MoveD(i, j);
+				}
+			}
+
+			i -= 2;
+
+			if (i >= 0) {
+				// 左移動
+				for (int j = n - 1; j >= 0; j--) {
+					// まだ辿って無い方
+					if (done[i, j] == false) {
+						MoveU(i, j);
+					} else {
+						MoveD(i, j);
+					}
+				}
+			}
+		}
+
+		void MoveU(int i, int j)
+		{
+			state.Move(i, j);
+			done[i, j] = true;
+		}
+
+		void MoveD(int i, int j)
+		{
+			state.Move(i + 1, j);
+			done[i + 1, j] = true;
+		}
+	}
+
 	static void CreateZigzagGreedy(State state, Input input)
 	{
 		int n = input.N;
@@ -298,13 +423,21 @@ public class Program
 			} else {
 				// 最下層はジグザグに折り返すしかない
 				for (int j = n - 1; j >= 0; j--) {
-					if (j % 2 != 0) {
+					if (j == n - 1) {
 						// 上 -> 下
 						MoveU(i, j);
 						MoveD(i, j);
-					} else {
+					} else if (j == 0) {
 						MoveD(i, j);
 						MoveU(i, j);
+					} else {
+						if (a[i, j] >= a[i + 1, j]) {
+							MoveD(i, j);
+							MoveU(i, j);
+						} else {
+							MoveU(i, j);
+							MoveD(i, j);
+						}
 					}
 				}
 			}
@@ -942,6 +1075,7 @@ public class DijkstraQ
 				ref Unsafe.As<long, byte>(ref newDistanceHeap[0]),
 				ref Unsafe.As<long, byte>(ref distanceHeap_[0]),
 				(uint)(8 * count_));
+
 			Unsafe.CopyBlock(
 				ref Unsafe.As<int, byte>(ref newVertexHeap[0]),
 				ref Unsafe.As<int, byte>(ref vertexHeap_[0]),
@@ -1491,7 +1625,6 @@ public class IOManager : IDisposable
 		var array = new T[height, width];
 		for (int i = 0; i < height; ++i) {
 			for (int j = 0; j < width; ++j) {
-				// キャプチャーを避けるために自身を引数として渡す。
 				array[i, j] = read(this);
 			}
 		}
