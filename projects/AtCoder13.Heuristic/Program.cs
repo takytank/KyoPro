@@ -25,6 +25,9 @@ public class Program
 					var status = new List<string> {
 						$"{i:d4}:",
 						$"N={input.N:d3}",
+						$"T={(info.Transpose ? "T" : "F")}",
+						$"V={(info.FlipV? "T" : "F")}",
+						$"H={(info.FlipH? "T" : "F")}",
 						$"loop={info.Loop:d8}",
 						$"up0={info.Ups[0]:d5}",
 						$"up1={info.Ups[1]:d5}",
@@ -66,7 +69,7 @@ public class Program
 	static State Plan1(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
 	{
 		var state = new State(isDebug, input);
-		CreateZigzagGreedy(state, input);
+		(info.Transpose, info.FlipH, info.FlipV) = CreateZigzagGreedy2(state, input);
 
 		return state;
 	}
@@ -74,7 +77,7 @@ public class Program
 	static State Plan2(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
 	{
 		var state = new State(isDebug, input);
-		CreateZigzagGreedy(state, input);
+		(info.Transpose, info.FlipH, info.FlipV) = CreateZigzagGreedy(state, input);
 
 		int n = input.N;
 
@@ -161,7 +164,7 @@ public class Program
 	static State Plan3(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
 	{
 		var state = new State(isDebug, input);
-		CreateZigzagGreedy(state, input);
+		(info.Transpose, info.FlipH, info.FlipV) = CreateZigzagGreedy2(state, input);
 
 		int n = input.N;
 		var map = new int[n, n];
@@ -176,10 +179,9 @@ public class Program
 		const double limit = 1900.0;
 		const int twoOptMaxLen = 100;
 
-		// 近傍: 候補なしの場合は diff = long.MinValue を返す
-		// diff: スコア差分（採択判定用）
-		// apply: 採択時に実行する状態更新
-		Func<(long diff, Action apply)> neighbor = NeighborUpDown;
+		// transpose=false: 横方向ジグザグ → 上下スワップ
+		// transpose=true:  縦方向ジグザグ → 左右スワップ
+		Func<(long diff, Action apply)> neighborSwap = info.Transpose ? NeighborLeftRight : NeighborUpDown;
 
 		while (true) {
 			long elapsed = sw.ElapsedMilliseconds;
@@ -193,7 +195,7 @@ public class Program
 			double temp = Math.Pow(startTemp, 1.0 - progress) * Math.Pow(endTemp, progress);
 
 			int way = rnd.Next(0, 2);
-			neighbor = way == 0 ? NeighborUpDown : NeighborTwoOpt;
+			var neighbor = way == 0 ? neighborSwap : NeighborTwoOpt;
 
 			var (diff, apply) = neighbor();
 			if (diff == long.MinValue) {
@@ -243,6 +245,37 @@ public class Program
 			);
 		}
 
+		(long diff, Action apply) NeighborLeftRight()
+		{
+			int p = rnd.Next(0, nn);
+			var (pi, pj) = state.Tour[p];
+			int qi, qj;
+			if (pj == 0) {
+				(qi, qj) = (pi, pj + 1);
+			} else if (pj == n - 1) {
+				(qi, qj) = (pi, pj - 1);
+			} else {
+				if (rnd.Next(0, 2) == 0) {
+					(qi, qj) = (pi, pj - 1);
+				} else {
+					(qi, qj) = (pi, pj + 1);
+				}
+			}
+
+			int q = map[qi, qj];
+
+			if (!CheckPrevAndNext(p, q) || !CheckPrevAndNext(q, p)) {
+				return (long.MinValue, null);
+			}
+
+			long diff = CalculateRev(p, q) - Calculate(p, q);
+			return (diff, () => {
+				(state.Tour[p], state.Tour[q]) = (state.Tour[q], state.Tour[p]);
+				(map[pi, pj], map[qi, qj]) = (map[qi, qj], map[pi, pj]);
+			}
+			);
+		}
+
 		(long diff, Action apply) NeighborTwoOpt()
 		{
 			// ランダムに区間 [l+1, r] を選択して反転する 2-opt 近傍
@@ -266,7 +299,7 @@ public class Program
 			}
 
 			// スコア差分: 区間 [l+1, r] の各要素 k が位置 (l+1+r-k) に移動する
-			// diff = Σ_{k=l+1}^{r} (l+1+r-k - k) * A[Tour[k]]
+			// diff = Σ_{k=l+1}^{r} (l+1+r-キ) * A[Tour[k]]
 			//      = Σ_{k=l+1}^{r} (l+1+r-2k) * A[Tour[k]]
 			long diff = 0;
 			var tourSpan = state.Tour.AsSpan();
@@ -447,7 +480,7 @@ public class Program
 		}
 	}
 
-	static void CreateZigzagGreedy(State state, Input input)
+	static (bool tanspose, bool flipH, bool flipV) CreateZigzagGreedy(State state, Input input)
 	{
 		int n = input.N;
 		var a = input.A;
@@ -555,6 +588,184 @@ public class Program
 			state.Move(i + 1, j);
 			done[i + 1, j] = true;
 		}
+
+		return (false, false, false);
+	}
+
+	// CreateZigzagGreedy の8パターン版。
+	// 開始角 (左上/右上/左下/右下) × 移動方向 (横/縦) の計8パターンを試し、
+	// スコアが最大のものを state に適用する。
+	static (bool tanspose, bool flipH, bool flipV) CreateZigzagGreedy2(State state, Input input)
+	{
+		int n = input.N;
+
+		List<(int i, int j)> bestTour = null;
+		long bestScore = long.MinValue;
+
+		// flipH: 左右反転, flipV: 上下反転, transpose: 縦横入れ替え
+		// の組み合わせで8パターンを生成する。
+		// transpose=false: 横方向移動, transpose=true: 縦方向移動
+		bool t = false;
+		bool h = false;
+		bool v = false;
+		foreach (bool transpose in new[] { false, true }) {
+			foreach (bool flipH in new[] { false, true }) {
+				foreach (bool flipV in new[] { false, true }) {
+					var tour = BuildZigzagTour(input, n, transpose, flipH, flipV);
+					long score = ScoreTour(tour, input, n);
+					if (score > bestScore) {
+						bestScore = score;
+						bestTour = tour;
+						(t, h, v) = (transpose, flipH, flipV);
+					}
+				}
+			}
+		}
+
+		foreach (var (i, j) in bestTour) {
+			state.Move(i, j);
+		}
+
+		return (t, h, v);
+	}
+
+	static List<(int i, int j)> BuildZigzagTour(Input input, int n, bool transpose, bool flipH, bool flipV)
+	{
+		// transpose=false のとき: 行方向に移動するジグザグ (CreateZigzagGreedy と同じ構造)
+		// transpose=true のとき: 列方向に移動するジグザグ (行と列を入れ替えて生成)
+		// flipH: 列方向を反転（左右）, flipV: 行方向を反転（上下）
+		// transpose 適用後に flip するので、transpose=true のとき flip の意味も入れ替わる。
+
+		// グリッドアクセサ: transpose/flip を適用した座標で A にアクセスする
+		int GetA(int row, int col)
+		{
+			int r = flipV ? n - 1 - row : row;
+			int c = flipH ? n - 1 - col : col;
+			return transpose ? input.A[c, r] : input.A[r, c];
+		}
+
+		// 実グリッド座標に変換
+		(int i, int j) ToReal(int row, int col)
+		{
+			int r = flipV ? n - 1 - row : row;
+			int c = flipH ? n - 1 - col : col;
+			return transpose ? (c, r) : (r, c);
+		}
+
+		var done = new bool[n, n];
+		var tour = new List<(int i, int j)>(n * n);
+
+		void MoveU(int row, int col)
+		{
+			var (i, j) = ToReal(row, col);
+			tour.Add((i, j));
+			done[i, j] = true;
+		}
+
+		void MoveD(int row, int col)
+		{
+			// 仮想グリッドでの「下」= row+1
+			var (i, j) = ToReal(row + 1, col);
+			tour.Add((i, j));
+			done[i, j] = true;
+		}
+
+		// 往路: 偶数行ペア (0,1), (4,5), ...
+		for (int row = 0; row < n; row += 2) {
+			// 右移動 (col: 0 → n-1)
+			for (int col = 0; col < n; col++) {
+				if (col == 0) {
+					MoveU(row, col);
+				} else if (col == n - 1) {
+					MoveD(row, col);
+				} else {
+					if (GetA(row, col) >= GetA(row + 1, col)) {
+						MoveD(row, col);
+					} else {
+						MoveU(row, col);
+					}
+				}
+			}
+
+			row += 2;
+
+			// 左移動 (col: n-1 → 0)
+			if (row < n - 2) {
+				for (int col = n - 1; col >= 0; col--) {
+					if (col == n - 1) {
+						MoveU(row, col);
+					} else if (col == 0) {
+						MoveD(row, col);
+					} else {
+						if (GetA(row, col) >= GetA(row + 1, col)) {
+							MoveD(row, col);
+						} else {
+							MoveU(row, col);
+						}
+					}
+				}
+			} else {
+				// 最下層
+				for (int col = n - 1; col >= 0; col--) {
+					if (col == n - 1) {
+						MoveU(row, col);
+						MoveD(row, col);
+					} else if (col == 0) {
+						MoveD(row, col);
+						MoveU(row, col);
+					} else {
+						if (GetA(row, col) >= GetA(row + 1, col)) {
+							MoveD(row, col);
+							MoveU(row, col);
+						} else {
+							MoveU(row, col);
+							MoveD(row, col);
+						}
+					}
+				}
+			}
+		}
+
+		// 復路
+		for (int row = n - 4; row >= 0; row -= 2) {
+			// 右移動
+			for (int col = 0; col < n; col++) {
+				var (i, j) = ToReal(row, col);
+				if (!done[i, j]) {
+					MoveU(row, col);
+				} else {
+					MoveD(row, col);
+				}
+			}
+
+			row -= 2;
+
+			if (row >= 0) {
+				// 左移動
+				for (int col = n - 1; col >= 0; col--) {
+					var (i, j) = ToReal(row, col);
+					if (!done[i, j]) {
+						MoveU(row, col);
+					} else {
+						MoveD(row, col);
+					}
+				}
+			}
+		}
+
+		return tour;
+	}
+
+	static long ScoreTour(List<(int i, int j)> tour, Input input, int n)
+	{
+		long v = 0;
+		int nn = n * n;
+		for (int k = 0; k < nn; k++) {
+			var (i, j) = tour[k];
+			v += (long)k * input.A[i, j];
+		}
+
+		return v;
 	}
 }
 
@@ -618,6 +829,9 @@ public class Information
 	public long Elapsed { get; set; } = 0;
 
 	public int[] Ups { get; set; } = new int[10];
+	public bool Transpose { get; set; } = false;
+	public bool FlipH { get; set; } = false;
+	public bool FlipV { get; set; } = false;
 }
 
 public class Input
