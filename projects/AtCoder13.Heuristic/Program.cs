@@ -16,18 +16,20 @@ public class Program
 	{
 		HeuristicHelper.RunCases(
 			runCaseCount: 100,
-			testCaseCount: 150,
+			testCaseCount: 50,
 			isParallel: false,
-			i => Run(i),
+			i => Run(i + 1 - 1),
 			(locker, i, ret) => {
 				var (input, info) = ret;
 				lock (locker) {
 					var status = new List<string> {
 						$"{i:d4}:",
-						//$"N={input.N:d2}",
+						$"N={input.N:d2}",
+						$"M={input.M:d3}",
+						$"C={input.C:d1}",
 						$"loop={info.Loop:d8}",
-						$"up={info.Up:d4}",
-						$"score={info.Score:d5}",
+						$"up={info.Up:d5}",
+						$"score={info.Score:d7}",
 						$"elapsed={info.Elapsed:d4}",
 					};
 
@@ -47,14 +49,138 @@ public class Program
 		Run(int caseNumber)
 	{
 		var (isDebug, sw, rnd) = HeuristicHelper.Initialize();
-		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC056\tools\in\", caseNumber);
+		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC063\tools\in\", caseNumber);
 
 		var input = new Input(io, isDebug);
 		var info = new Information();
 
+		var state = Plan1(rnd, sw, isDebug, input, info);
+
+		input.Output(state);
+		info.Score = state.Calculate();
+
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
+	}
+
+	static State Plan1(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
+	{
+		var state = new State(isDebug, input);
+
+		for (int j = 0; j < input.N; j++) {
+			if (j % 2 == 0) {
+				while (state.Head.i < input.N - 1) {
+					state.Move(Direction4.D);
+				}
+			} else {
+				while (state.Head.i > 0) {
+					state.Move(Direction4.U);
+				}
+			}
+
+			if (j < input.N - 1) {
+				state.Move(Direction4.R);
+			}
+		}
+
+		return state;
+	}
+}
+
+public class State
+{
+	private Input _input;
+	private bool _isDebug;
+
+	public List<Direction4> Ops { get; } = [];
+	public Direction4 HeadDir { get; private set; }
+	public Deque<(int i, int j)> Boros { get; } = new();
+	public Deque<int> Colors { get; } = new();
+
+	public bool[,] Bodies { get; }
+	public int[,] Esas { get; }
+
+	public (int i, int j) Head => Boros.Front;
+
+	public State(bool isDebug, Input input)
+	{
+		_isDebug = isDebug;
+		_input = input;
+
+		int n = input.N;
+		Bodies = new bool[n, n];
+		Esas = new int[n, n];
+
+		HeadDir = Direction4.D;
+		for (int i = 0; i < 5; i++) {
+			Boros.PushFront((i, 0));
+			Colors.PushFront(1);
+			if (i > 0) {
+				// 尻尾は胴体に含めない
+				Bodies[i, 0] = true;
+			}
+		}
+
+		for (int i = 0; i < n; i++) {
+			for (int j = 0; j < n; j++) {
+				Esas[i, j] = input.F[i, j];
+			}
+		}
+	}
+
+	public void Move(Direction4 dir)
+	{
+		var (hi, hj) = Boros[0];
+		var (ni, nj) = dir.Move(hi, hj);
+		if (Bodies[ni, nj]) {
+			// 後ろから噛んだところまでを削除
+			while (Boros.Back != (ni, nj)) {
+				var (bi, bj) = Boros.PopBack();
+				var color = Colors.PopBack();
+				Esas[bi, bj] = color;
+				Bodies[bi, bj] = false;
+			}
+
+			// あらたに頭と尻尾が居る位置も胴体ではない
+			Bodies[ni, nj] = false;
+		} else if (Esas[ni, nj] > 0) {
+			// 現在の尻尾の位置がそのまま尻尾となる。
+			// つまり、末尾は削除せず頭だけ追加すれば良い。
+			// 色を末尾に追加する。
+			Colors.PushBack(Esas[ni, nj]);
+			Esas[ni, nj] = 0;
+		} else {
+			// 末尾が無くなる
+			Boros.PopBack();
+			// その上で、次の末尾が尻尾になるので胴体から外す
+			var (bi, bj) = Boros.Back;
+			Bodies[bi, bj] = false;
+		}
+
+		// 頭が次の位置へ移動
+		Boros.PushFront((ni, nj));
+		// 元々頭があった位置が胴体になる
+		Bodies[hi, hj] = true;
+
+		Ops.Add(dir);
+	}
+
+	public long Calculate()
+	{
+		long score = 0;
+		score += Ops.Count;
+
+		int k = Math.Min(_input.M, Colors.Count);
+		int e = 0;
+		for (int i = 0; i < k; i++) {
+			if (_input.D[i] != Colors[i]) {
+				++e;
+			}
+		}
+
+		score += 10000 * (e + (2 * (_input.M - k)));
+		return score;
 	}
 }
 
@@ -65,19 +191,232 @@ public class Information
 	public int Loop { get; set; } = 0;
 	public int Up { get; set; } = 0;
 	public long Elapsed { get; set; } = 0;
-
 }
 
 public class Input
 {
 	private readonly IOManager _io;
 	private readonly bool _isDebug;
+	public int N { get; }
+	public int M { get; }
+	public int C { get; }
+	public int[] D { get; }
+	public int[,] F { get; }
 
 	public Input(IOManager io, bool isDebug)
 	{
 		_io = io;
 		_isDebug = isDebug;
+
+		(N, M, C) = io.Int3();
+		D = io.ArrayInt(M);
+		F = io.Repeat(N, N, io => io.Int());
 	}
+
+	public void Output(State state)
+	{
+		foreach (var dir in state.Ops) {
+			_io.WriteLine($"{dir.ToSymbol()}");
+		}
+	}
+}
+
+public class Deque<T> : IEnumerable<T>
+{
+	/// <summary>リングバッファのサイズ</summary>
+	private int _capacity;
+	/// <summary>両端キューの実体であるリングバッファ</summary>
+	private T[] _ringBuffer;
+	/// <summary>キューの先頭のインデックス</summary>
+	/// <remarks>
+	/// キューに格納されている要素を閉区間[front, back]の範囲で持つ。
+	/// 閉区間のため、中身が空のときはbackがfront-1の位置にある。
+	/// </remarks>
+	private int _front;
+	/// <summary>キューの末尾のインデックス</summary>
+	private int _back;
+
+	/// <summary>格納されている要素数</summary>
+	public int Count { get; private set; } = 0;
+	/// <summary>キューの先頭の要素</summary>
+	public T Front => _ringBuffer[_front];
+	/// <summary>キューの末尾の要素</summary>
+	public T Back => _ringBuffer[_back];
+
+	/// <summary>ランダムアクセス</summary>
+	/// <remarks>
+	/// 範囲チェックは省いてあるので注意。
+	/// </remarks>
+	public T this[int index]
+	{
+		get
+		{
+			index += _front;
+			// バッファの終端を超えた場合は先頭に戻る
+			return _ringBuffer[index < _capacity ? index : index - _capacity];
+		}
+	}
+
+	/// <summary>既定のサイズでインスタンスを生成</summary>
+	public Deque() : this(1024) { }
+	/// <summary>
+	/// 指定したサイズでインスタンスを生成
+	/// </summary>
+	/// <param name="capacity">リングバッファのサイズ</param>
+	public Deque(int capacity)
+	{
+		if (capacity <= 0) {
+			capacity = 1024;
+		}
+
+		_capacity = capacity;
+		_ringBuffer = new T[capacity];
+		Clear();
+	}
+
+	/// <summary>
+	/// キューの中身を空にする O(1)
+	/// </summary>
+	public void Clear()
+	{
+		_front = 0;
+		_back = _capacity - 1;
+		Count = 0;
+		// バッファのクリアはしない。
+		// 再度バッファにアクセスされる際には新しい値に上書きされるので問題無い。
+	}
+
+	/// <summary>
+	/// キューの先頭に要素を追加する amortized O(1)
+	/// </summary>
+	/// <param name="item">追加する要素</param>
+	public void PushFront(T item)
+	{
+		// リングバッファが一杯の場合、バッファサイズを倍に拡張する。
+		// この部分がならしO(1)。
+		if (Count == _capacity) {
+			Extend(_capacity * 2);
+		}
+
+		// 要素が格納されている区間を前方向に拡張。
+		// バッファの先頭を超えた場合は末尾に追加する。
+		--_front;
+		if (_front < 0) {
+			_front += _capacity;
+		}
+
+		++Count;
+		_ringBuffer[_front] = item;
+	}
+
+	/// <summary>
+	/// キューの末尾に要素を追加する amortized O(1)
+	/// </summary>
+	/// <param name="item">追加する要素</param>
+	public void PushBack(T item)
+	{
+		// リングバッファが一杯の場合、バッファサイズを倍に拡張する。
+		// この部分がならしO(1)。
+		if (Count == _capacity) {
+			Extend(_capacity * 2);
+		}
+
+		// 要素が格納されている区間を後ろ方向に拡張。
+		// バッファの末尾を超えた場合は先頭に追加する。
+		++_back;
+		if (_back >= _capacity) {
+			_back -= _capacity;
+		}
+
+		++Count;
+		_ringBuffer[_back] = item;
+	}
+
+	/// <summary>
+	/// キューの先頭から要素を取り出す O(1)
+	/// </summary>
+	/// <returns>取り出した要素</returns>
+	public T PopFront()
+	{
+		if (Count == 0) {
+			// 例外を投げるべき？
+			return default(T);
+		}
+
+		T ret = _ringBuffer[_front];
+		--Count;
+		// 要素が格納されている区間の先頭を縮小。
+		// バッファの末尾を超えた場合は先頭を指すようにする。
+		++_front;
+		if (_front >= _capacity) {
+			_front -= _capacity;
+		}
+
+		return ret;
+	}
+
+	/// <summary>
+	/// キューの末尾から要素を取り出す O(1)
+	/// </summary>
+	/// <returns>取り出した要素</returns>
+	public T PopBack()
+	{
+		if (Count == 0) {
+			// 例外を投げるべき？
+			return default(T);
+		}
+
+		T ret = _ringBuffer[_back];
+		--Count;
+		// 要素が格納されている区間の末尾を縮小。
+		// バッファの先頭を超えた場合は末尾を指すようにする。
+		--_back;
+		if (_back < 0) {
+			_back += _capacity;
+		}
+
+		return ret;
+	}
+
+	/// <summary>
+	/// バッファサイズを倍に拡張
+	/// </summary>
+	/// <remarks>
+	/// この処理自体はO(N)かかるのであるが、
+	/// 呼ばれるタイイングがサイズNのバッファーが埋まったときなので、
+	/// 実際に使われるケースでの計算量はならしO(1)となる。
+	/// </remarks>
+	/// <param name="newSize">拡張後のサイズ</param>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void Extend(int newSize)
+	{
+		var newBuffer = new T[newSize];
+		if (Count > 0) {
+			if (_front <= _back) {
+				// ここにくるのは実質frontが0でbackが^1のときだけ。
+				Array.Copy(_ringBuffer, _front, newBuffer, 0, Count);
+			} else {
+				// [front, 末尾] と [先頭, back] の2回に分けてコピーする必要がある。
+				int prevLength = _ringBuffer.Length - _front;
+				Array.Copy(_ringBuffer, _front, newBuffer, 0, prevLength);
+				Array.Copy(_ringBuffer, 0, newBuffer, prevLength, _back + 1);
+			}
+		}
+
+		_ringBuffer = newBuffer;
+		_capacity = newSize;
+		_front = 0;
+		_back = Count - 1;
+	}
+
+	public IEnumerator<T> GetEnumerator()
+	{
+		for (int i = 0; i < Count; i++) {
+			yield return this[i];
+		}
+	}
+
+	IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
 [Flags]
@@ -586,6 +925,7 @@ public class DijkstraQ
 				ref Unsafe.As<long, byte>(ref newDistanceHeap[0]),
 				ref Unsafe.As<long, byte>(ref distanceHeap_[0]),
 				(uint)(8 * count_));
+
 			Unsafe.CopyBlock(
 				ref Unsafe.As<int, byte>(ref newVertexHeap[0]),
 				ref Unsafe.As<int, byte>(ref vertexHeap_[0]),
@@ -1135,7 +1475,6 @@ public class IOManager : IDisposable
 		var array = new T[height, width];
 		for (int i = 0; i < height; ++i) {
 			for (int j = 0; j < width; ++j) {
-				// キャプチャーを避けるために自身を引数として渡す。
 				array[i, j] = read(this);
 			}
 		}
@@ -1149,7 +1488,7 @@ public class IOManager : IDisposable
 		byte b;
 		do {
 			b = Read();
-		} while (b < ASCII_CHAR_BEGIN || ASCII_CHAR_END < b);
+		} while (b < ASCII_CHAR_BEGIN || b > ASCII_CHAR_END);
 
 		return (char)b;
 	}
