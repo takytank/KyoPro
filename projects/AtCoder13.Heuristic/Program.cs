@@ -63,12 +63,34 @@ public class Program
 		info.P = 1;
 
 		{
-			var temp = Plan2(rnd, sw, isDebug, input, info);
-			var tempScore = temp.Calculate();
-			if (tempScore.score < bestScore) {
-				bestScore = tempScore.score;
-				best = temp;
-				info.P = 2;
+			for (int l = 0; l < 100; l++) {
+				var temp = Plan2(rnd, sw, isDebug, input, info, 1000);
+				var tempScore = temp.Calculate();
+				if (tempScore.score < bestScore) {
+					bestScore = tempScore.score;
+					best = temp;
+					info.P = 2;
+				}
+			}
+
+			for (int l = 0; l < 10; l++) {
+				var temp = Plan2(rnd, sw, isDebug, input, info, 10000);
+				var tempScore = temp.Calculate();
+				if (tempScore.score < bestScore) {
+					bestScore = tempScore.score;
+					best = temp;
+					info.P = 2;
+				}
+			}
+
+			{
+				var temp = Plan2(rnd, sw, isDebug, input, info, 100000);
+				var tempScore = temp.Calculate();
+				if (tempScore.score < bestScore) {
+					bestScore = tempScore.score;
+					best = temp;
+					info.P = 2;
+				}
 			}
 		}
 
@@ -105,15 +127,15 @@ public class Program
 		return state;
 	}
 
-	static State Plan2(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
+	static State Plan2(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int max)
 	{
 		var state = new State(isDebug, input);
 
 		State best = state.Clone();
 		var (bestScore, _, _) = state.Calculate();
 
-		for (int i = 0; i < 100000; i++) {
-			var dir = FindNextStepGreedy(rnd, input, info, state);
+		for (int i = 0; i < max; i++) {
+			var dir = FindNextStepGreedy2(rnd, input, info, state);
 			int s = state.Move(dir);
 			if (s == 0) {
 				info.KamiCount++;
@@ -179,6 +201,129 @@ public class Program
 		}
 
 		// しょうがないので違う色のところ(どこでもよい)
+		ret = Found(
+			p => true,
+			p => true);
+		return ToDirection(ret.i, ret.j);
+
+		Direction4 ToDirection(int ni, int nj)
+		{
+			if (hi == ni) {
+				if (nj < hj) {
+					return Direction4.L;
+				} else {
+					return Direction4.R;
+				}
+			} else {
+				if (ni < hi) {
+					return Direction4.U;
+				} else {
+					return Direction4.D;
+				}
+			}
+		}
+
+		(int i, int j) Found(Func<(int i, int j), bool> predictor, Func<(int i, int j), bool> canMove)
+		{
+			var que = new Queue<(int i, int j, int d)>();
+			que.Enqueue((hi, hj, 0));
+			var dists = new int[n, n].Fill(int.MaxValue);
+			(int i, int j)[,] prevs = new (int i, int j)[n, n].Fill((-1, -1));
+			dists[hi, hj] = 0;
+			// Uターン出来ないように距離0にしておく
+			var (bi, bj) = state.HeadDir.Reverse().Move(hi, hj);
+			dists[bi, bj] = 0;
+
+			var (ti, tj) = (-1, -1);
+			while (que.Count > 0) {
+				var (i, j, d) = que.Dequeue();
+				if (predictor((i, j)) && (i, j) != (hi, hj)) {
+					(ti, tj) = (i, j);
+					break;
+				}
+
+				int nd = d + 1;
+				foreach (var (ii, jj) in Helper.Adjacence4(i, j, n, n)) {
+					if (canMove((ii, jj)) == false) {
+						continue;
+					}
+
+					if (dists[ii, jj] > nd) {
+						dists[ii, jj] = nd;
+						prevs[ii, jj] = (i, j);
+						que.Enqueue((ii, jj, d));
+					}
+				}
+			}
+
+			if (ti >= 0) {
+				var (pi, pj) = prevs[ti, tj];
+				while (pi >= 0 && prevs[pi, pj].i >= 0) {
+					(ti, tj) = (pi, pj);
+					(pi, pj) = prevs[ti, tj];
+				}
+
+				return (ti, tj);
+			} else {
+				return (-1, -1);
+			}
+		}
+	}
+
+	private static Direction4 FindNextStepGreedy2(Random rnd, Input input, Information info, State state)
+	{
+		var (hi, hj) = state.Head;
+		int n = input.N;
+
+		// まずは次の色を探す
+		int nextColor = input.D[state.Boros.Count];
+		var ret = Found(
+			p => state.Esas[p.i, p.j] == nextColor,
+			p => state.Bodies[p.i, p.j] == false && (state.Esas[p.i, p.j] == 0 || state.Esas[p.i, p.j] == nextColor));
+		if (ret.i >= 0) {
+			return ToDirection(ret.i, ret.j);
+		}
+
+		if (state.Ops.Count > 5000) {
+			// 自分を食べない餌
+			ret = Found(
+			p => state.Esas[p.i, p.j] > 0,
+			p => state.Bodies[p.i, p.j] == false);
+			if (ret.i >= 0) {
+				return ToDirection(ret.i, ret.j);
+			}
+		}
+
+		if (info.KamiCount > 10) {
+			// 同じ行動をループしてしまうので、ランダムにする。
+			var dame = state.HeadDir.Reverse();
+			var kouho = new List<Direction4>();
+			foreach (var dir in Direction4Extensions.ForEach4()) {
+				if (dir == dame) {
+					continue;
+				}
+
+				var (ni, nj) = dir.Move(hi, hj);
+				if ((uint)ni < n && (uint)nj < n) {
+					kouho.Add(dir);
+				}
+			}
+
+			if (kouho.Count > 0) {
+				int ri = rnd.Next(0, kouho.Count);
+				return kouho[ri];
+			}
+		}
+
+		// 無い場合、違う色以外で探す
+		ret = Found(
+			p => state.Esas[p.i, p.j] == 0,
+			p => state.Esas[p.i, p.j] == 0);
+		if (ret.i >= 0) {
+			return ToDirection(ret.i, ret.j);
+		}
+
+		// どこでもよい
 		ret = Found(
 			p => true,
 			p => true);
