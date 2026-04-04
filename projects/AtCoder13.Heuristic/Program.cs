@@ -111,9 +111,42 @@ public class Program
 		info.K = input.M - info.K;
 		info.SameScore = info.Score == best.Score;
 
+		if (isDebug) {
+			Validate(input, best);
+		}
+
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
+	}
+
+	static void Validate(Input input, State state)
+	{
+		int n = input.N;
+		var (ci, cj) = (4, 0);
+		var lastDir = Direction4.N;
+
+		if (state.Ops.Count > 100000) {
+			throw new Exception($"Too long output {state.Ops.Count}");
+		}
+
+		for (int i = 0; i < state.Ops.Count; i++) {
+			var dir = state.Ops[i];
+			if (dir == Direction4.N) {
+				throw new Exception($"tunr {i} : Invalid direction {dir.ToSymbol()}");
+			}
+
+			if (dir.Reverse() == lastDir) {
+				throw new Exception($"turn {i} : Try to U-turn {dir.ToSymbol()}");
+			}
+
+			var (ni, nj) = dir.Move(ci, cj);
+			if ((uint)ni >= n || (uint)nj >= n) {
+				throw new Exception($"turn {i} : Try to move out of the board ({ni}, {nj})");
+			}
+
+			lastDir = dir;
+		}
 	}
 
 	static State Plan1(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
