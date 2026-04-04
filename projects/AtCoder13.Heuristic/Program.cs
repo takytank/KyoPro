@@ -34,6 +34,7 @@ public class Program
 						$"K={info.K:d3}",
 						$"P={info.P:d2}",
 						$"score={info.Score:d7}",
+						$"same={info.SameScore}",
 						$"elapsed={info.Elapsed:d4}",
 					};
 
@@ -59,15 +60,15 @@ public class Program
 		var info = new Information();
 
 		var best = Plan1(rnd, sw, isDebug, input, info);
-		var (bestScore, _, _) = best.Calculate();
+		long bestScore = best.Score;
 		info.P = 1;
 
 		{
 			for (int l = 0; l < 100; l++) {
 				var temp = Plan2(rnd, sw, isDebug, input, info, 1000);
-				var tempScore = temp.Calculate();
-				if (tempScore.score < bestScore) {
-					bestScore = tempScore.score;
+				var tempScore = temp.Score;
+				if (tempScore < bestScore) {
+					bestScore = tempScore;
 					best = temp;
 					info.P = 2;
 				}
@@ -75,9 +76,9 @@ public class Program
 
 			for (int l = 0; l < 10; l++) {
 				var temp = Plan2(rnd, sw, isDebug, input, info, 10000);
-				var tempScore = temp.Calculate();
-				if (tempScore.score < bestScore) {
-					bestScore = tempScore.score;
+				var tempScore = temp.Score;
+				if (tempScore < bestScore) {
+					bestScore = tempScore;
 					best = temp;
 					info.P = 2;
 				}
@@ -85,12 +86,22 @@ public class Program
 
 			{
 				var temp = Plan2(rnd, sw, isDebug, input, info, 100000);
-				var tempScore = temp.Calculate();
-				if (tempScore.score < bestScore) {
-					bestScore = tempScore.score;
+				var tempScore = temp.Score;
+				if (tempScore < bestScore) {
+					bestScore = tempScore;
 					best = temp;
 					info.P = 2;
 				}
+			}
+		}
+
+		{
+			var temp = Plan3(rnd, sw, isDebug, input, info);
+			var tempScore = temp.Score;
+			if (tempScore < bestScore) {
+				bestScore = tempScore;
+				best = temp;
+				info.P = 3;
 			}
 		}
 
@@ -98,6 +109,7 @@ public class Program
 		info.T = best.Ops.Count;
 		(info.Score, info.E, info.K) = best.Calculate();
 		info.K = input.M - info.K;
+		info.SameScore = info.Score == best.Score;
 
 		info.Elapsed = sw.ElapsedMilliseconds;
 
@@ -153,6 +165,15 @@ public class Program
 				break;
 			}
 		}
+
+		return best;
+	}
+
+	static State Plan3(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
+	{
+		var state = new State(isDebug, input);
+
+		State best = state.Clone();
 
 		return best;
 	}
@@ -396,18 +417,20 @@ public class Program
 
 public class State
 {
-	private Input _input;
-	private bool _isDebug;
+	private readonly Input _input;
+	private readonly bool _isDebug;
 
 	public List<Direction4> Ops { get; } = [];
-	public Direction4 HeadDir { get; private set; }
-	public Deque<(int i, int j)> Boros { get; } = new();
-	public Deque<int> Colors { get; } = new();
+	public Deque<(int i, int j)> Boros { get; }
+	public Deque<byte> Colors { get; }
 
-	public bool[,] Bodies { get; }
-	public int[,] Esas { get; }
+	public Array2D<bool> Bodies { get; }
+	public Array2D<byte> Esas { get; }
+
+	public long Score { get; private set; }
 
 	public (int i, int j) Head => Boros.Front;
+	public Direction4 HeadDir => Ops.Count > 0 ? Ops[^1] : Direction4.D;
 
 	public State(bool isDebug, Input input)
 	{
@@ -415,10 +438,11 @@ public class State
 		_input = input;
 
 		int n = input.N;
-		Bodies = new bool[n, n];
-		Esas = new int[n, n];
+		Bodies = new Array2D<bool>(n, n);
+		Esas = new Array2D<byte>(n, n);
 
-		HeadDir = Direction4.D;
+		Boros = new();
+		Colors = new();
 		for (int i = 0; i < 5; i++) {
 			Boros.PushFront((i, 0));
 			Colors.PushFront(1);
@@ -430,33 +454,26 @@ public class State
 
 		for (int i = 0; i < n; i++) {
 			for (int j = 0; j < n; j++) {
-				Esas[i, j] = input.F[i, j];
+				Esas[i, j] = (byte)input.F[i, j];
 			}
 		}
+
+		Score = Calculate(0, 5, 0);
 	}
 
-	public State Clone()
+	private State(State src)
 	{
-		var clone = new State(_isDebug, _input);
-		clone.Ops.AddRange(Ops);
-		clone.HeadDir = HeadDir;
-
-		clone.Boros.Clear();
-		clone.Colors.Clear();
-		for (int i = 0; i < Boros.Count; i++) {
-			clone.Boros.PushBack(Boros[i]);
-			clone.Colors.PushBack(Colors[i]);
-		}
-
-		for (int i = 0; i < _input.N; i++) {
-			for (int j = 0; j < _input.N; j++) {
-				clone.Bodies[i, j] = Bodies[i, j];
-				clone.Esas[i, j] = Esas[i, j];
-			}
-		}
-
-		return clone;
+		_input = src._input;
+		_isDebug = src._isDebug;
+		Ops.AddRange(src.Ops);
+		Boros = src.Boros.Clone();
+		Colors = src.Colors.Clone();
+		Bodies = src.Bodies.Clone();
+		Esas = src.Esas.Clone();
+		Score = src.Score;
 	}
+
+	public State Clone() => new(this);
 
 	public int Move(Direction4 dir)
 	{
@@ -478,6 +495,13 @@ public class State
 				var color = Colors.PopBack();
 				Esas[bi, bj] = color;
 				Bodies[bi, bj] = false;
+				if (_input.D[Colors.Count] == color) {
+					// Kが減ってEは減らない
+					Score += 20000;
+				} else {
+					// Kが減ってEは減る
+					Score += 10000;
+				}
 			}
 
 			// あらたに頭と尻尾が居る位置も胴体ではない
@@ -491,6 +515,13 @@ public class State
 				// 色を末尾に追加する。
 				Colors.PushBack(Esas[ni, nj]);
 				Esas[ni, nj] = 0;
+				if (_input.D[Colors.Count - 1] == Colors[^1]) {
+					// Kが増えてEが減らない
+					Score -= 20000;
+				} else {
+					// Kが増えてEが増える
+					Score -= 10000;
+				}
 
 				state = 1;
 			} else {
@@ -510,16 +541,13 @@ public class State
 		}
 
 		Ops.Add(dir);
-		HeadDir = dir;
+		++Score;
 
 		return state;
 	}
 
 	public (long score, int e, int k) Calculate()
 	{
-		long score = 0;
-		score += Ops.Count;
-
 		int k = Math.Min(_input.M, Colors.Count);
 		int e = 0;
 		for (int i = 0; i < k; i++) {
@@ -528,8 +556,15 @@ public class State
 			}
 		}
 
-		score += 10000 * (e + (2 * (_input.M - k)));
+		long score = Calculate(Ops.Count, k, e);
 		return (score, e, k);
+	}
+
+	public long Calculate(int t, int k, int e)
+	{
+		long score = t;
+		score += 10000 * (e + (2 * (_input.M - k)));
+		return score;
 	}
 }
 
@@ -546,6 +581,8 @@ public class Information
 	public int K { get; set; } = 0;
 
 	public int P { get; set; } = 0;
+	public bool SameScore { get; set; } = false;
+
 	public int KamiCount { get; set; } = 0;
 }
 
@@ -629,6 +666,18 @@ public class Deque<T> : IEnumerable<T>
 		_ringBuffer = new T[capacity];
 		Clear();
 	}
+
+	private Deque(Deque<T> src)
+	{
+		_capacity = src._capacity;
+		_ringBuffer = new T[_capacity];
+		Array.Copy(src._ringBuffer, _ringBuffer, _capacity);
+		_front = src._front;
+		_back = src._back;
+		Count = src.Count;
+	}
+
+	public Deque<T> Clone() => new(this);
 
 	/// <summary>
 	/// キューの中身を空にする O(1)
