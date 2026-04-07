@@ -58,11 +58,13 @@ public class Program
 
 		var input = new Input(io, isDebug);
 		var info = new Information();
+		Zob.Initialize(rnd, input);
 
 		var best = Plan1(rnd, sw, isDebug, input, info);
 		long bestScore = best.Score;
 		info.P = 1;
 
+		/*
 		{
 			for (int l = 0; l < 100; l++) {
 				var temp = Plan2(rnd, sw, isDebug, input, info, 1000);
@@ -93,7 +95,7 @@ public class Program
 					info.P = 2;
 				}
 			}
-		}
+		}*/
 
 		{
 			var temp = Plan3(rnd, sw, isDebug, input, info);
@@ -206,8 +208,69 @@ public class Program
 	static State Plan3(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
 	{
 		var state = new State(isDebug, input);
-
 		State best = state.Clone();
+		long bestScore = best.Score;
+
+		int depth = 500;
+		int width = 500;
+		int n = input.N;
+
+		// 使用する時は全部使用するので、評価の悪い方を優先するようにして、悪いtopを抜いていく。
+		var que = new HeapQueue<(State s, long e), long>(x => x.e);
+		que.Enqueue((state, state.Evaluate()));
+		var stack = new Stack<State>();
+		var set = new HashSet<long> {
+			state.Hash
+		};
+		for (int i = 0; i < depth; i++) {
+			// 良いやつの方を先に処理して、悪いやつはそもそもキューに入れないようにしたい。
+			// 一回全部抜く
+			while (que.Count > 0) {
+				stack.Push(que.Dequeue().s);
+			}
+
+			var nextQue = new HeapQueue<(State s, long e), long>(x => x.e);
+			while (stack.Count > 0) {
+				var tag = stack.Pop();
+				var (hi, hj) = tag.Head;
+				var lastDir = tag.HeadDir;
+				foreach (var dir in Direction4Extensions.ForEach4()) {
+					if (dir.Reverse() == lastDir) {
+						continue;
+					}
+
+					var (ni, nj) = dir.Move(hi, hj);
+					if ((uint)ni < n && (uint)nj < n) {
+						var nex = tag.Clone();
+						nex.Move(dir);
+						var hash = nex.Hash;
+						if (set.Contains(hash)) {
+							continue;
+						}
+
+						set.Add(hash);
+
+						long eval = nex.Evaluate();
+						long tempScore = nex.Score;
+						if (tempScore < bestScore) {
+							bestScore = tempScore;
+							best = nex;
+						}
+
+						if (nextQue.Count == width) {
+							if (nextQue.Top.e > eval) {
+								nextQue.Dequeue();
+								nextQue.Enqueue((nex, eval));
+							}
+						} else {
+							nextQue.Enqueue((nex, eval));
+						}
+					}
+				}
+			}
+
+			que = nextQue;
+		}
 
 		return best;
 	}
@@ -336,6 +399,42 @@ public class Program
 	}
 }
 
+public static class Zob
+{
+	public static long[,,] Esa { get; private set; }
+	public static long[,] Head { get; private set; }
+	public static long[,] Hebi { get; private set; }
+	public static long[,] Color { get; private set; }
+
+	public static void Initialize(Random rnd, Input input)
+	{
+		int n = input.N;
+		int m = input.M;
+		int c = input.C;
+
+		Esa = new long[n, n, c + 1];
+		Head = new long[n, n];
+		Hebi = new long[n, n];
+		for (int i = 0; i < n; i++) {
+			for (int j = 0; j < n; j++) {
+				for (int k = 0; k < c + 1; k++) {
+					Esa[i, j, k] = rnd.NextInt64();
+				}
+
+				Head[i, j] = rnd.NextInt64();
+				Hebi[i, j] = rnd.NextInt64();
+			}
+		}
+
+		Color = new long[input.M + 1, input.C + 1];
+		for (int i = 0; i < m + 1; i++) {
+			for (int k = 0; k < c + 1; k++) {
+				Color[i, k] = rnd.NextInt64();
+			}
+		}
+	}
+}
+
 public class State
 {
 	private readonly Input _input;
@@ -352,6 +451,11 @@ public class State
 	public int E { get; private set; }
 	public int K { get; private set; }
 	public long Score => Calculate(Ops.Count, K, E);
+
+	public long Hash { get; set; } = 0;
+
+	// 先頭からエラーなく色が詰まっている数
+	public int NoErrorCount { get; private set; }
 
 	public (int i, int j) Head => Boros.Front;
 	public Direction4 HeadDir => Ops.Count > 0 ? Ops[^1] : Direction4.D;
@@ -378,16 +482,26 @@ public class State
 				// 尻尾は胴体に含めない
 				WillBites[i, 0] = true;
 			}
+
+			if (i == 4) {
+				Hash ^= Zob.Head[i, 0];
+			} else {
+				Hash ^= Zob.Hebi[i, 0];
+			}
+
+			Hash ^= Zob.Color[i, 1];
 		}
 
 		for (int i = 0; i < n; i++) {
 			for (int j = 0; j < n; j++) {
 				Esas[i, j] = (byte)input.F[i, j];
+				Hash ^= Zob.Esa[i, j, Esas[i, j]];
 			}
 		}
 
 		K = 5;
 		E = 0;
+		NoErrorCount = 5;
 	}
 
 	private State(State src)
@@ -401,6 +515,8 @@ public class State
 		Esas = src.Esas.Clone();
 		K = src.K;
 		E = src.E;
+		Hash = src.Hash;
+		NoErrorCount = src.NoErrorCount;
 	}
 
 	public State Clone() => new(this);
@@ -412,19 +528,14 @@ public class State
 		int state = 0;
 		if (WillBites[ni, nj]) {
 			// 処理を簡単にするため先に移動
-			// 頭が次の位置へ移動
-			Boros.PushFront((ni, nj));
-			// 元々頭があった位置が胴体になる
-			WillBites[hi, hj] = true;
-			// 尻尾を抜く
-			Boros.PopBack();
+			PushHead(ni, nj, hi, hj);
+			PopTail();
 
 			// 後ろから噛んだところまでを削除
 			while (Boros.Back != (ni, nj)) {
-				var (bi, bj) = Boros.PopBack();
-				var color = Colors.PopBack();
-				Esas[bi, bj] = color;
-				WillBites[bi, bj] = false;
+				var (ti, tj) = PopTail();
+				var color = PopTailColor(ti, tj);
+				WillBites[ti, tj] = false;
 				if (_input.D[Colors.Count] == color) {
 					// Kが減ってEは減らない
 					--K;
@@ -438,8 +549,11 @@ public class State
 			// あらたに頭と尻尾が居る位置も胴体ではない
 			WillBites[ni, nj] = false;
 			// さらに後ろから2番目も噛み付き対象ではない
-			var (bbi, bbj) = Boros[^2];
-			WillBites[bbi, bbj] = false;
+			var (tti, ttj) = Boros[^2];
+			WillBites[tti, ttj] = false;
+
+			// 切ったとこまでエラーカウントをリセット。長さとのminを取れば良い
+			NoErrorCount = Math.Min(NoErrorCount, Colors.Count);
 
 			state = 0;
 		} else {
@@ -447,11 +561,15 @@ public class State
 				// 現在の尻尾の位置がそのまま尻尾となる。
 				// つまり、末尾は削除せず頭だけ追加すれば良い。
 				// 色を末尾に追加する。
-				Colors.PushBack(Esas[ni, nj]);
-				Esas[ni, nj] = 0;
+				PushTailColor(ni, nj);
 				if (_input.D[Colors.Count - 1] == Colors[^1]) {
 					// Kが増えてEが減らない
 					++K;
+
+					// 1個前までエラー無く入っているなら、カウントアップ
+					if (NoErrorCount == Colors.Count - 1) {
+						++NoErrorCount;
+					}
 				} else {
 					// Kが増えてEが増える
 					++K;
@@ -463,17 +581,16 @@ public class State
 				// 末尾が無くなる
 				Boros.PopBack();
 				// その上で、次の末尾が尻尾になるので噛み付き対象ではなくなる。
-				var (bi, bj) = Boros.Back;
-				WillBites[bi, bj] = false;
+				// 末尾2を対象外にしているのでこれ必要無いかも。
+				var (ti, tj) = Boros.Back;
+				WillBites[ti, tj] = false;
 
 				state = 2;
 			}
 
-			// 頭が次の位置へ移動
-			Boros.PushFront((ni, nj));
-			// 元々頭があった位置が胴体になる
-			WillBites[hi, hj] = true;
-			// 後ろから2番目も噛み付き対象ではなくなる
+			PushHead(ni, nj, hi, hj);
+
+			// 後ろから2番目も噛み付き対象ではなくなる(hashの変更は無し)
 			var (bbi, bbj) = Boros[^2];
 			WillBites[bbi, bbj] = false;
 		}
@@ -481,6 +598,51 @@ public class State
 		Ops.Add(dir);
 
 		return state;
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void PushHead(int ni, int nj, int hi, int hj)
+	{
+		// 頭が次の位置へ移動
+		Boros.PushFront((ni, nj));
+		Hash ^= Zob.Head[ni, nj];
+		// 元々頭があった位置が胴体になる
+		WillBites[hi, hj] = true;
+		Hash ^= Zob.Head[hi, hj];
+		Hash ^= Zob.Hebi[ni, nj];
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private (int ti, int tj) PopTail()
+	{
+		// 尻尾を抜く
+		var (ti, tj) = Boros.PopBack();
+		Hash ^= Zob.Hebi[ti, tj];
+		return (ti, tj);
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private int PushTailColor(int ni, int nj)
+	{
+		byte color = Esas[ni, nj];
+		Colors.PushBack(color);
+		Esas[ni, nj] = 0;
+		Hash ^= Zob.Esa[ni, nj, 0];
+		Hash ^= Zob.Esa[ni, nj, color];
+
+		return color;
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private int PopTailColor(int ti, int tj)
+	{
+		var color = Colors.PopBack();
+		Hash ^= Zob.Color[Colors.Count, color];
+		Esas[ti, tj] = color;
+		Hash ^= Zob.Esa[ti, tj, 0];
+		Hash ^= Zob.Esa[ti, tj, color];
+
+		return color;
 	}
 
 	public (long score, int e, int k) Calculate()
@@ -502,6 +664,29 @@ public class State
 		long score = t;
 		score += 10000 * (e + (2 * (_input.M - k)));
 		return score;
+	}
+
+	// ビームサーチ用の評価値。低いほど良い。
+	public long Evaluate()
+	{
+		long val = 0;
+
+		// 生スコア
+		val += Score;
+
+		// エラーなく色が沢山入っている方がよい。
+		// 生スコアだと、違う色を食べるのと何も食べないのでは前者の方が良くなるが、
+		// 後を考えると後者を優先したい。
+		// ただ、何も食べないのを優先した結果、何もないところにずっと居られても困る。
+		// 数歩あるけば餌に着くと思うので、盤面ハッシュで重複を弾いておけば良いか？
+		val += E * 1;
+		val += (_input.M - K) * 100;
+		val -= NoErrorCount * 10000;
+
+		// エラーの上に積み上げよりも噛みを優先したい気持ち
+		val += (K - NoErrorCount) * 10000;
+
+		return val;
 	}
 }
 
@@ -548,6 +733,106 @@ public class Input
 		foreach (var dir in state.Ops) {
 			_io.WriteLine($"{dir.ToSymbol()}");
 		}
+	}
+}
+
+public class HeapQueue<TObject, TPriority> where TPriority : IComparable<TPriority>
+{
+	private readonly Func<TObject, TPriority> selector_;
+	private readonly int reverseFactory_;
+	private TObject[] heap_;
+
+	public TObject Top => heap_[0];
+	public int Count { get; private set; }
+
+	public HeapQueue(
+		Func<TObject, TPriority> selector,
+		bool reverses = false)
+		: this(1024, selector, reverses) { }
+
+	public HeapQueue(
+		int capacity,
+		Func<TObject, TPriority> selector,
+		bool reverses = false)
+	{
+		if (capacity == 0) {
+			capacity = 1024;
+		}
+
+		heap_ = new TObject[capacity];
+		selector_ = selector;
+		reverseFactory_ = reverses ? -1 : 1;
+	}
+
+	public void Enqueue(TObject item)
+	{
+		if (heap_.Length == Count) {
+			Extend(heap_.Length * 2);
+		}
+
+		var priority = selector_(item);
+		heap_[Count] = item;
+		++Count;
+
+		int c = Count - 1;
+		while (c > 0) {
+			int p = (c - 1) >> 1;
+			if (Compare(Priority(p), priority) < 0) {
+				heap_[c] = heap_[p];
+				c = p;
+			} else {
+				break;
+			}
+		}
+
+		heap_[c] = item;
+	}
+
+	public TObject Dequeue()
+	{
+		TObject ret = heap_[0];
+		int n = Count - 1;
+
+		var item = heap_[n];
+		var priority = Priority(n);
+		int p = 0;
+		int c = (p << 1) + 1;
+		while (c < n) {
+			if (c != n - 1 && Compare(Priority(c + 1), Priority(c)) > 0) {
+				++c;
+			}
+
+			if (Compare(priority, Priority(c)) < 0) {
+				heap_[p] = heap_[c];
+				p = c;
+				c = (p << 1) + 1;
+			} else {
+				break;
+			}
+		}
+
+		heap_[p] = item;
+		Count--;
+
+		return ret;
+	}
+
+	public void Clear() => Count = 0;
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private TPriority Priority(int index)
+		=> selector_(heap_[index]);
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private int Compare(TPriority x, TPriority y)
+		=> x.CompareTo(y) * reverseFactory_;
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void Extend(int newSize)
+	{
+		var newHeap = new TObject[newSize];
+		heap_.CopyTo(newHeap, 0);
+		heap_ = newHeap;
 	}
 }
 
@@ -1225,7 +1510,7 @@ public class HeuristicHelper
 #if DEBUG
 		isDebug = true;
 #endif
-		var rnd = new Random();
+		var rnd = new Random(123456);
 
 		return (isDebug, sw, rnd);
 	}

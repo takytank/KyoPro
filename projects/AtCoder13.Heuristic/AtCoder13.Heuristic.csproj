@@ -9,7 +9,7 @@
     <!--<PublishAot>true</PublishAot>-->
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <InvariantGlobalization>true</InvariantGlobalization>
-		<AssemblyTitle>AtCoder13.Heuristic063</AssemblyTitle>
+		<AssemblyTitle>AtCoder13.Heuristic</AssemblyTitle>
   </PropertyGroup>
 
   <ItemGroup>
