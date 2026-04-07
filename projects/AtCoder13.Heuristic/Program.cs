@@ -124,7 +124,7 @@ public class Program
 	{
 		int n = input.N;
 		var (ci, cj) = (4, 0);
-		var lastDir = Direction4.N;
+		var lastDir = Direction4.D;
 
 		if (state.Ops.Count > 100000) {
 			throw new Exception($"Too long output {state.Ops.Count}");
@@ -146,6 +146,7 @@ public class Program
 			}
 
 			lastDir = dir;
+			(ci, cj) = (ni, nj);
 		}
 	}
 
@@ -211,119 +212,6 @@ public class Program
 		return best;
 	}
 
-	private static Direction4 FindNextStepGreedy(Random rnd, Input input, Information info, State state)
-	{
-		var (hi, hj) = state.Head;
-		int n = input.N;
-
-		// まずは次の色を探す
-		int nextColor = input.D[state.Boros.Count];
-		var ret = Found(
-			p => state.Esas[p.i, p.j] == nextColor,
-			p => state.Bodies[p.i, p.j] == false && (state.Esas[p.i, p.j] == 0 || state.Esas[p.i, p.j] == nextColor));
-		if (ret.i >= 0) {
-			return ToDirection(ret.i, ret.j);
-		}
-
-		if (info.KamiCount > 10) {
-			// 同じ行動をループしてしまうので、ランダムにする。
-			var dame = state.HeadDir.Reverse();
-			var kouho = new List<Direction4>();
-			foreach (var dir in Direction4Extensions.ForEach4()) {
-				if (dir == dame) {
-					continue;
-				}
-
-				var (ni, nj) = dir.Move(hi, hj);
-				if ((uint)ni < n && (uint)nj < n) {
-					kouho.Add(dir);
-				}
-			}
-
-			if (kouho.Count > 0) {
-				int ri = rnd.Next(0, kouho.Count);
-				return kouho[ri];
-			}
-		}
-
-		// 無い場合、違う色以外で探す
-		ret = Found(
-			p => state.Esas[p.i, p.j] == 0,
-			p => state.Esas[p.i, p.j] == 0);
-		if (ret.i >= 0) {
-			return ToDirection(ret.i, ret.j);
-		}
-
-		// しょうがないので違う色のところ(どこでもよい)
-		ret = Found(
-			p => true,
-			p => true);
-		return ToDirection(ret.i, ret.j);
-
-		Direction4 ToDirection(int ni, int nj)
-		{
-			if (hi == ni) {
-				if (nj < hj) {
-					return Direction4.L;
-				} else {
-					return Direction4.R;
-				}
-			} else {
-				if (ni < hi) {
-					return Direction4.U;
-				} else {
-					return Direction4.D;
-				}
-			}
-		}
-
-		(int i, int j) Found(Func<(int i, int j), bool> predictor, Func<(int i, int j), bool> canMove)
-		{
-			var que = new Queue<(int i, int j, int d)>();
-			que.Enqueue((hi, hj, 0));
-			var dists = new int[n, n].Fill(int.MaxValue);
-			(int i, int j)[,] prevs = new (int i, int j)[n, n].Fill((-1, -1));
-			dists[hi, hj] = 0;
-			// Uターン出来ないように距離0にしておく
-			var (bi, bj) = state.HeadDir.Reverse().Move(hi, hj);
-			dists[bi, bj] = 0;
-
-			var (ti, tj) = (-1, -1);
-			while (que.Count > 0) {
-				var (i, j, d) = que.Dequeue();
-				if (predictor((i, j)) && (i, j) != (hi, hj)) {
-					(ti, tj) = (i, j);
-					break;
-				}
-
-				int nd = d + 1;
-				foreach (var (ii, jj) in Helper.Adjacence4(i, j, n, n)) {
-					if (canMove((ii, jj)) == false) {
-						continue;
-					}
-
-					if (dists[ii, jj] > nd) {
-						dists[ii, jj] = nd;
-						prevs[ii, jj] = (i, j);
-						que.Enqueue((ii, jj, d));
-					}
-				}
-			}
-
-			if (ti >= 0) {
-				var (pi, pj) = prevs[ti, tj];
-				while (pi >= 0 && prevs[pi, pj].i >= 0) {
-					(ti, tj) = (pi, pj);
-					(pi, pj) = prevs[ti, tj];
-				}
-
-				return (ti, tj);
-			} else {
-				return (-1, -1);
-			}
-		}
-	}
-
 	private static Direction4 FindNextStepGreedy2(Random rnd, Input input, Information info, State state)
 	{
 		var (hi, hj) = state.Head;
@@ -333,7 +221,7 @@ public class Program
 		int nextColor = input.D[state.Boros.Count];
 		var ret = Found(
 			p => state.Esas[p.i, p.j] == nextColor,
-			p => state.Bodies[p.i, p.j] == false && (state.Esas[p.i, p.j] == 0 || state.Esas[p.i, p.j] == nextColor));
+			p => state.WillBites[p.i, p.j] == false && (state.Esas[p.i, p.j] == 0 || state.Esas[p.i, p.j] == nextColor));
 		if (ret.i >= 0) {
 			return ToDirection(ret.i, ret.j);
 		}
@@ -342,7 +230,7 @@ public class Program
 			// 自分を食べない餌
 			ret = Found(
 			p => state.Esas[p.i, p.j] > 0,
-			p => state.Bodies[p.i, p.j] == false);
+			p => state.WillBites[p.i, p.j] == false);
 			if (ret.i >= 0) {
 				return ToDirection(ret.i, ret.j);
 			}
@@ -457,10 +345,13 @@ public class State
 	public Deque<(int i, int j)> Boros { get; }
 	public Deque<byte> Colors { get; }
 
-	public Array2D<bool> Bodies { get; }
+	// 移動先がここだったら胴体への噛み付きが発生する。
+	public Array2D<bool> WillBites { get; }
 	public Array2D<byte> Esas { get; }
 
-	public long Score { get; private set; }
+	public int E { get; private set; }
+	public int K { get; private set; }
+	public long Score => Calculate(Ops.Count, K, E);
 
 	public (int i, int j) Head => Boros.Front;
 	public Direction4 HeadDir => Ops.Count > 0 ? Ops[^1] : Direction4.D;
@@ -471,17 +362,21 @@ public class State
 		_input = input;
 
 		int n = input.N;
-		Bodies = new Array2D<bool>(n, n);
+		WillBites = new Array2D<bool>(n, n);
 		Esas = new Array2D<byte>(n, n);
 
 		Boros = new();
 		Colors = new();
+		// BrosもColorsもFrontが頭側でBackが尻尾側。
+		// 初期配置は頭側が (4, 0) なので、ループ順に前から詰めていけば結果的にFrontが頭になる。
 		for (int i = 0; i < 5; i++) {
 			Boros.PushFront((i, 0));
 			Colors.PushFront(1);
-			if (i > 0) {
+			// 尻尾に移動しても噛み付かない。
+			// またその次の胴体がある場所に移動しても、移動が完了したら尻尾になるので噛み付かない。
+			if (i > 1) {
 				// 尻尾は胴体に含めない
-				Bodies[i, 0] = true;
+				WillBites[i, 0] = true;
 			}
 		}
 
@@ -491,7 +386,8 @@ public class State
 			}
 		}
 
-		Score = Calculate(0, 5, 0);
+		K = 5;
+		E = 0;
 	}
 
 	private State(State src)
@@ -501,9 +397,10 @@ public class State
 		Ops.AddRange(src.Ops);
 		Boros = src.Boros.Clone();
 		Colors = src.Colors.Clone();
-		Bodies = src.Bodies.Clone();
+		WillBites = src.WillBites.Clone();
 		Esas = src.Esas.Clone();
-		Score = src.Score;
+		K = src.K;
+		E = src.E;
 	}
 
 	public State Clone() => new(this);
@@ -513,12 +410,12 @@ public class State
 		var (hi, hj) = Boros[0];
 		var (ni, nj) = dir.Move(hi, hj);
 		int state = 0;
-		if (Bodies[ni, nj]) {
+		if (WillBites[ni, nj]) {
 			// 処理を簡単にするため先に移動
 			// 頭が次の位置へ移動
 			Boros.PushFront((ni, nj));
 			// 元々頭があった位置が胴体になる
-			Bodies[hi, hj] = true;
+			WillBites[hi, hj] = true;
 			// 尻尾を抜く
 			Boros.PopBack();
 
@@ -527,18 +424,22 @@ public class State
 				var (bi, bj) = Boros.PopBack();
 				var color = Colors.PopBack();
 				Esas[bi, bj] = color;
-				Bodies[bi, bj] = false;
+				WillBites[bi, bj] = false;
 				if (_input.D[Colors.Count] == color) {
 					// Kが減ってEは減らない
-					Score += 20000;
+					--K;
 				} else {
 					// Kが減ってEは減る
-					Score += 10000;
+					--K;
+					--E;
 				}
 			}
 
 			// あらたに頭と尻尾が居る位置も胴体ではない
-			Bodies[ni, nj] = false;
+			WillBites[ni, nj] = false;
+			// さらに後ろから2番目も噛み付き対象ではない
+			var (bbi, bbj) = Boros[^2];
+			WillBites[bbi, bbj] = false;
 
 			state = 0;
 		} else {
@@ -550,19 +451,20 @@ public class State
 				Esas[ni, nj] = 0;
 				if (_input.D[Colors.Count - 1] == Colors[^1]) {
 					// Kが増えてEが減らない
-					Score -= 20000;
+					++K;
 				} else {
 					// Kが増えてEが増える
-					Score -= 10000;
+					++K;
+					++E;
 				}
 
 				state = 1;
 			} else {
 				// 末尾が無くなる
 				Boros.PopBack();
-				// その上で、次の末尾が尻尾になるので胴体から外す
+				// その上で、次の末尾が尻尾になるので噛み付き対象ではなくなる。
 				var (bi, bj) = Boros.Back;
-				Bodies[bi, bj] = false;
+				WillBites[bi, bj] = false;
 
 				state = 2;
 			}
@@ -570,11 +472,13 @@ public class State
 			// 頭が次の位置へ移動
 			Boros.PushFront((ni, nj));
 			// 元々頭があった位置が胴体になる
-			Bodies[hi, hj] = true;
+			WillBites[hi, hj] = true;
+			// 後ろから2番目も噛み付き対象ではなくなる
+			var (bbi, bbj) = Boros[^2];
+			WillBites[bbi, bbj] = false;
 		}
 
 		Ops.Add(dir);
-		++Score;
 
 		return state;
 	}
