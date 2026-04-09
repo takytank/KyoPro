@@ -401,6 +401,186 @@ public class Program
 		return best;
 	}
 
+	/// <summary>
+	/// DFSで指定歩数先まで探索し、必要な色を最も多く（同数なら最短歩数で）拾える経路を返す
+	/// </summary>
+	/// <param name="state">現在の状態（Move/Undoで変更される）</param>
+	/// <param name="input">入力情報</param>
+	/// <param name="neededColors">必要な色の配列（順序通りに拾う必要がある）</param>
+	/// <param name="maxDepth">探索する最大歩数</param>
+	/// <returns>最適な移動経路。1つも拾えない場合はnull</returns>
+	static Direction4[] FindBestPathDFS(State state, Input input, byte[] neededColors, int maxDepth)
+	{
+		int n = input.N;
+
+		Direction4[] bestPath = null;
+		int bestCollected = 0;
+		int bestSteps = int.MaxValue;
+
+		void DFS(int depth, List<Direction4> currentPath, int collectedIndex)
+		{
+			// 現在の経路を評価（より良い経路なら更新）
+			if (collectedIndex > bestCollected ||
+				(collectedIndex == bestCollected && currentPath.Count > 0 && currentPath.Count < bestSteps)) {
+				bestCollected = collectedIndex;
+				bestSteps = currentPath.Count;
+				bestPath = currentPath.ToArray();
+			}
+
+			// 深さ上限チェック
+			if (depth >= maxDepth) {
+				return;
+			}
+
+			// 必要な色を全て拾い終えたら終了
+			if (collectedIndex >= neededColors.Length) {
+				return;
+			}
+
+			var (hi, hj) = state.Head;
+			var lastDir = state.HeadDir;
+
+			foreach (var dir in Direction4Extensions.ForEach4()) {
+				// Uターン禁止
+				if (dir.Reverse() == lastDir) {
+					continue;
+				}
+
+				var (ni, nj) = dir.Move(hi, hj);
+
+				// 範囲チェック
+				if ((uint)ni >= n || (uint)nj >= n) {
+					continue;
+				}
+
+				// 胴体への噛み付き禁止
+				if (state.WillBites[ni, nj]) {
+					continue;
+				}
+
+				// 餌がある場合、必要な色かチェック
+				byte esa = state.Esas[ni, nj];
+				if (esa > 0) {
+					byte neededColor = neededColors[collectedIndex];
+					if (esa != neededColor) {
+						// 必要な色以外の餌は拾わない
+						continue;
+					}
+				}
+
+				// Move実行
+				var undo = state.Move(dir);
+				currentPath.Add(dir);
+
+				int newCollectedIndex = collectedIndex;
+				if (undo.State == 1) {
+					// 餌を食べた
+					newCollectedIndex++;
+				}
+
+				// 再帰探索
+				DFS(depth + 1, currentPath, newCollectedIndex);
+
+				// Undo
+				currentPath.RemoveAt(currentPath.Count - 1);
+				state.Undo(undo);
+			}
+		}
+
+		DFS(0, new List<Direction4>(), 0);
+
+		return bestCollected > 0 ? bestPath : null;
+	}
+
+	/// <summary>
+	/// DFSで指定歩数先まで探索し、必要な色との一致数が最も多い経路を返す（制約緩和版）
+	/// </summary>
+	/// <remarks>
+	/// FindBestPathDFSとの違い：
+	/// - 他の餌のマスにも移動を許す（必要な色以外の餌も踏める）
+	/// - neededColorsとの一致数をカウント（一致した色のみカウント）
+	/// </remarks>
+	/// <param name="state">現在の状態（Move/Undoで変更される）</param>
+	/// <param name="input">入力情報</param>
+	/// <param name="neededColors">必要な色の配列（順序通りに一致をチェック）</param>
+	/// <param name="maxDepth">探索する最大歩数</param>
+	/// <returns>最適な移動経路。1つも一致しない場合はnull</returns>
+	static Direction4[] FindBestPathDFSRelaxed(State state, Input input, byte[] neededColors, int maxDepth)
+	{
+		int n = input.N;
+
+		Direction4[] bestPath = null;
+		int bestMatched = 0;
+		int bestSteps = int.MaxValue;
+
+		void DFS(int depth, List<Direction4> currentPath, int matchedIndex)
+		{
+			// 現在の経路を評価（より良い経路なら更新）
+			if (matchedIndex > bestMatched ||
+				(matchedIndex == bestMatched && currentPath.Count > 0 && currentPath.Count < bestSteps)) {
+				bestMatched = matchedIndex;
+				bestSteps = currentPath.Count;
+				bestPath = currentPath.ToArray();
+			}
+
+			// 深さ上限チェック
+			if (depth >= maxDepth) {
+				return;
+			}
+
+			// 必要な色を全て一致させたら終了
+			if (matchedIndex >= neededColors.Length) {
+				return;
+			}
+
+			var (hi, hj) = state.Head;
+			var lastDir = state.HeadDir;
+
+			foreach (var dir in Direction4Extensions.ForEach4()) {
+				// Uターン禁止
+				if (dir.Reverse() == lastDir) {
+					continue;
+				}
+
+				var (ni, nj) = dir.Move(hi, hj);
+
+				// 範囲チェック
+				if ((uint)ni >= n || (uint)nj >= n) {
+					continue;
+				}
+
+				// 胴体への噛み付き禁止
+				if (state.WillBites[ni, nj]) {
+					continue;
+				}
+
+				// Move実行（餌があっても必要な色でなくても移動を許す）
+				var undo = state.Move(dir);
+				currentPath.Add(dir);
+
+				int newMatchedIndex = matchedIndex;
+				if (undo.State == 1) {
+					// 餌を食べた場合、必要な色と一致するかチェック
+					byte eatenColor = undo.EatenColor;
+					if (eatenColor == neededColors[matchedIndex]) {
+						newMatchedIndex++;
+					}
+				}
+
+				// 再帰探索
+				DFS(depth + 1, currentPath, newMatchedIndex);
+
+				// Undo
+				currentPath.RemoveAt(currentPath.Count - 1);
+				state.Undo(undo);
+			}
+		}
+
+		DFS(0, new List<Direction4>(), 0);
+
+		return bestMatched > 0 ? bestPath : null;
+	}
+
 	private static Direction4 FindNextStepGreedy2(Random rnd, Input input, Information info, State state)
 	{
 		var (hi, hj) = state.Head;
