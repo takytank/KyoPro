@@ -15,7 +15,7 @@ public class Program
 	static void Main()
 	{
 		HeuristicHelper.RunCases(
-			runCaseCount: 100,
+			runCaseCount: 1000,
 			testCaseCount: 50,
 			isParallel: false,
 			i => Run(i),
@@ -62,7 +62,25 @@ public class Program
 
 		var best = Plan4(rnd, sw, isDebug, input, info);
 		long bestScore = best.Score;
-		info.P = 1;
+		info.P = 4;
+
+		int maxOp = best.Ops.Count;
+		/*
+		{
+			for (int l = 0; l < 100; l++) {
+				var temp = Plan2(rnd, sw, isDebug, input, info, maxOp);
+				var tempScore = temp.Score;
+				if (tempScore < bestScore) {
+					bestScore = tempScore;
+					best = temp;
+					info.P = 2;
+					++info.Up;
+					if (temp.E == 0 && temp.K == input.M) {
+						maxOp.UpdateMin(temp.Ops.Count);
+					}
+				}
+			}
+		}*/
 
 		/*
 		{
@@ -758,23 +776,23 @@ public class Program
 							else if (hj < startJForEating) targetDir = Direction4.R;
 							else if (hj > startJForEating) targetDir = Direction4.L;
 
-							// 目標方向に移動可能かチェック
+							// 目標方向に移動可能かチェック（未食の配置済み行は避ける）
 							bool moved = false;
 							if (targetDir != Direction4.N && targetDir.Reverse() != lastDir) {
 								var (ni, nj) = targetDir.Move(hi, hj);
-								if ((uint)ni < n && (uint)nj < n && !state.WillBites[ni, nj]) {
+								if ((uint)ni < n && (uint)nj < n && ni > r && !state.WillBites[ni, nj]) {
 									state.Move(targetDir);
 									moved = true;
 								}
 							}
 
-							// 直接移動できない場合、迂回
+							// 直接移動できない場合、迂回（未食の配置済み行は避ける）
 							if (!moved) {
 								var validDirs = new List<Direction4>();
 								foreach (var dir in Direction4Extensions.ForEach4()) {
 									if (dir.Reverse() == lastDir) continue;
 									var (ni, nj) = dir.Move(hi, hj);
-									if ((uint)ni < n && (uint)nj < n && !state.WillBites[ni, nj]) {
+									if ((uint)ni < n && (uint)nj < n && ni > r && !state.WillBites[ni, nj]) {
 										validDirs.Add(dir);
 									}
 								}
