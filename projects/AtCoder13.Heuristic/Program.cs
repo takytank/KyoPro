@@ -18,7 +18,7 @@ public class Program
 			runCaseCount: 100,
 			testCaseCount: 50,
 			isParallel: false,
-			i => Run(i + 1 - 1),
+			i => Run(i),
 			(locker, i, ret) => {
 				var (input, info) = ret;
 				lock (locker) {
@@ -60,7 +60,7 @@ public class Program
 		var info = new Information();
 		Zob.Initialize(rnd, input);
 
-		var best = Plan1(rnd, sw, isDebug, input, info);
+		var best = Plan4(rnd, sw, isDebug, input, info);
 		long bestScore = best.Score;
 		info.P = 1;
 
@@ -401,6 +401,628 @@ public class Program
 		return best;
 	}
 
+	static State Plan4(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
+	{
+		bool isDebugPlan4 = false; // Plan4のデバッグ出力フラグ（一時的にtrue）
+		var state = new State(isDebug, input);
+		int n = input.N;
+		int m = input.M;
+
+		// 何行配置できるか（最大N行、またはM個の色を全て配置できる行数）
+		int maxRows = Math.Min(n, (m + n - 1) / n);
+
+		if (isDebugPlan4) {
+			Console.WriteLine($"Plan4 Start: M={m}, N={n}, maxRows={maxRows}");
+			Console.WriteLine();
+		}
+
+		// 各行をループで処理
+		for (int row = 0; row < maxRows; row++) {
+			// この行で配置する色の範囲
+			int targetFromBackStart = row * n;
+			int targetFromBackEnd = Math.Min((row + 1) * n, m - 5);
+			int targetCountForRow = targetFromBackEnd - targetFromBackStart;
+			int targetFromBack = 0; // この行で何個処理したか
+			int maxRetries = 10;
+			int retryCount = 0;
+
+			if (isDebugPlan4) {
+				Console.WriteLine($"=== Row {row} Start ===");
+				Console.WriteLine($"Target colors: D[{m - targetFromBackEnd}..{m - targetFromBackStart - 1}]");
+				Console.Write("Expected colors (from back): ");
+				for (int i = 0; i < targetCountForRow; i++) {
+					Console.Write($"{input.D[m - 1 - targetFromBackStart - i]} ");
+				}
+				Console.WriteLine();
+				Console.WriteLine();
+			}
+
+			while (retryCount < maxRetries && state.Ops.Count < 50000) {
+				// Step 1: この行用のN色を集める（既に配置した行は避ける）
+				int consecutiveFailures = 0; // DFSの連続失敗回数
+				int maxConsecutiveFailures = 100; // 100回連続失敗したら諦める
+
+				while (targetFromBack < targetCountForRow) {
+					if (isDebugPlan4) {
+						Console.WriteLine($"[Row {row} Step1 Loop] targetFromBack={targetFromBack}/{targetCountForRow}");
+						Console.Write("  Current Colors: [");
+						for (int i = 0; i < state.Colors.Count; i++) {
+							Console.Write($"{state.Colors[i]}");
+							if (i < state.Colors.Count - 1) Console.Write(", ");
+						}
+						Console.WriteLine("]");
+					}
+
+					// 次に必要な色の配列を作成（最大8個先まで）
+					var neededColors = new List<byte>();
+					bool isFinalRow = (row == maxRows - 1);
+					for (int i = 0; i < Math.Min(8, targetCountForRow - targetFromBack); i++) {
+						int index;
+						if (isFinalRow) {
+							// 最終行は前から（配置済みの行を食べるための準備）
+							index = m - targetFromBackEnd + targetFromBack + i;
+						} else {
+							// それ以外は後ろから（配置のための準備）
+							index = m - 1 - targetFromBackStart - targetFromBack - i;
+						}
+						neededColors.Add((byte)input.D[index]);
+					}
+
+					if (isDebugPlan4 && neededColors.Count > 0) {
+						Console.Write("  Needed colors: [");
+						for (int i = 0; i < neededColors.Count; i++) {
+							Console.Write($"{neededColors[i]}");
+							if (i < neededColors.Count - 1) Console.Write(", ");
+						}
+						Console.WriteLine("]");
+					}
+
+					if (neededColors.Count == 0) break;
+
+					// FindBestPathDFSで経路を探索（既に配置した行は避ける）
+					var path = FindBestPathDFS(state, input, neededColors.ToArray(), 8, row - 1);
+
+					if (isDebugPlan4) {
+						if (path != null && path.Length > 0) {
+							Console.Write($"  DFS found path (length={path.Length}): ");
+							for (int i = 0; i < path.Length; i++) {
+								Console.Write($"{path[i].ToSymbol()}");
+							}
+							Console.WriteLine();
+						} else {
+							Console.WriteLine("  DFS: No path found");
+						}
+					}
+
+					if (path != null && path.Length > 0) {
+						// 経路に従って移動し、実際に必要な色を集めたかを検証
+						int collectedBefore = state.Colors.Count;
+						foreach (var dir in path) {
+							state.Move(dir);
+						}
+						int collectedCount = state.Colors.Count - collectedBefore;
+
+						// 侵入チェック：DFS実行後
+						if (isDebugPlan4) {
+							var (checkI, checkJ) = state.Head;
+							if (checkI < row) {
+								Console.WriteLine($"  ★★★ INVASION DETECTED after DFS: Head=({checkI},{checkJ}), should be > row {row} ★★★");
+							} else {
+								Console.WriteLine($"  DFS OK: Head=({checkI},{checkJ}), row={row}");
+							}
+						}
+
+						// 実際に集めた色が期待通りかを検証（デバッグ用）
+						int matchedCount = 0;
+						for (int i = 0; i < collectedCount && targetFromBack + matchedCount < targetCountForRow; i++) {
+							int colorIndex = collectedBefore + i;
+							if (colorIndex < state.Colors.Count) {
+								byte collectedColor = state.Colors[colorIndex];
+								byte expectedColor = (byte)input.D[m - 1 - targetFromBackStart - targetFromBack - matchedCount];
+								if (collectedColor == expectedColor) {
+									matchedCount++;
+									if (isDebugPlan4) {
+										Console.WriteLine($"    DFS Match[{i}]: collected={collectedColor}, expected={expectedColor}");
+									}
+								} else {
+									if (isDebugPlan4) {
+										Console.WriteLine($"    DFS Mismatch[{i}]: collected={collectedColor}, expected={expectedColor} - CONTINUE (wrong color will be eaten)");
+									}
+								}
+							}
+						}
+						if (isDebugPlan4) {
+							Console.WriteLine($"  DFS execution: matched={matchedCount}, collected={collectedCount}, targetFromBack: {targetFromBack} -> {targetFromBack + collectedCount}");
+						}
+						// 重要: matchedCountではなくcollectedCountを加算
+						targetFromBack += collectedCount;
+
+						// 色を集められたので失敗カウントをリセット
+						consecutiveFailures = 0;
+					} else {
+						// 経路が見つからない場合
+						consecutiveFailures++;
+
+						// 連続失敗が閾値を超えたら諦める
+						if (consecutiveFailures >= maxConsecutiveFailures) {
+							if (isDebugPlan4) {
+								Console.WriteLine($"  Too many consecutive failures ({consecutiveFailures}), giving up on this row");
+							}
+							break;
+						}
+
+						// 胴体を噛まない範囲で空マスにランダム移動
+						// 既に配置した行（0からrow-1まで）は避ける
+						var (hi, hj) = state.Head;
+						var lastDir = state.HeadDir;
+						var validDirs = new List<Direction4>();
+
+						foreach (var dir in Direction4Extensions.ForEach4()) {
+							if (dir.Reverse() == lastDir) continue;
+							var (ni, nj) = dir.Move(hi, hj);
+							// 空マスかつ胴体を噛まない、かつ既に配置した行を避ける
+							if ((uint)ni < n && (uint)nj < n && ni >= row && !state.WillBites[ni, nj] && state.Esas[ni, nj] == 0) {
+								validDirs.Add(dir);
+							}
+						}
+
+						if (validDirs.Count > 0) {
+							if (isDebugPlan4) {
+								Console.WriteLine("  Trying random move to empty cell...");
+							}
+							state.Move(validDirs[rnd.Next(validDirs.Count)]);
+
+							// 侵入チェック：ランダム移動後
+							if (isDebugPlan4) {
+								var (checkI, checkJ) = state.Head;
+								if (checkI < row) {
+									Console.WriteLine($"  ★★★ INVASION DETECTED after random move: Head=({checkI},{checkJ}), should be > row {row} ★★★");
+								} else {
+									Console.WriteLine($"  Random move OK: Head=({checkI},{checkJ}), row={row}");
+								}
+							}
+						} else {
+							// 空マス移動も不可能な場合、胴体を噛んで長さ5にリセット
+							if (isDebugPlan4) {
+								Console.WriteLine("  No valid empty cell - forcing body bite to reset...");
+							}
+							var allDirs = new List<Direction4>();
+							foreach (var dir in Direction4Extensions.ForEach4()) {
+								if (dir.Reverse() == lastDir) continue;
+								var (ni, nj) = dir.Move(hi, hj);
+								if ((uint)ni < n && (uint)nj < n && ni >= row) {
+									allDirs.Add(dir);
+								}
+							}
+
+							if (allDirs.Count > 0) {
+								state.Move(allDirs[rnd.Next(allDirs.Count)]);
+
+								// Borosの長さが5になるまで胴体を噛み続ける
+								while (state.Boros.Count > 5) {
+									(hi, hj) = state.Head;
+									lastDir = state.HeadDir;
+
+									Direction4? biteDir = null;
+									foreach (var dir in Direction4Extensions.ForEach4()) {
+										if (dir.Reverse() == lastDir) continue;
+										var (ni, nj) = dir.Move(hi, hj);
+										if ((uint)ni < n && (uint)nj < n && ni >= row && state.WillBites[ni, nj]) {
+											biteDir = dir;
+											break;
+										}
+									}
+
+									if (biteDir.HasValue) {
+										state.Move(biteDir.Value);
+									} else {
+										var tempDirs = new List<Direction4>();
+										foreach (var dir in Direction4Extensions.ForEach4()) {
+											if (dir.Reverse() == lastDir) continue;
+											var (ni, nj) = dir.Move(hi, hj);
+											if ((uint)ni < n && (uint)nj < n && ni >= row) {
+												tempDirs.Add(dir);
+											}
+										}
+										if (tempDirs.Count > 0) {
+											state.Move(tempDirs[rnd.Next(tempDirs.Count)]);
+										} else {
+											break;
+										}
+									}
+								}
+								// 噛み付いてリセットしたので、targetFromBackもリセット
+								if (isDebugPlan4) {
+									var (checkI, checkJ) = state.Head;
+									Console.WriteLine($"  Body bite reset complete: targetFromBack {targetFromBack} -> 0, Head=({checkI},{checkJ})");
+									if (checkI < row) {
+										Console.WriteLine($"  ★★★ INVASION DETECTED after body bite reset in Step1: Head=({checkI},{checkJ}), should be > row {row} ★★★");
+									}
+								}
+								targetFromBack = 0;
+							} else {
+								break; // 移動不可能
+							}
+						}
+					}
+
+					// 無限ループ防止
+					if (state.Ops.Count > 50000) break;
+
+					if (isDebugPlan4) {
+						Console.WriteLine();
+					}
+				}
+
+				// Step 1で目標に到達できなかった場合はリトライ
+				if (targetFromBack < targetCountForRow) {
+					retryCount++;
+					continue;
+				}
+
+				// 最終行の場合、配置せずに配置済みの行を食べていく
+				if (row == maxRows - 1) {
+					if (isDebugPlan4) {
+						Console.WriteLine($"[Row {row}] Final row completed, now eating placed rows from bottom to top");
+						Console.WriteLine();
+					}
+
+					// 配置済みの行を下から順番に食べる（蛇行）
+					for (int r = maxRows - 2; r >= 0; r--) {
+						bool isEvenRowForEating = (r % 2 == 0);
+						int startJForEating = isEvenRowForEating ? 0 : n - 1;
+						int endJForEating = isEvenRowForEating ? n - 1 : 0;
+						Direction4 horizontalDirForEating = isEvenRowForEating ? Direction4.R : Direction4.L;
+
+						if (isDebugPlan4) {
+							Console.WriteLine($"[Eating Row {r}] Moving to ({r + 1},{startJForEating}) then entering row {r}");
+						}
+
+						// Step 1: (r+1, startJForEating) の位置に移動
+						int maxMoveAttemptsForEating = 10000;
+						int moveCountForEating = 0;
+						while (state.Head != (r + 1, startJForEating) && moveCountForEating < maxMoveAttemptsForEating) {
+							var (hi, hj) = state.Head;
+							var lastDir = state.HeadDir;
+
+							// 目標方向を決定
+							Direction4 targetDir = Direction4.N;
+							if (hi < r + 1) targetDir = Direction4.D;
+							else if (hi > r + 1) targetDir = Direction4.U;
+							else if (hj < startJForEating) targetDir = Direction4.R;
+							else if (hj > startJForEating) targetDir = Direction4.L;
+
+							// 目標方向に移動可能かチェック
+							bool moved = false;
+							if (targetDir != Direction4.N && targetDir.Reverse() != lastDir) {
+								var (ni, nj) = targetDir.Move(hi, hj);
+								if ((uint)ni < n && (uint)nj < n && !state.WillBites[ni, nj]) {
+									state.Move(targetDir);
+									moved = true;
+								}
+							}
+
+							// 直接移動できない場合、迂回
+							if (!moved) {
+								var validDirs = new List<Direction4>();
+								foreach (var dir in Direction4Extensions.ForEach4()) {
+									if (dir.Reverse() == lastDir) continue;
+									var (ni, nj) = dir.Move(hi, hj);
+									if ((uint)ni < n && (uint)nj < n && !state.WillBites[ni, nj]) {
+										validDirs.Add(dir);
+									}
+								}
+
+								if (validDirs.Count > 0) {
+									state.Move(validDirs[0]);
+								} else {
+									if (isDebugPlan4) {
+										Console.WriteLine($"[Eating Row {r}] Failed to reach ({r + 1},{startJForEating})");
+									}
+									break; // 移動不可能
+								}
+							}
+							moveCountForEating++;
+						}
+
+						// Step 2: 行 r に侵入
+						if (state.Head == (r + 1, startJForEating) && state.HeadDir != Direction4.D) {
+							state.Move(Direction4.U);
+						}
+
+						if (isDebugPlan4) {
+							var (checkI, checkJ) = state.Head;
+							Console.WriteLine($"[Eating Row {r}] Entered at ({checkI},{checkJ}), now moving to column {endJForEating}");
+						}
+
+						// Step 3: 行 r を横断して餌を食べる
+						moveCountForEating = 0;
+						while (state.Head.j != endJForEating && moveCountForEating < maxMoveAttemptsForEating) {
+							var (hi, hj) = state.Head;
+							var lastDir = state.HeadDir;
+
+							if (lastDir != horizontalDirForEating.Reverse()) {
+								var (ni, nj) = horizontalDirForEating.Move(hi, hj);
+								if ((uint)ni < n && (uint)nj < n && !state.WillBites[ni, nj]) {
+									state.Move(horizontalDirForEating);
+									moveCountForEating++;
+									continue;
+								}
+							}
+
+							// 直接移動できない場合は迂回（行r内のみ）
+							var validDirs = new List<Direction4>();
+							foreach (var dir in Direction4Extensions.ForEach4()) {
+								if (dir.Reverse() == lastDir) continue;
+								var (ni, nj) = dir.Move(hi, hj);
+								// 行r内のみを許可
+								if ((uint)ni < n && (uint)nj < n && ni == r && !state.WillBites[ni, nj]) {
+									validDirs.Add(dir);
+								}
+							}
+
+							if (validDirs.Count > 0) {
+								state.Move(validDirs[0]);
+							} else {
+								if (isDebugPlan4) {
+									Console.WriteLine($"[Eating Row {r}] Failed to reach column {endJForEating}");
+								}
+								break; // 移動不可能
+							}
+							moveCountForEating++;
+						}
+
+						if (isDebugPlan4) {
+							var (checkI, checkJ) = state.Head;
+							Console.WriteLine($"[Eating Row {r}] Completed at ({checkI},{checkJ})");
+							Console.WriteLine();
+						}
+					}
+
+					break;
+				}
+
+				// Step 2-5: 偶奇で場合分け
+				bool isEvenRow = (row % 2 == 0);
+				int targetRow = row;
+				int targetJ = isEvenRow ? 0 : n - 1; // 侵入後の目標j座標
+				int endJ = isEvenRow ? n - 1 : 0; // 最終目標j座標
+
+				// Step 2: (row+1, targetJ)の位置に移動（既に配置した行は避ける）
+				int maxMoveAttempts = 10000;
+				int moveCount = 0;
+				bool step2Failed = false;
+				while (state.Head != (row + 1, targetJ) && moveCount < maxMoveAttempts) {
+					var (hi, hj) = state.Head;
+					var lastDir = state.HeadDir;
+
+					// 目標方向を決定
+					Direction4 targetDir = Direction4.N;
+					if (hi < row + 1) targetDir = Direction4.D;
+					else if (hi > row + 1) targetDir = Direction4.U;
+					else if (hj < targetJ) targetDir = Direction4.R;
+					else if (hj > targetJ) targetDir = Direction4.L;
+
+					// 目標方向に移動可能かチェック（既に配置した行は避ける）
+					bool moved = false;
+					if (targetDir != Direction4.N && targetDir.Reverse() != lastDir) {
+						var (ni, nj) = targetDir.Move(hi, hj);
+						if ((uint)ni < n && (uint)nj < n && ni > row && !state.WillBites[ni, nj]) {
+							state.Move(targetDir);
+							moved = true;
+						}
+					}
+
+					// 直接移動できない場合、迂回（既に配置した行と配置予定の行は避ける）
+					if (!moved) {
+						var validDirs = new List<Direction4>();
+						foreach (var dir in Direction4Extensions.ForEach4()) {
+							if (dir.Reverse() == lastDir) continue;
+							var (ni, nj) = dir.Move(hi, hj);
+							if ((uint)ni < n && (uint)nj < n && ni > row && !state.WillBites[ni, nj]) {
+								validDirs.Add(dir);
+							}
+						}
+
+						if (validDirs.Count > 0) {
+							state.Move(validDirs[0]);
+						} else {
+							step2Failed = true;
+							break;
+						}
+					}
+					moveCount++;
+				}
+
+				// Step 2完了時の侵入チェック
+				if (isDebugPlan4) {
+					var (checkI, checkJ) = state.Head;
+					Console.WriteLine($"[Row {row} Step2 Complete] Head=({checkI},{checkJ}), expected=({row + 1},{targetJ})");
+					if (checkI <= row) {
+						Console.WriteLine($"  ★★★ INVASION DETECTED after Step2: Head=({checkI},{checkJ}), should be > row {row} ★★★");
+					}
+				}
+
+				// Step 2で目標位置に到達できなかった場合、胴体を噛んでリセット。ここは配置予定の行を移動してもよい。
+				if (step2Failed || state.Head != (row + 1, targetJ)) {
+					while (state.Boros.Count > 5) {
+						var (hi, hj) = state.Head;
+						var lastDir = state.HeadDir;
+						Direction4? biteDir = null;
+						foreach (var dir in Direction4Extensions.ForEach4()) {
+							if (dir.Reverse() == lastDir) continue;
+							var (ni, nj) = dir.Move(hi, hj);
+							if ((uint)ni < n && (uint)nj < n && ni >= row && state.WillBites[ni, nj]) {
+								biteDir = dir;
+								break;
+							}
+						}
+
+						if (biteDir.HasValue) {
+							state.Move(biteDir.Value);
+						} else {
+							var tempDirs = new List<Direction4>();
+							foreach (var dir in Direction4Extensions.ForEach4()) {
+								if (dir.Reverse() == lastDir) continue;
+								var (ni, nj) = dir.Move(hi, hj);
+								if ((uint)ni < n && (uint)nj < n && ni >= row) {
+									tempDirs.Add(dir);
+								}
+							}
+							if (tempDirs.Count > 0) {
+								state.Move(tempDirs[rnd.Next(tempDirs.Count)]);
+							} else {
+								break;
+							}
+						}
+					}
+					if (isDebugPlan4) {
+						var (checkI, checkJ) = state.Head;
+						Console.WriteLine($"[Row {row} Step2 Failed] Body bite reset: targetFromBack {targetFromBack} -> 0, retry {retryCount + 1}/{maxRetries}, Head=({checkI},{checkJ})");
+						if (checkI <= row) {
+							Console.WriteLine($"  ★★★ INVASION DETECTED after Step2 body bite reset: Head=({checkI},{checkJ}), should be > row {row} ★★★");
+						}
+					}
+					targetFromBack = 0;
+					retryCount++;
+					continue;
+				}
+
+				// Step 3: (row, targetJ)に侵入
+				if (state.Head == (row + 1, targetJ) && state.HeadDir != Direction4.D) {
+					state.Move(Direction4.U);
+				}
+
+				// Step 3完了時の侵入チェック
+				if (isDebugPlan4) {
+					var (checkI, checkJ) = state.Head;
+					Console.WriteLine($"[Row {row} Step3 Complete] Head=({checkI},{checkJ}), expected=({row},{targetJ})");
+					if (checkI != row) {
+						Console.WriteLine($"  ★★★ INVASION DETECTED after Step3: Head=({checkI},{checkJ}), should be at row {row} ★★★");
+					}
+				}
+
+				// Step 4: (row, endJ)まで移動
+				moveCount = 0;
+				bool step4Failed = false;
+				Direction4 moveDir = isEvenRow ? Direction4.R : Direction4.L;
+				Direction4 reverseDir = moveDir.Reverse();
+
+				while (state.Head.j != endJ && moveCount < maxMoveAttempts) {
+					var (hi, hj) = state.Head;
+					var lastDir = state.HeadDir;
+
+					if (lastDir != reverseDir) {
+						var (ni, nj) = moveDir.Move(hi, hj);
+						if ((uint)ni < n && (uint)nj < n && !state.WillBites[ni, nj]) {
+							state.Move(moveDir);
+							moveCount++;
+							continue;
+						}
+					}
+
+					// 直接移動できない場合は迂回（行row内のみ）
+					var validDirs = new List<Direction4>();
+					foreach (var dir in Direction4Extensions.ForEach4()) {
+						if (dir.Reverse() == lastDir) continue;
+						var (ni, nj) = dir.Move(hi, hj);
+						// 行row内のみを許可
+						if ((uint)ni < n && (uint)nj < n && ni == row && !state.WillBites[ni, nj]) {
+							validDirs.Add(dir);
+						}
+					}
+
+					if (validDirs.Count > 0) {
+						state.Move(validDirs[0]);
+					} else {
+						step4Failed = true;
+						break;
+					}
+					moveCount++;
+				}
+
+				// Step 4完了時の侵入チェック
+				if (isDebugPlan4) {
+					var (checkI, checkJ) = state.Head;
+					Console.WriteLine($"[Row {row} Step4 Complete] Head=({checkI},{checkJ}), expected=({row},{endJ})");
+					if (checkI != row) {
+						Console.WriteLine($"  ★★★ INVASION DETECTED after Step4: Head=({checkI},{checkJ}), should be at row {row} ★★★");
+					}
+				}
+
+				// Step 4で目標位置に到達できなかった場合、胴体を噛んでリセット
+				if (step4Failed || state.Head.j != endJ) {
+					while (state.Boros.Count > 5) {
+						var (hi, hj) = state.Head;
+						var lastDir = state.HeadDir;
+						Direction4? biteDir = null;
+						foreach (var dir in Direction4Extensions.ForEach4()) {
+							if (dir.Reverse() == lastDir) continue;
+							var (ni, nj) = dir.Move(hi, hj);
+							if ((uint)ni < n && (uint)nj < n && ni > row && state.WillBites[ni, nj]) {
+								biteDir = dir;
+								break;
+							}
+						}
+
+						if (biteDir.HasValue) {
+							state.Move(biteDir.Value);
+						} else {
+							var tempDirs = new List<Direction4>();
+							foreach (var dir in Direction4Extensions.ForEach4()) {
+								if (dir.Reverse() == lastDir) continue;
+								var (ni, nj) = dir.Move(hi, hj);
+								if ((uint)ni < n && (uint)nj < n && ni > row) {
+									tempDirs.Add(dir);
+								}
+							}
+							if (tempDirs.Count > 0) {
+								state.Move(tempDirs[rnd.Next(tempDirs.Count)]);
+							} else {
+								break;
+							}
+						}
+					}
+					if (isDebugPlan4) {
+						var (checkI, checkJ) = state.Head;
+						Console.WriteLine($"[Row {row} Step4 Failed] Body bite reset: targetFromBack {targetFromBack} -> 0, retry {retryCount + 1}/{maxRetries}, Head=({checkI},{checkJ})");
+						if (checkI <= row) {
+							Console.WriteLine($"  ★★★ INVASION DETECTED after Step4 body bite reset: Head=({checkI},{checkJ}), should be > row {row} ★★★");
+						}
+					}
+					targetFromBack = 0;
+					retryCount++;
+					continue;
+				}
+
+				// Step 5: 胴体を噛むシーケンス（偶奇で異なる）
+				Direction4[] sequence = isEvenRow
+					? new[] { Direction4.D, Direction4.D, Direction4.L, Direction4.U, Direction4.R }
+					: new[] { Direction4.D, Direction4.D, Direction4.R, Direction4.U, Direction4.L };
+
+				foreach (var dir in sequence) {
+					if (dir.Reverse() != state.HeadDir) {
+						var (hi, hj) = state.Head;
+						var (ni, nj) = dir.Move(hi, hj);
+						if ((uint)ni < n && (uint)nj < n) {
+							state.Move(dir);
+						}
+					}
+				}
+
+				// この行の処理が完了したらループを抜ける
+				break;
+			}
+
+			if (isDebugPlan4) {
+				Console.WriteLine($"=== Row {row} Complete ===");
+				Console.WriteLine();
+			}
+		}
+
+		return state;
+	}
+
 	/// <summary>
 	/// DFSで指定歩数先まで探索し、必要な色を最も多く（同数なら最短歩数で）拾える経路を返す
 	/// </summary>
@@ -408,8 +1030,9 @@ public class Program
 	/// <param name="input">入力情報</param>
 	/// <param name="neededColors">必要な色の配列（順序通りに拾う必要がある）</param>
 	/// <param name="maxDepth">探索する最大歩数</param>
+	/// <param name="avoidRowsBelow">この行番号以下には侵入しない（既に配置済みの行を避ける）</param>
 	/// <returns>最適な移動経路。1つも拾えない場合はnull</returns>
-	static Direction4[] FindBestPathDFS(State state, Input input, byte[] neededColors, int maxDepth)
+	static Direction4[] FindBestPathDFS(State state, Input input, byte[] neededColors, int maxDepth, int avoidRowsBelow = -1)
 	{
 		int n = input.N;
 
@@ -450,6 +1073,11 @@ public class Program
 
 				// 範囲チェック
 				if ((uint)ni >= n || (uint)nj >= n) {
+					continue;
+				}
+
+				// 既に配置済みの行には侵入しない
+				if (ni <= avoidRowsBelow) {
 					continue;
 				}
 
@@ -504,8 +1132,9 @@ public class Program
 	/// <param name="input">入力情報</param>
 	/// <param name="neededColors">必要な色の配列（順序通りに一致をチェック）</param>
 	/// <param name="maxDepth">探索する最大歩数</param>
+	/// <param name="avoidRowsBelow">この行番号以下には侵入しない（既に配置済みの行を避ける）</param>
 	/// <returns>最適な移動経路。1つも一致しない場合はnull</returns>
-	static Direction4[] FindBestPathDFSRelaxed(State state, Input input, byte[] neededColors, int maxDepth)
+	static Direction4[] FindBestPathDFSRelaxed(State state, Input input, byte[] neededColors, int maxDepth, int avoidRowsBelow = -1)
 	{
 		int n = input.N;
 
@@ -546,6 +1175,11 @@ public class Program
 
 				// 範囲チェック
 				if ((uint)ni >= n || (uint)nj >= n) {
+					continue;
+				}
+
+				// 既に配置済みの行には侵入しない
+				if (ni <= avoidRowsBelow) {
 					continue;
 				}
 
