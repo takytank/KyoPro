@@ -555,49 +555,116 @@ public class Program
 						// 既に配置した行（0からrow-1まで）は避ける
 						var (hi, hj) = state.Head;
 						var lastDir = state.HeadDir;
-						var validDirs = new List<Direction4>();
 
-						foreach (var dir in Direction4Extensions.ForEach4()) {
-							if (dir.Reverse() == lastDir) continue;
-							var (ni, nj) = dir.Move(hi, hj);
-							// 空マスかつ胴体を噛まない、かつ既に配置した行を避ける
-							if ((uint)ni < n && (uint)nj < n && ni >= row && !state.WillBites[ni, nj] && state.Esas[ni, nj] == 0) {
-								validDirs.Add(dir);
-							}
-						}
-
-						if (validDirs.Count > 0) {
-							if (isDebugPlan4) {
-								Console.WriteLine("  Trying random move to empty cell...");
-							}
-							state.Move(validDirs[rnd.Next(validDirs.Count)]);
-
-							// 侵入チェック：ランダム移動後
-							if (isDebugPlan4) {
-								var (checkI, checkJ) = state.Head;
-								if (checkI < row) {
-									Console.WriteLine($"  ★★★ INVASION DETECTED after random move: Head=({checkI},{checkJ}), should be > row {row} ★★★");
-								} else {
-									Console.WriteLine($"  Random move OK: Head=({checkI},{checkJ}), row={row}");
-								}
-							}
-						} else {
-							// 空マス移動も不可能な場合、胴体を噛んで長さ5にリセット
-							if (isDebugPlan4) {
-								Console.WriteLine("  No valid empty cell - forcing body bite to reset...");
-							}
-							var allDirs = new List<Direction4>();
+						// 連続失敗が少ない場合は空マスへのランダム移動を優先（方向転換のため）
+						bool usedRandomMove = false;
+						if (consecutiveFailures < 20) {
+							var validDirs = new List<Direction4>();
 							foreach (var dir in Direction4Extensions.ForEach4()) {
 								if (dir.Reverse() == lastDir) continue;
 								var (ni, nj) = dir.Move(hi, hj);
-								if ((uint)ni < n && (uint)nj < n && ni >= row) {
-									allDirs.Add(dir);
+								// 空マスかつ胴体を噛まない、かつ既に配置した行を避ける
+								if ((uint)ni < n && (uint)nj < n && ni >= row && !state.WillBites[ni, nj] && state.Esas[ni, nj] == 0) {
+									validDirs.Add(dir);
 								}
 							}
 
-							if (allDirs.Count > 0) {
-								state.Move(allDirs[rnd.Next(allDirs.Count)]);
+							if (validDirs.Count > 0) {
+								if (isDebugPlan4) {
+									Console.WriteLine("  Trying random move to empty cell...");
+								}
+								state.Move(validDirs[rnd.Next(validDirs.Count)]);
+								if (isDebugPlan4) {
+									var (checkI, checkJ) = state.Head;
+									if (checkI < row) {
+										Console.WriteLine($"  ★★★ INVASION DETECTED after random move: Head=({checkI},{checkJ}), should be > row {row} ★★★");
+									} else {
+										Console.WriteLine($"  Random move OK: Head=({checkI},{checkJ}), row={row}");
+									}
+								}
+								usedRandomMove = true;
+							}
+						}
 
+						if (!usedRandomMove) {
+							// 空マス移動が不可能またはランダム移動の回数制限超過の場合、
+							// BFSで目的の色に向かいリセット
+							if (isDebugPlan4) {
+								Console.WriteLine("  No valid empty cell or threshold reached - using BFS to reach target color then reset...");
+							}
+
+							byte bfsTargetColor = neededColors[0];
+							var bfsQueue = new Queue<(int i, int j)>();
+							var bfsVisited = new bool[n, n];
+							var bfsPrev = new (int pi, int pj, Direction4 fromDir)[n, n];
+
+							bfsVisited[hi, hj] = true;
+							{
+								var (bfsBackI, bfsBackJ) = lastDir.Reverse().Move(hi, hj);
+								if ((uint)bfsBackI < n && (uint)bfsBackJ < n) bfsVisited[bfsBackI, bfsBackJ] = true;
+							}
+							bfsQueue.Enqueue((hi, hj));
+
+							// Fisher-Yatesシャッフルで移動順をランダム化
+							var bfsDirs = new[] { Direction4.D, Direction4.L, Direction4.U, Direction4.R };
+							for (int bfsK = bfsDirs.Length - 1; bfsK > 0; bfsK--) {
+								int bfsSwap = rnd.Next(bfsK + 1);
+								(bfsDirs[bfsK], bfsDirs[bfsSwap]) = (bfsDirs[bfsSwap], bfsDirs[bfsK]);
+							}
+
+							int bfsFoundI = -1, bfsFoundJ = -1;
+							while (bfsQueue.Count > 0) {
+								var (bfsCi, bfsCj) = bfsQueue.Dequeue();
+								if ((bfsCi, bfsCj) != (hi, hj) && state.Esas[bfsCi, bfsCj] == bfsTargetColor) {
+									bfsFoundI = bfsCi;
+									bfsFoundJ = bfsCj;
+									break;
+								}
+								foreach (var bfsDir in bfsDirs) {
+									var (bfsNi, bfsNj) = bfsDir.Move(bfsCi, bfsCj);
+									if ((uint)bfsNi >= n || (uint)bfsNj >= n) continue;
+									if (bfsNi < row) continue;
+									if (state.WillBites[bfsNi, bfsNj]) continue;
+									if (bfsVisited[bfsNi, bfsNj]) continue;
+									bfsVisited[bfsNi, bfsNj] = true;
+									bfsPrev[bfsNi, bfsNj] = (bfsCi, bfsCj, bfsDir);
+									bfsQueue.Enqueue((bfsNi, bfsNj));
+								}
+							}
+
+							bool movedForReset = false;
+							if (bfsFoundI >= 0) {
+								var bfsPath = new Stack<Direction4>();
+								int bfsTi = bfsFoundI, bfsTj = bfsFoundJ;
+								while ((bfsTi, bfsTj) != (hi, hj)) {
+									var (bfsPi, bfsPj, bfsMoveDir) = bfsPrev[bfsTi, bfsTj];
+									bfsPath.Push(bfsMoveDir);
+									(bfsTi, bfsTj) = (bfsPi, bfsPj);
+								}
+								if (isDebugPlan4) {
+									Console.WriteLine($"  BFS found path (length={bfsPath.Count}), following...");
+								}
+								while (bfsPath.Count > 0) {
+									state.Move(bfsPath.Pop());
+								}
+								movedForReset = true;
+							} else {
+								// BFSも失敗した場合、任意の方向へ移動
+								var allDirs = new List<Direction4>();
+								foreach (var dir in Direction4Extensions.ForEach4()) {
+									if (dir.Reverse() == lastDir) continue;
+									var (ni, nj) = dir.Move(hi, hj);
+									if ((uint)ni < n && (uint)nj < n && ni >= row) {
+										allDirs.Add(dir);
+									}
+								}
+								if (allDirs.Count > 0) {
+									state.Move(allDirs[rnd.Next(allDirs.Count)]);
+									movedForReset = true;
+								}
+							}
+
+							if (movedForReset) {
 								// Borosの長さが5になるまで胴体を噛み続ける
 								while (state.Boros.Count > 5) {
 									(hi, hj) = state.Head;
@@ -631,7 +698,6 @@ public class Program
 										}
 									}
 								}
-								// 噛み付いてリセットしたので、targetFromBackもリセット
 								if (isDebugPlan4) {
 									var (checkI, checkJ) = state.Head;
 									Console.WriteLine($"  Body bite reset complete: targetFromBack {targetFromBack} -> 0, Head=({checkI},{checkJ})");
@@ -1044,7 +1110,7 @@ public class Program
 		{
 			// 現在の経路を評価（より良い経路なら更新）
 			if (collectedIndex > bestCollected ||
-				(collectedIndex == bestCollected && currentPath.Count > 0 && currentPath.Count < bestSteps)) {
+				(collectedIndex > 0 && collectedIndex == bestCollected && currentPath.Count > 0 && currentPath.Count < bestSteps)) {
 				bestCollected = collectedIndex;
 				bestSteps = currentPath.Count;
 				bestPath = currentPath.ToArray();
