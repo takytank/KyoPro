@@ -59,11 +59,11 @@ public class Program
 
 		var input = new Input(io, isDebug);
 		var info = new Information();
-		Zob.Initialize(rnd, input);
+		var zob = new Zob(rnd, input);
 
 		int limit = 1500;
 
-		var best = Plan4(rnd, sw, isDebug, input, info, 10000);
+		var best = Plan4(rnd, sw, isDebug, input, info, 10000, zob);
 		long bestScore = best.Score;
 		info.P = 4;
 
@@ -75,7 +75,7 @@ public class Program
 			}
 
 			++info.Loop;
-			var temp = Plan2(rnd, sw, isDebug, input, info, maxOp);
+			var temp = Plan2(rnd, sw, isDebug, input, info, maxOp, zob);
 			var tempScore = temp.Score;
 			if (tempScore < bestScore) {
 				bestScore = tempScore;
@@ -94,7 +94,7 @@ public class Program
 			}
 
 			++info.Loop;
-			var temp = Plan3(rnd, sw, isDebug, input, info, maxOp, out int maxStep);
+			var temp = Plan3(rnd, sw, isDebug, input, info, maxOp, zob, out int maxStep);
 			var tempScore = temp.Score;
 			if (tempScore < bestScore) {
 				bestScore = tempScore;
@@ -122,7 +122,10 @@ public class Program
 
 		if (isDebug) {
 			// Move/Undoの正しさを検証
-			ValidateMoveUndo(input, rnd);
+			ValidateMoveUndo(input, rnd, zob);
+
+			// キャッシュ統計を出力
+			zob.PrintCacheStats();
 		}
 
 		return (input, info);
@@ -158,9 +161,9 @@ public class Program
 		}
 	}
 
-	static void ValidateMoveUndo(Input input, Random rnd)
+	static void ValidateMoveUndo(Input input, Random rnd, Zob zob)
 	{
-		var state = new State(true, input);
+		var state = new State(true, input, zob);
 		int n = input.N;
 
 		// ランダムに100回Move→Undoを実行して状態が完全に復元されることを確認
@@ -278,9 +281,9 @@ public class Program
 		}
 	}
 
-	static State Plan1(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
+	static State Plan1(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, Zob zob)
 	{
-		var state = new State(isDebug, input);
+		var state = new State(isDebug, input, zob);
 
 		for (int j = 0; j < input.N; j++) {
 			if (j % 2 == 0) {
@@ -301,9 +304,9 @@ public class Program
 		return state;
 	}
 
-	static State Plan2(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int max)
+	static State Plan2(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int max, Zob zob)
 	{
-		var state = new State(isDebug, input);
+		var state = new State(isDebug, input, zob);
 
 		State best = state.Clone();
 		var (bestScore, _, _) = state.Calculate();
@@ -331,9 +334,9 @@ public class Program
 		return best;
 	}
 
-	static State Plan3(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int max, out int maxStep)
+	static State Plan3(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int max, Zob zob, out int maxStep)
 	{
-		var state = new State(isDebug, input);
+		var state = new State(isDebug, input, zob);
 
 		State best = state.Clone();
 		var (bestScore, _, _) = state.Calculate();
@@ -348,7 +351,7 @@ public class Program
 					neededColors[i] = (byte)input.D[state.Colors.Count + i];
 				}
 
-				var path = FindBestPathDFS3(state, input, neededColors.ToArray(), maxStep, -1);
+				var path = FindBestPathDFS4(state, input, neededColors.ToArray(), maxStep, zob, -1);
 				if (path is not null) {
 					isFound = true;
 					foreach (var dir in path) {
@@ -381,10 +384,10 @@ public class Program
 		return best;
 	}
 
-	static State Plan4(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int maxOp)
+	static State Plan4(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int maxOp, Zob zob)
 	{
 		bool isDebugPlan4 = false; // Plan4のデバッグ出力フラグ（一時的にtrue）
-		var state = new State(isDebug, input);
+		var state = new State(isDebug, input, zob);
 		int n = input.N;
 		int m = input.M;
 
@@ -1069,9 +1072,9 @@ public class Program
 		return state;
 	}
 
-	static State Plan9(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
+	static State Plan9(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, Zob zob)
 	{
-		var state = new State(isDebug, input);
+		var state = new State(isDebug, input, zob);
 		State best = state.Clone();
 		long bestScore = best.Score;
 
@@ -1534,6 +1537,46 @@ public class Program
 	}
 
 	/// <summary>
+	/// DFSで指定歩数先まで探索し、必要な色を最も多く（同数なら最短歩数で）拾える経路を返す（キャッシュ版）
+	/// </summary>
+	/// <remarks>
+	/// FindBestPathDFS3との違い：
+	/// - キャッシュを使用して同じ探索を避ける
+	/// - キャッシュキーは (state.Hash, neededColorsHash) のペア
+	/// - maxDepth ごとにキャッシュ配列を保持
+	/// </remarks>
+	/// <param name="state">現在の状態（Move/Undoで変更される）</param>
+	/// <param name="input">入力情報</param>
+	/// <param name="neededColors">必要な色の配列（順序通りに拾う必要がある）</param>
+	/// <param name="maxDepth">探索する最大歩数</param>
+	/// <param name="avoidRowsBelow">この行番号以下には侵入しない（既に配置済みの行を避ける）</param>
+	/// <returns>最適な移動経路。1つも拾えない場合はnull</returns>
+	static Direction4[] FindBestPathDFS4(State state, Input input, byte[] neededColors, int maxDepth, Zob zob, int avoidRowsBelow = -1)
+	{
+		// neededColors のハッシュを計算
+		int neededHash = 0;
+		for (int i = 0; i < neededColors.Length; i++) {
+			neededHash = neededHash * 31 + neededColors[i];
+		}
+
+		// キャッシュキー（Plan3はavoidRowsBelow=-1固定なので不要）
+		var cacheKey = (state.Hash, neededHash);
+
+		// キャッシュから結果を取得
+		if (zob.TryGetCache(maxDepth, cacheKey, out var cachedResult)) {
+			return cachedResult;
+		}
+
+		// キャッシュミス：通常の DFS3 を実行
+		var result = FindBestPathDFS3(state, input, neededColors, maxDepth, avoidRowsBelow);
+
+		// 結果をキャッシュに保存
+		zob.AddCache(maxDepth, cacheKey, result);
+
+		return result;
+	}
+
+	/// <summary>
 	/// DFSで指定歩数先まで探索し、必要な色との一致数が最も多い経路を返す（制約緩和版）
 	/// </summary>
 	/// <remarks>
@@ -1752,14 +1795,23 @@ public class Program
 	}
 }
 
-public static class Zob
+public class Zob
 {
-	public static long[,,] Esa { get; private set; }
-	public static long[,] Head { get; private set; }
-	public static long[,] Hebi { get; private set; }
-	public static long[,] Color { get; private set; }
+	public long[,,] Esa { get; private set; }
+	public long[,] Head { get; private set; }
+	public long[,] Hebi { get; private set; }
+	public long[,] Color { get; private set; }
+	public long[] Dir { get; private set; }
 
-	public static void Initialize(Random rnd, Input input)
+	// DFS キャッシュ（maxDepth ごとに配列を保持、最大16まで）
+	private Dictionary<(long stateHash, int neededHash), Direction4[]>[] _dfsCache =
+		new Dictionary<(long, int), Direction4[]>[16];
+
+	// キャッシュ統計
+	private long _dfsCacheHits = 0;
+	private long _dfsCacheMisses = 0;
+
+	public Zob(Random rnd, Input input)
 	{
 		int n = input.N;
 		int m = input.M;
@@ -1784,6 +1836,48 @@ public static class Zob
 			for (int k = 0; k < c + 1; k++) {
 				Color[i, k] = rnd.NextInt64();
 			}
+		}
+
+		// HeadDir用のハッシュ（N, D, L, U, R の5つ）
+		Dir = new long[5];
+		for (int i = 0; i < 5; i++) {
+			Dir[i] = rnd.NextInt64();
+		}
+	}
+
+	public bool TryGetCache(int maxDepth, (long stateHash, int neededHash) key, out Direction4[] result)
+	{
+		if (maxDepth < _dfsCache.Length && _dfsCache[maxDepth] != null) {
+			if (_dfsCache[maxDepth].TryGetValue(key, out result)) {
+				_dfsCacheHits++;
+				return true;
+			}
+		}
+		_dfsCacheMisses++;
+		result = null;
+		return false;
+	}
+
+	public void AddCache(int maxDepth, (long stateHash, int neededHash) key, Direction4[] value)
+	{
+		const int MAX_CACHE_SIZE = 100000;
+		if (maxDepth < _dfsCache.Length) {
+			if (_dfsCache[maxDepth] == null) {
+				_dfsCache[maxDepth] = new Dictionary<(long, int), Direction4[]>();
+			}
+
+			if (_dfsCache[maxDepth].Count < MAX_CACHE_SIZE) {
+				_dfsCache[maxDepth][key] = value;
+			}
+		}
+	}
+
+	public void PrintCacheStats()
+	{
+		long total = _dfsCacheHits + _dfsCacheMisses;
+		if (total > 0) {
+			double hitRate = (double)_dfsCacheHits / total * 100.0;
+			Console.WriteLine($"DFS Cache Stats: Hits={_dfsCacheHits}, Misses={_dfsCacheMisses}, HitRate={hitRate:F2}%");
 		}
 	}
 }
@@ -1850,6 +1944,7 @@ public class State
 {
 	private readonly Input _input;
 	private readonly bool _isDebug;
+	private readonly Zob _zob;
 
 	public List<Direction4> Ops { get; } = [];
 	public Deque<(int i, int j)> Boros { get; }
@@ -1871,10 +1966,11 @@ public class State
 	public (int i, int j) Head => Boros.Front;
 	public Direction4 HeadDir => Ops.Count > 0 ? Ops[^1] : Direction4.D;
 
-	public State(bool isDebug, Input input)
+	public State(bool isDebug, Input input, Zob zob)
 	{
 		_isDebug = isDebug;
 		_input = input;
+		_zob = zob;
 
 		int n = input.N;
 		WillBites = new Array2D<bool>(n, n);
@@ -1895,18 +1991,21 @@ public class State
 			}
 
 			if (i == 4) {
-				Hash ^= Zob.Head[i, 0];
+				Hash ^= _zob.Head[i, 0];
 			} else {
-				Hash ^= Zob.Hebi[i, 0];
+				Hash ^= _zob.Hebi[i, 0];
 			}
 
-			Hash ^= Zob.Color[i, 1];
+			Hash ^= _zob.Color[i, 1];
 		}
+
+		// 初期状態の HeadDir (Direction4.D) を Hash に含める
+		Hash ^= _zob.Dir[Direction4.D.ToIndex4()];
 
 		for (int i = 0; i < n; i++) {
 			for (int j = 0; j < n; j++) {
 				Esas[i, j] = (byte)input.F[i, j];
-				Hash ^= Zob.Esa[i, j, Esas[i, j]];
+				Hash ^= _zob.Esa[i, j, Esas[i, j]];
 			}
 		}
 
@@ -1919,6 +2018,7 @@ public class State
 	{
 		_input = src._input;
 		_isDebug = src._isDebug;
+		_zob = src._zob;
 		Ops.AddRange(src.Ops);
 		Boros = src.Boros.Clone();
 		Colors = src.Colors.Clone();
@@ -2045,7 +2145,11 @@ public class State
 			WillBites[bbi, bbj] = false;
 		}
 
+		// 古い HeadDir を除外して新しい HeadDir を追加
+		var oldDir = HeadDir;
 		Ops.Add(dir);
+		Hash ^= _zob.Dir[oldDir.ToIndex4()];
+		Hash ^= _zob.Dir[dir.ToIndex4()];
 
 		return new UndoInfo(dir, state, (ni, nj), (hi, hj),
 			oldE, oldK, oldNoErrorCount, oldHash,
@@ -2151,11 +2255,11 @@ public class State
 	{
 		// 頭が次の位置へ移動
 		Boros.PushFront((ni, nj));
-		Hash ^= Zob.Head[ni, nj];
+		Hash ^= _zob.Head[ni, nj];
 		// 元々頭があった位置が胴体になる
 		WillBites[hi, hj] = true;
-		Hash ^= Zob.Head[hi, hj];
-		Hash ^= Zob.Hebi[ni, nj];
+		Hash ^= _zob.Head[hi, hj];
+		Hash ^= _zob.Hebi[ni, nj];
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
@@ -2163,7 +2267,7 @@ public class State
 	{
 		// 尻尾を抜く
 		var (ti, tj) = Boros.PopBack();
-		Hash ^= Zob.Hebi[ti, tj];
+		Hash ^= _zob.Hebi[ti, tj];
 		return (ti, tj);
 	}
 
@@ -2173,8 +2277,8 @@ public class State
 		byte color = Esas[ni, nj];
 		Colors.PushBack(color);
 		Esas[ni, nj] = 0;
-		Hash ^= Zob.Esa[ni, nj, 0];
-		Hash ^= Zob.Esa[ni, nj, color];
+		Hash ^= _zob.Esa[ni, nj, 0];
+		Hash ^= _zob.Esa[ni, nj, color];
 
 		return color;
 	}
@@ -2183,10 +2287,10 @@ public class State
 	private int PopTailColor(int ti, int tj)
 	{
 		var color = Colors.PopBack();
-		Hash ^= Zob.Color[Colors.Count, color];
+		Hash ^= _zob.Color[Colors.Count, color];
 		Esas[ti, tj] = color;
-		Hash ^= Zob.Esa[ti, tj, 0];
-		Hash ^= Zob.Esa[ti, tj, color];
+		Hash ^= _zob.Esa[ti, tj, 0];
+		Hash ^= _zob.Esa[ti, tj, color];
 
 		return color;
 	}
