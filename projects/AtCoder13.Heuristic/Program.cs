@@ -15,7 +15,7 @@ public class Program
 	static void Main()
 	{
 		HeuristicHelper.RunCases(
-			runCaseCount: 1000,
+			runCaseCount: 300,
 			testCaseCount: 50,
 			isParallel: false,
 			i => Run(i),
@@ -60,71 +60,51 @@ public class Program
 		var info = new Information();
 		Zob.Initialize(rnd, input);
 
-		var best = Plan4(rnd, sw, isDebug, input, info);
+		int limit = 1500;
+
+		var best = Plan4(rnd, sw, isDebug, input, info, 10000);
 		long bestScore = best.Score;
 		info.P = 4;
 
 		int maxOp = best.Ops.Count;
-		/*
-		{
-			for (int l = 0; l < 100; l++) {
-				var temp = Plan2(rnd, sw, isDebug, input, info, maxOp);
-				var tempScore = temp.Score;
-				if (tempScore < bestScore) {
-					bestScore = tempScore;
-					best = temp;
-					info.P = 2;
-					++info.Up;
-					if (temp.E == 0 && temp.K == input.M) {
-						maxOp.UpdateMin(temp.Ops.Count);
-					}
-				}
-			}
-		}*/
 
-		/*
-		{
-			for (int l = 0; l < 100; l++) {
-				var temp = Plan2(rnd, sw, isDebug, input, info, 1000);
-				var tempScore = temp.Score;
-				if (tempScore < bestScore) {
-					bestScore = tempScore;
-					best = temp;
-					info.P = 2;
-				}
+		for (int l = 0; l < 100; l++) {
+			if (sw.ElapsedMilliseconds >= limit) {
+				break;
 			}
 
-			for (int l = 0; l < 10; l++) {
-				var temp = Plan2(rnd, sw, isDebug, input, info, 10000);
-				var tempScore = temp.Score;
-				if (tempScore < bestScore) {
-					bestScore = tempScore;
-					best = temp;
-					info.P = 2;
+			++info.Loop;
+			var temp = Plan2(rnd, sw, isDebug, input, info, maxOp);
+			var tempScore = temp.Score;
+			if (tempScore < bestScore) {
+				bestScore = tempScore;
+				best = temp;
+				info.P = 2;
+				++info.Up;
+				if (temp.E == 0 && temp.K == input.M) {
+					maxOp.UpdateMin(temp.Ops.Count);
 				}
 			}
+		}
 
-			{
-				var temp = Plan2(rnd, sw, isDebug, input, info, 100000);
-				var tempScore = temp.Score;
-				if (tempScore < bestScore) {
-					bestScore = tempScore;
-					best = temp;
-					info.P = 2;
-				}
+		for (int l = 0; l < 100; l++) {
+			if (sw.ElapsedMilliseconds >= limit) {
+				break;
 			}
-		}*/
 
-		/*
-		{
-			var temp = Plan3(rnd, sw, isDebug, input, info);
+			++info.Loop;
+			var temp = Plan3(rnd, sw, isDebug, input, info, maxOp);
 			var tempScore = temp.Score;
 			if (tempScore < bestScore) {
 				bestScore = tempScore;
 				best = temp;
 				info.P = 3;
+				++info.Up;
+				if (temp.E == 0 && temp.K == input.M) {
+					maxOp.UpdateMin(temp.Ops.Count);
+				}
 			}
-		}*/
+		}
 
 		input.Output(best);
 		info.T = best.Ops.Count;
@@ -335,7 +315,7 @@ public class Program
 				//info.KamiCount = 0;
 			}
 
-			var (tempScore, _, _) = state.Calculate();
+			long tempScore = state.Score;
 			if (tempScore < bestScore) {
 				bestScore = tempScore;
 				best = state.Clone();
@@ -349,77 +329,56 @@ public class Program
 		return best;
 	}
 
-	static State Plan3(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
+	static State Plan3(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int max)
 	{
 		var state = new State(isDebug, input);
+
 		State best = state.Clone();
-		long bestScore = best.Score;
+		var (bestScore, _, _) = state.Calculate();
 
-		int depth = 500;
-		int width = 500;
-		int n = input.N;
+		while (state.Ops.Count <= max) {
+			bool isFound = false;
+			if (state.NoErrorCount == state.Colors.Count) {
+				int moveMax = Math.Min(8, input.M - state.Colors.Count);
+				var neededColors = new byte[moveMax];
+				for (int i = 0; i < moveMax; i++) {
+					neededColors[i] = (byte)input.D[state.Colors.Count + i];
+				}
 
-		// 使用する時は全部使用するので、評価の悪い方を優先するようにして、悪いtopを抜いていく。
-		var que = new HeapQueue<(State s, long e), long>(x => x.e);
-		que.Enqueue((state, state.Evaluate()));
-		var stack = new Stack<State>();
-		var set = new HashSet<long> {
-			state.Hash
-		};
-		for (int i = 0; i < depth; i++) {
-			// 良いやつの方を先に処理して、悪いやつはそもそもキューに入れないようにしたい。
-			// 一回全部抜く
-			while (que.Count > 0) {
-				stack.Push(que.Dequeue().s);
-			}
-
-			var nextQue = new HeapQueue<(State s, long e), long>(x => x.e);
-			while (stack.Count > 0) {
-				var tag = stack.Pop();
-				var (hi, hj) = tag.Head;
-				var lastDir = tag.HeadDir;
-				foreach (var dir in Direction4Extensions.ForEach4()) {
-					if (dir.Reverse() == lastDir) {
-						continue;
-					}
-
-					var (ni, nj) = dir.Move(hi, hj);
-					if ((uint)ni < n && (uint)nj < n) {
-						var nex = tag.Clone();
-						nex.Move(dir);
-						var hash = nex.Hash;
-						if (set.Contains(hash)) {
-							continue;
-						}
-
-						set.Add(hash);
-
-						long eval = nex.Evaluate();
-						long tempScore = nex.Score;
-						if (tempScore < bestScore) {
-							bestScore = tempScore;
-							best = nex;
-						}
-
-						if (nextQue.Count == width) {
-							if (nextQue.Top.e > eval) {
-								nextQue.Dequeue();
-								nextQue.Enqueue((nex, eval));
-							}
-						} else {
-							nextQue.Enqueue((nex, eval));
-						}
+				var path = FindBestPathDFS(state, input, neededColors.ToArray(), 8, -1);
+				if (path is not null) {
+					isFound = true;
+					foreach (var dir in path) {
+						state.Move(dir);
 					}
 				}
 			}
 
-			que = nextQue;
+			if (isFound == false) {
+				var dir = FindNextStepGreedy2(rnd, input, info, state);
+				var undo = state.Move(dir);
+				if (undo.State == 0) {
+					info.KamiCount++;
+				} else if (info.KamiCount > 10 && undo.State == 1) {
+					//info.KamiCount = 0;
+				}
+			}
+
+			long tempScore = state.Score;
+			if (tempScore < bestScore) {
+				bestScore = tempScore;
+				best = state.Clone();
+			}
+
+			if (state.Colors.Count == input.M) {
+				break;
+			}
 		}
 
 		return best;
 	}
 
-	static State Plan4(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
+	static State Plan4(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int maxOp)
 	{
 		bool isDebugPlan4 = false; // Plan4のデバッグ出力フラグ（一時的にtrue）
 		var state = new State(isDebug, input);
@@ -455,7 +414,7 @@ public class Program
 				Console.WriteLine();
 			}
 
-			while (retryCount < maxRetries && state.Ops.Count < 50000) {
+			while (retryCount < maxRetries && state.Ops.Count < maxOp) {
 				// Step 1: この行用のN色を集める（既に配置した行は避ける）
 				int consecutiveFailures = 0; // DFSの連続失敗回数
 				int maxConsecutiveFailures = 100; // 100回連続失敗したら諦める
@@ -731,7 +690,7 @@ public class Program
 					}
 
 					// 無限ループ防止
-					if (state.Ops.Count > 50000) break;
+					if (state.Ops.Count > maxOp) break;
 
 					if (isDebugPlan4) {
 						Console.WriteLine();
@@ -1105,6 +1064,76 @@ public class Program
 		}
 
 		return state;
+	}
+
+	static State Plan9(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info)
+	{
+		var state = new State(isDebug, input);
+		State best = state.Clone();
+		long bestScore = best.Score;
+
+		int depth = 500;
+		int width = 500;
+		int n = input.N;
+
+		// 使用する時は全部使用するので、評価の悪い方を優先するようにして、悪いtopを抜いていく。
+		var que = new HeapQueue<(State s, long e), long>(x => x.e);
+		que.Enqueue((state, state.Evaluate()));
+		var stack = new Stack<State>();
+		var set = new HashSet<long> {
+			state.Hash
+		};
+		for (int i = 0; i < depth; i++) {
+			// 良いやつの方を先に処理して、悪いやつはそもそもキューに入れないようにしたい。
+			// 一回全部抜く
+			while (que.Count > 0) {
+				stack.Push(que.Dequeue().s);
+			}
+
+			var nextQue = new HeapQueue<(State s, long e), long>(x => x.e);
+			while (stack.Count > 0) {
+				var tag = stack.Pop();
+				var (hi, hj) = tag.Head;
+				var lastDir = tag.HeadDir;
+				foreach (var dir in Direction4Extensions.ForEach4()) {
+					if (dir.Reverse() == lastDir) {
+						continue;
+					}
+
+					var (ni, nj) = dir.Move(hi, hj);
+					if ((uint)ni < n && (uint)nj < n) {
+						var nex = tag.Clone();
+						nex.Move(dir);
+						var hash = nex.Hash;
+						if (set.Contains(hash)) {
+							continue;
+						}
+
+						set.Add(hash);
+
+						long eval = nex.Evaluate();
+						long tempScore = nex.Score;
+						if (tempScore < bestScore) {
+							bestScore = tempScore;
+							best = nex;
+						}
+
+						if (nextQue.Count == width) {
+							if (nextQue.Top.e > eval) {
+								nextQue.Dequeue();
+								nextQue.Enqueue((nex, eval));
+							}
+						} else {
+							nextQue.Enqueue((nex, eval));
+						}
+					}
+				}
+			}
+
+			que = nextQue;
+		}
+
+		return best;
 	}
 
 	/// <summary>
