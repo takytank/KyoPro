@@ -15,7 +15,7 @@ public class Program
 	static void Main()
 	{
 		HeuristicHelper.RunCases(
-			runCaseCount: 300,
+			runCaseCount: 100,
 			testCaseCount: 50,
 			isParallel: false,
 			i => Run(i),
@@ -33,6 +33,7 @@ public class Program
 						$"E={info.E:d3}",
 						$"K={info.K:d3}",
 						$"P={info.P:d2}",
+						$"S={info.S:d2}",
 						$"score={info.Score:d7}",
 						$"same={info.SameScore}",
 						$"elapsed={info.Elapsed:d4}",
@@ -93,13 +94,14 @@ public class Program
 			}
 
 			++info.Loop;
-			var temp = Plan3(rnd, sw, isDebug, input, info, maxOp);
+			var temp = Plan3(rnd, sw, isDebug, input, info, maxOp, out int maxStep);
 			var tempScore = temp.Score;
 			if (tempScore < bestScore) {
 				bestScore = tempScore;
 				best = temp;
 				info.P = 3;
 				++info.Up;
+				info.S = maxStep;
 				if (temp.E == 0 && temp.K == input.M) {
 					maxOp.UpdateMin(temp.Ops.Count);
 				}
@@ -329,23 +331,24 @@ public class Program
 		return best;
 	}
 
-	static State Plan3(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int max)
+	static State Plan3(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int max, out int maxStep)
 	{
 		var state = new State(isDebug, input);
 
 		State best = state.Clone();
 		var (bestScore, _, _) = state.Calculate();
 
+		maxStep = rnd.Next(8, 9);
 		while (state.Ops.Count <= max) {
 			bool isFound = false;
 			if (state.NoErrorCount == state.Colors.Count) {
-				int moveMax = Math.Min(8, input.M - state.Colors.Count);
+				int moveMax = Math.Min(maxStep, input.M - state.Colors.Count);
 				var neededColors = new byte[moveMax];
 				for (int i = 0; i < moveMax; i++) {
 					neededColors[i] = (byte)input.D[state.Colors.Count + i];
 				}
 
-				var path = FindBestPathDFS(state, input, neededColors.ToArray(), 8, -1);
+				var path = FindBestPathDFS3(state, input, neededColors.ToArray(), maxStep, -1);
 				if (path is not null) {
 					isFound = true;
 					foreach (var dir in path) {
@@ -457,7 +460,7 @@ public class Program
 					if (neededColors.Count == 0) break;
 
 					// FindBestPathDFSで経路を探索（既に配置した行は避ける）
-					var path = FindBestPathDFS(state, input, neededColors.ToArray(), 8, row - 1);
+					var path = FindBestPathDFS3(state, input, neededColors.ToArray(), 8, row - 1);
 
 					if (isDebugPlan4) {
 						if (path != null && path.Length > 0) {
@@ -1175,6 +1178,303 @@ public class Program
 
 			var (hi, hj) = state.Head;
 			var lastDir = state.HeadDir;
+
+			foreach (var dir in Direction4Extensions.ForEach4()) {
+				// Uターン禁止
+				if (dir.Reverse() == lastDir) {
+					continue;
+				}
+
+				var (ni, nj) = dir.Move(hi, hj);
+
+				// 範囲チェック
+				if ((uint)ni >= n || (uint)nj >= n) {
+					continue;
+				}
+
+				// 既に配置済みの行には侵入しない
+				if (ni <= avoidRowsBelow) {
+					continue;
+				}
+
+				// 胴体への噛み付き禁止
+				if (state.WillBites[ni, nj]) {
+					continue;
+				}
+
+				// 餌がある場合、必要な色かチェック
+				byte esa = state.Esas[ni, nj];
+				if (esa > 0) {
+					byte neededColor = neededColors[collectedIndex];
+					if (esa != neededColor) {
+						// 必要な色以外の餌は拾わない
+						continue;
+					}
+				}
+
+				// Move実行
+				var undo = state.Move(dir);
+				currentPath.Add(dir);
+
+				int newCollectedIndex = collectedIndex;
+				if (undo.State == 1) {
+					// 餌を食べた
+					newCollectedIndex++;
+				}
+
+				// 再帰探索
+				DFS(depth + 1, currentPath, newCollectedIndex);
+
+				// Undo
+				currentPath.RemoveAt(currentPath.Count - 1);
+				state.Undo(undo);
+			}
+		}
+
+		DFS(0, new List<Direction4>(), 0);
+
+		return bestCollected > 0 ? bestPath : null;
+	}
+
+	/// <summary>
+	/// DFSで指定歩数先まで探索し、必要な色を最も多く（同数なら最短歩数で）拾える経路を返す（高速化版）
+	/// </summary>
+	/// <remarks>
+	/// FindBestPathDFSとの違い：
+	/// - 距離pruning: 次の必要な色に残り手数内で届かないノードを枝刈り
+	/// - Move ordering: 次の必要な色に近い方向を優先して試す
+	/// </remarks>
+	/// <param name="state">現在の状態（Move/Undoで変更される）</param>
+	/// <param name="input">入力情報</param>
+	/// <param name="neededColors">必要な色の配列（順序通りに拾う必要がある）</param>
+	/// <param name="maxDepth">探索する最大歩数</param>
+	/// <param name="avoidRowsBelow">この行番号以下には侵入しない（既に配置済みの行を避ける）</param>
+	/// <returns>最適な移動経路。1つも拾えない場合はnull</returns>
+	static Direction4[] FindBestPathDFS2(State state, Input input, byte[] neededColors, int maxDepth, int avoidRowsBelow = -1)
+	{
+		int n = input.N;
+
+		// 距離pruning用: 色ごとの餌位置を事前計算（DFS中はEsasを確認して存在チェック）
+		var foodsByColor = new List<(int i, int j)>[input.C + 1];
+		for (int col = 0; col <= input.C; col++) {
+			foodsByColor[col] = [];
+		}
+		for (int di = 0; di < n; di++) {
+			for (int dj = 0; dj < n; dj++) {
+				byte esa = state.Esas[di, dj];
+				if (esa > 0) {
+					foodsByColor[esa].Add((di, dj));
+				}
+			}
+		}
+
+		// (fi, fj) から color の餌までの最小マンハッタン距離を返す
+		int CalcMinManhattan(int fi, int fj, byte color)
+		{
+			int min = int.MaxValue;
+			foreach (var (pi, pj) in foodsByColor[color]) {
+				if (state.Esas[pi, pj] == color) {
+					int dist = Math.Abs(fi - pi) + Math.Abs(fj - pj);
+					if (dist < min) {
+						min = dist;
+						if (dist <= 1) break;
+					}
+				}
+			}
+			return min;
+		}
+
+		Direction4[] bestPath = null;
+		int bestCollected = 0;
+		int bestSteps = int.MaxValue;
+
+		void DFS(int depth, List<Direction4> currentPath, int collectedIndex)
+		{
+			// 現在の経路を評価（より良い経路なら更新）
+			if (collectedIndex > bestCollected ||
+				(collectedIndex > 0 && collectedIndex == bestCollected && currentPath.Count > 0 && currentPath.Count < bestSteps)) {
+				bestCollected = collectedIndex;
+				bestSteps = currentPath.Count;
+				bestPath = currentPath.ToArray();
+			}
+
+			// 深さ上限チェック
+			if (depth >= maxDepth) {
+				return;
+			}
+
+			// 必要な色を全て拾い終えたら終了
+			if (collectedIndex >= neededColors.Length) {
+				return;
+			}
+
+			var (hi, hj) = state.Head;
+			var lastDir = state.HeadDir;
+
+			// 距離pruning: 次の必要な色に残り手数内で届かないなら枝刈り
+			int remaining = maxDepth - depth;
+			if (CalcMinManhattan(hi, hj, neededColors[collectedIndex]) > remaining) {
+				return;
+			}
+
+			// Move ordering: 有効な方向を収集し、次の必要な色に近い順にソートして試す
+			Span<Direction4> orderedDirs = stackalloc Direction4[4];
+			Span<int> dirScores = stackalloc int[4];
+			int dirCount = 0;
+
+			foreach (var dir in Direction4Extensions._delta4Dir) {
+				if (dir.Reverse() == lastDir) {
+					continue;
+				}
+
+				var (ni, nj) = dir.Move(hi, hj);
+
+				if ((uint)ni >= n || (uint)nj >= n) {
+					continue;
+				}
+
+				if (ni <= avoidRowsBelow) {
+					continue;
+				}
+
+				if (state.WillBites[ni, nj]) {
+					continue;
+				}
+
+				byte esa = state.Esas[ni, nj];
+				if (esa > 0 && esa != neededColors[collectedIndex]) {
+					continue;
+				}
+
+				// 移動先が目的の餌なら0、空マスなら次の必要色への距離をスコアとする
+				int score = esa == neededColors[collectedIndex]
+					? 0
+					: CalcMinManhattan(ni, nj, neededColors[collectedIndex]);
+
+				orderedDirs[dirCount] = dir;
+				dirScores[dirCount] = score;
+				dirCount++;
+			}
+
+			// insertion sort（最大4要素）
+			for (int ii = 1; ii < dirCount; ii++) {
+				var kd = orderedDirs[ii];
+				int ks = dirScores[ii];
+				int jj = ii - 1;
+				while (jj >= 0 && dirScores[jj] > ks) {
+					orderedDirs[jj + 1] = orderedDirs[jj];
+					dirScores[jj + 1] = dirScores[jj];
+					jj--;
+				}
+				orderedDirs[jj + 1] = kd;
+				dirScores[jj + 1] = ks;
+			}
+
+			for (int ii = 0; ii < dirCount; ii++) {
+				var dir = orderedDirs[ii];
+				var undo = state.Move(dir);
+				currentPath.Add(dir);
+
+				int newCollectedIndex = collectedIndex;
+				if (undo.State == 1) {
+					// 餌を食べた
+					newCollectedIndex++;
+				}
+
+				// 再帰探索
+				DFS(depth + 1, currentPath, newCollectedIndex);
+
+				// Undo
+				currentPath.RemoveAt(currentPath.Count - 1);
+				state.Undo(undo);
+			}
+		}
+
+		DFS(0, new List<Direction4>(), 0);
+
+		return bestCollected > 0 ? bestPath : null;
+	}
+
+	/// <summary>
+	/// DFSで指定歩数先まで探索し、必要な色を最も多く（同数なら最短歩数で）拾える経路を返す（距離pruning版）
+	/// </summary>
+	/// <remarks>
+	/// FindBestPathDFS2との違い：
+	/// - Move orderingは行わない
+	/// - 距離pruningのみ適用（次の必要な色に残り手数内で届かないノードを枝刈り）
+	/// </remarks>
+	/// <param name="state">現在の状態（Move/Undoで変更される）</param>
+	/// <param name="input">入力情報</param>
+	/// <param name="neededColors">必要な色の配列（順序通りに拾う必要がある）</param>
+	/// <param name="maxDepth">探索する最大歩数</param>
+	/// <param name="avoidRowsBelow">この行番号以下には侵入しない（既に配置済みの行を避ける）</param>
+	/// <returns>最適な移動経路。1つも拾えない場合はnull</returns>
+	static Direction4[] FindBestPathDFS3(State state, Input input, byte[] neededColors, int maxDepth, int avoidRowsBelow = -1)
+	{
+		int n = input.N;
+
+		// 距離pruning用: 色ごとの餌位置を事前計算（DFS中はEsasを確認して存在チェック）
+		var foodsByColor = new List<(int i, int j)>[input.C + 1];
+		for (int col = 0; col <= input.C; col++) {
+			foodsByColor[col] = [];
+		}
+		for (int di = 0; di < n; di++) {
+			for (int dj = 0; dj < n; dj++) {
+				byte esa = state.Esas[di, dj];
+				if (esa > 0) {
+					foodsByColor[esa].Add((di, dj));
+				}
+			}
+		}
+
+		// (fi, fj) から color の餌までの最小マンハッタン距離を返す
+		int CalcMinManhattan(int fi, int fj, byte color)
+		{
+			int min = int.MaxValue;
+			foreach (var (pi, pj) in foodsByColor[color]) {
+				if (state.Esas[pi, pj] == color) {
+					int dist = Math.Abs(fi - pi) + Math.Abs(fj - pj);
+					if (dist < min) {
+						min = dist;
+						if (dist <= 1) break;
+					}
+				}
+			}
+			return min;
+		}
+
+		Direction4[] bestPath = null;
+		int bestCollected = 0;
+		int bestSteps = int.MaxValue;
+
+		void DFS(int depth, List<Direction4> currentPath, int collectedIndex)
+		{
+			// 現在の経路を評価（より良い経路なら更新）
+			if (collectedIndex > bestCollected ||
+				(collectedIndex > 0 && collectedIndex == bestCollected && currentPath.Count > 0 && currentPath.Count < bestSteps)) {
+				bestCollected = collectedIndex;
+				bestSteps = currentPath.Count;
+				bestPath = currentPath.ToArray();
+			}
+
+			// 深さ上限チェック
+			if (depth >= maxDepth) {
+				return;
+			}
+
+			// 必要な色を全て拾い終えたら終了
+			if (collectedIndex >= neededColors.Length) {
+				return;
+			}
+
+			var (hi, hj) = state.Head;
+			var lastDir = state.HeadDir;
+
+			// 距離pruning: 次の必要な色に残り手数内で届かないなら枝刈り
+			int remaining = maxDepth - depth;
+			if (CalcMinManhattan(hi, hj, neededColors[collectedIndex]) > remaining) {
+				return;
+			}
 
 			foreach (var dir in Direction4Extensions.ForEach4()) {
 				// Uターン禁止
@@ -1952,6 +2252,7 @@ public class Information
 	public bool SameScore { get; set; } = false;
 
 	public int KamiCount { get; set; } = 0;
+	public int S { get; set; } = 8;
 }
 
 public class Input
