@@ -54,20 +54,38 @@ public class Program
 	static (Input input, Information info)
 		Run(int caseNumber)
 	{
-		var (isDebug, sw, rnd) = HeuristicHelper.Initialize();
+		var (isLocal, sw, rnd) = HeuristicHelper.Initialize();
 		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC063\tools\in\", caseNumber);
 
-		var input = new Input(io, isDebug);
+		var input = new Input(io, isLocal);
 		var info = new Information();
 		var zob = new Zob(rnd, input);
 
 		int limit = 1500;
 
-		var best = Plan4(rnd, sw, isDebug, input, info, 10000, zob);
+		var best = Plan4(rnd, sw, isLocal, input, info, 10000, zob);
 		long bestScore = best.Score;
 		info.P = 4;
 
 		int maxOp = best.Ops.Count;
+		for (int l = 0; l < 100; l++) {
+			if (sw.ElapsedMilliseconds >= limit) {
+				break;
+			}
+
+			++info.Loop;
+			var temp = Plan4(rnd, sw, isLocal, input, info, maxOp, zob);
+			var tempScore = temp.Score;
+			if (tempScore < bestScore) {
+				bestScore = tempScore;
+				best = temp;
+				info.P = 4;
+				++info.Up;
+				if (temp.E == 0 && temp.K == input.M) {
+					maxOp.UpdateMin(temp.Ops.Count);
+				}
+			}
+		}
 
 		for (int l = 0; l < 100; l++) {
 			if (sw.ElapsedMilliseconds >= limit) {
@@ -75,7 +93,7 @@ public class Program
 			}
 
 			++info.Loop;
-			var temp = Plan2(rnd, sw, isDebug, input, info, maxOp, zob);
+			var temp = Plan2(rnd, sw, isLocal, input, info, maxOp, zob);
 			var tempScore = temp.Score;
 			if (tempScore < bestScore) {
 				bestScore = tempScore;
@@ -94,7 +112,7 @@ public class Program
 			}
 
 			++info.Loop;
-			var temp = Plan3(rnd, sw, isDebug, input, info, maxOp, zob, out int maxStep);
+			var temp = Plan3(rnd, sw, isLocal, input, info, maxOp, zob, out int maxStep);
 			var tempScore = temp.Score;
 			if (tempScore < bestScore) {
 				bestScore = tempScore;
@@ -114,13 +132,13 @@ public class Program
 		info.K = input.M - info.K;
 		info.SameScore = info.Score == best.Score;
 
-		if (isDebug) {
+		if (isLocal) {
 			Validate(input, best);
 		}
 
 		info.Elapsed = sw.ElapsedMilliseconds;
 
-		if (isDebug) {
+		if (isLocal) {
 			// Move/Undoの正しさを検証
 			ValidateMoveUndo(input, rnd, zob);
 
@@ -281,9 +299,9 @@ public class Program
 		}
 	}
 
-	static State Plan1(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, Zob zob)
+	static State Plan1(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, Zob zob)
 	{
-		var state = new State(isDebug, input, zob);
+		var state = new State(isLocal, input, zob);
 
 		for (int j = 0; j < input.N; j++) {
 			if (j % 2 == 0) {
@@ -304,9 +322,9 @@ public class Program
 		return state;
 	}
 
-	static State Plan2(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int max, Zob zob)
+	static State Plan2(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, int max, Zob zob)
 	{
-		var state = new State(isDebug, input, zob);
+		var state = new State(isLocal, input, zob);
 
 		State best = state.Clone();
 		var (bestScore, _, _) = state.Calculate();
@@ -334,9 +352,9 @@ public class Program
 		return best;
 	}
 
-	static State Plan3(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int max, Zob zob, out int maxStep)
+	static State Plan3(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, int max, Zob zob, out int maxStep)
 	{
-		var state = new State(isDebug, input, zob);
+		var state = new State(isLocal, input, zob);
 
 		State best = state.Clone();
 		var (bestScore, _, _) = state.Calculate();
@@ -351,7 +369,7 @@ public class Program
 					neededColors[i] = (byte)input.D[state.Colors.Count + i];
 				}
 
-				var path = FindBestPathDFS4(state, input, neededColors.ToArray(), maxStep, zob, -1);
+				var path = FindBestPathDFS3(state, input, neededColors.ToArray(), maxStep, -1);
 				if (path is not null) {
 					isFound = true;
 					foreach (var dir in path) {
@@ -384,10 +402,10 @@ public class Program
 		return best;
 	}
 
-	static State Plan4(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, int maxOp, Zob zob)
+	static State Plan4(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, int maxOp, Zob zob)
 	{
 		bool isDebugPlan4 = false; // Plan4のデバッグ出力フラグ（一時的にtrue）
-		var state = new State(isDebug, input, zob);
+		var state = new State(isLocal, input, zob);
 		int n = input.N;
 		int m = input.M;
 
@@ -1072,9 +1090,9 @@ public class Program
 		return state;
 	}
 
-	static State Plan9(Random rnd, Stopwatch sw, bool isDebug, Input input, Information info, Zob zob)
+	static State Plan9(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, Zob zob)
 	{
-		var state = new State(isDebug, input, zob);
+		var state = new State(isLocal, input, zob);
 		State best = state.Clone();
 		long bestScore = best.Score;
 
@@ -1943,7 +1961,7 @@ public readonly struct UndoInfo
 public class State
 {
 	private readonly Input _input;
-	private readonly bool _isDebug;
+	private readonly bool _isLocal;
 	private readonly Zob _zob;
 
 	public List<Direction4> Ops { get; } = [];
@@ -1966,9 +1984,9 @@ public class State
 	public (int i, int j) Head => Boros.Front;
 	public Direction4 HeadDir => Ops.Count > 0 ? Ops[^1] : Direction4.D;
 
-	public State(bool isDebug, Input input, Zob zob)
+	public State(bool isLocal, Input input, Zob zob)
 	{
-		_isDebug = isDebug;
+		_isLocal = isLocal;
 		_input = input;
 		_zob = zob;
 
@@ -2017,7 +2035,7 @@ public class State
 	private State(State src)
 	{
 		_input = src._input;
-		_isDebug = src._isDebug;
+		_isLocal = src._isLocal;
 		_zob = src._zob;
 		Ops.AddRange(src.Ops);
 		Boros = src.Boros.Clone();
@@ -2369,10 +2387,10 @@ public class Input
 	public int[] D { get; }
 	public int[,] F { get; }
 
-	public Input(IOManager io, bool isDebug)
+	public Input(IOManager io, bool isLocal)
 	{
 		_io = io;
-		_isDebug = isDebug;
+		_isDebug = isLocal;
 
 		(N, M, C) = io.Int3();
 		D = io.ArrayInt(M);
@@ -3152,18 +3170,18 @@ public class HeuristicHelper
 #endif
 	}
 
-	public static (bool isDebug, Stopwatch sw, Random rnd) Initialize()
+	public static (bool isLocal, Stopwatch sw, Random rnd) Initialize()
 	{
 		var sw = new Stopwatch();
 		sw.Start();
 
-		bool isDebug = false;
+		bool isLocal = false;
 #if DEBUG
-		isDebug = true;
+		isLocal = true;
 #endif
 		var rnd = new Random(123456);
 
-		return (isDebug, sw, rnd);
+		return (isLocal, sw, rnd);
 	}
 
 	public static IOManager CreateIO(
