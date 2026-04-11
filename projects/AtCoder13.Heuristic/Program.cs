@@ -409,8 +409,9 @@ public class Program
 		int n = input.N;
 		int m = input.M;
 
-		// 何行配置できるか（最大N行、またはM個の色を全て配置できる行数）
-		int maxRows = Math.Min(n, (m + n - 1) / n);
+		// 何行配置できるか（最大N行、またはM-5個の色を全て配置できる行数）
+		// 初期の5個は既に保持しているため、盤面に配置する必要があるのはM-5個
+		int maxRows = Math.Min(n, (m - 5 + n - 1) / n);
 
 		if (isDebugPlan4) {
 			Console.WriteLine($"Plan4 Start: M={m}, N={n}, maxRows={maxRows}");
@@ -734,8 +735,10 @@ public class Program
 						Console.WriteLine();
 					}
 
+					bool eatingSucceeded = true;
+
 					// 配置済みの行を下から順番に食べる（蛇行）
-					for (int r = maxRows - 2; r >= 0; r--) {
+					for (int r = maxRows - 2; r >= 0 && eatingSucceeded; r--) {
 						bool isEvenRowForEating = (r % 2 == 0);
 						int startJForEating = isEvenRowForEating ? 0 : n - 1;
 						int endJForEating = isEvenRowForEating ? n - 1 : 0;
@@ -786,11 +789,14 @@ public class Program
 									if (isDebugPlan4) {
 										Console.WriteLine($"[Eating Row {r}] Failed to reach ({r + 1},{startJForEating})");
 									}
+									eatingSucceeded = false;
 									break; // 移動不可能
 								}
 							}
 							moveCountForEating++;
 						}
+
+						if (!eatingSucceeded) break;
 
 						// Step 2: 行 r に侵入
 						if (state.Head == (r + 1, startJForEating) && state.HeadDir != Direction4.D) {
@@ -834,16 +840,61 @@ public class Program
 								if (isDebugPlan4) {
 									Console.WriteLine($"[Eating Row {r}] Failed to reach column {endJForEating}");
 								}
+								eatingSucceeded = false;
 								break; // 移動不可能
 							}
 							moveCountForEating++;
 						}
+
+						if (!eatingSucceeded) break;
 
 						if (isDebugPlan4) {
 							var (checkI, checkJ) = state.Head;
 							Console.WriteLine($"[Eating Row {r}] Completed at ({checkI},{checkJ})");
 							Console.WriteLine();
 						}
+					}
+
+					if (!eatingSucceeded) {
+						// 蛇行失敗、胴体を噛んでリトライ
+						while (state.Boros.Count > 5) {
+							var (hi, hj) = state.Head;
+							var lastDir = state.HeadDir;
+							Direction4? biteDir = null;
+							foreach (var dir in Direction4Extensions.ForEach4()) {
+								if (dir.Reverse() == lastDir) continue;
+								var (ni, nj) = dir.Move(hi, hj);
+								if ((uint)ni < n && (uint)nj < n && ni >= row && state.WillBites[ni, nj]) {
+									biteDir = dir;
+									break;
+								}
+							}
+
+							if (biteDir.HasValue) {
+								state.Move(biteDir.Value);
+							} else {
+								var tempDirs = new List<Direction4>();
+								foreach (var dir in Direction4Extensions.ForEach4()) {
+									if (dir.Reverse() == lastDir) continue;
+									var (ni, nj) = dir.Move(hi, hj);
+									if ((uint)ni < n && (uint)nj < n && ni >= row) {
+										tempDirs.Add(dir);
+									}
+								}
+								if (tempDirs.Count > 0) {
+									state.Move(tempDirs[rnd.Next(tempDirs.Count)]);
+								} else {
+									break;
+								}
+							}
+						}
+						if (isDebugPlan4) {
+							var (checkI, checkJ) = state.Head;
+							Console.WriteLine($"[Row {row}] Eating failed, retry {retryCount + 1}/{maxRetries}: targetFromBack {targetFromBack} -> 0, Head=({checkI},{checkJ})");
+						}
+						targetFromBack = 0;
+						retryCount++;
+						continue;
 					}
 
 					break;
