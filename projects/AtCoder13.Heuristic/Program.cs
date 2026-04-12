@@ -61,12 +61,12 @@ public class Program
 		var info = new Information();
 		var zob = new Zob(rnd, input);
 
-		int limit = 1500;
-
 		var best = Plan4(rnd, sw, isLocal, input, info, 10000, zob);
 		long bestScore = best.Score;
 		info.P = 4;
 
+		/*
+		int limit = 1500;
 		int maxOp = best.Ops.Count;
 		for (int l = 0; l < 100; l++) {
 			if (sw.ElapsedMilliseconds >= limit) {
@@ -124,7 +124,7 @@ public class Program
 					maxOp.UpdateMin(temp.Ops.Count);
 				}
 			}
-		}
+		}*/
 
 		input.Output(best);
 		info.T = best.Ops.Count;
@@ -134,6 +134,7 @@ public class Program
 
 		if (isLocal) {
 			Validate(input, best);
+
 		}
 
 		info.Elapsed = sw.ElapsedMilliseconds;
@@ -141,9 +142,7 @@ public class Program
 		if (isLocal) {
 			// Move/Undoの正しさを検証
 			ValidateMoveUndo(input, rnd, zob);
-
-			// キャッシュ統計を出力
-			zob.PrintCacheStats();
+			Validate2(isLocal, input, zob, best);
 		}
 
 		return (input, info);
@@ -179,13 +178,45 @@ public class Program
 		}
 	}
 
+	static void Validate2(bool isLocal, Input input, Zob zob, State state)
+	{
+		var other = new State(isLocal, input, zob);
+
+		for (int i = 0; i < state.Ops.Count; i++) {
+			var dir = state.Ops[i];
+			other.Move(dir);
+		}
+
+		var (score1, e1, k1) = state.Calculate();
+		var (score2, e2, k2) = other.Calculate();
+
+		if (score1 != score2) {
+			Console.WriteLine($"[Validate2] Score mismatch: state={score1}, other={score2}");
+			Console.WriteLine($"  state: E={state.E}, K={state.K}, T={state.Ops.Count}, Colors.Count={state.Colors.Count}");
+			Console.WriteLine($"  other: E={other.E}, K={other.K}, T={other.Ops.Count}, Colors.Count={other.Colors.Count}");
+			Console.WriteLine($"  calc:  e1={e1}, k1={k1}, e2={e2}, k2={k2}");
+
+			// Colors配列の内容を比較
+			int mismatchCount = 0;
+			int minCount = Math.Min(state.Colors.Count, other.Colors.Count);
+			for (int i = 0; i < minCount && mismatchCount < 10; i++) {
+				if (state.Colors[i] != other.Colors[i]) {
+					Console.WriteLine($"  Colors[{i}]: state={state.Colors[i]}, other={other.Colors[i]}, expected={input.D[i]}");
+					mismatchCount++;
+				}
+			}
+
+			throw new Exception($"best state internal score {score1} different from real move score {score2}");
+		}
+	}
+
 	static void ValidateMoveUndo(Input input, Random rnd, Zob zob)
 	{
 		var state = new State(true, input, zob);
 		int n = input.N;
 
-		// ランダムに100回Move→Undoを実行して状態が完全に復元されることを確認
-		for (int trial = 0; trial < 100; trial++) {
+		// ランダムに200回Move→Undoを実行して状態が完全に復元されることを確認
+		for (int trial = 0; trial < 200; trial++) {
 			// 現在の状態を記録
 			var originalHash = state.Hash;
 			var originalE = state.E;
@@ -294,6 +325,13 @@ public class Program
 					if (state.Esas[i, j] != originalEsas[i, j]) {
 						throw new Exception($"MoveUndo trial {trial}: Esas[{i},{j}] mismatch (expected={originalEsas[i, j]}, actual={state.Esas[i, j]})");
 					}
+				}
+			}
+
+			// Colors配列の値レベルでの完全な検証
+			for (int i = 0; i < originalColors.Count; i++) {
+				if (state.Colors[i] != originalColors[i]) {
+					throw new Exception($"MoveUndo trial {trial}: Colors[{i}] value mismatch after full cycle");
 				}
 			}
 		}
@@ -2047,14 +2085,15 @@ public class State
 
 		Boros = new();
 		Colors = new();
-		// BrosもColorsもFrontが頭側でBackが尻尾側。
+		// BrosはFrontが頭側でBackが尻尾側。
+		// ColorsはColors[0]が最古（D[0]）、Colors[Count-1]が最新（D[Count-1]）。
 		// 初期配置は頭側が (4, 0) なので、ループ順に前から詰めていけば結果的にFrontが頭になる。
 		for (int i = 0; i < 5; i++) {
 			Boros.PushFront((i, 0));
-			Colors.PushFront(1);
-			// 尻尾に移動しても噛み付かない。
-			// またその次の胴体がある場所に移動しても、移動が完了したら尻尾になるので噛み付かない。
-			// 頭(i=4)と尻尾(i=0)と尻尾の隣(i=1)以外を胴体とする
+			Colors.PushBack(1);  // PushBackで順番通りに追加
+								 // 尻尾に移動しても噛み付かない。
+								 // またその次の胴体がある場所に移動しても、移動が完了したら尻尾になるので噛み付かない。
+								 // 頭(i=4)と尻尾(i=0)と尻尾の隣(i=1)以外を胴体とする
 			if (i >= 2 && i < 4) {
 				WillBites[i, 0] = true;
 			}
@@ -2348,7 +2387,7 @@ public class State
 		Esas[ni, nj] = 0;
 		Hash ^= _zob.Esa[ni, nj, 0];
 		Hash ^= _zob.Esa[ni, nj, color];
-
+		Hash ^= _zob.Color[Colors.Count - 1, color];
 		return color;
 	}
 
@@ -3140,8 +3179,6 @@ public class Array2D<T>(int h, int w)
 	{
 		var newArr = new Array2D<T>(H, W);
 		Array.Copy(_arr, newArr._arr, _arr.Length);
-		// Unsafe.CopyBlock(ref newArr._arr[0], ref _arr[0], (uint)_arr.Length);
-
 		return newArr;
 	}
 }
@@ -3192,7 +3229,7 @@ public class HeuristicHelper
 			} catch (Exception ex) {
 				lock (locker) {
 					++errorCount;
-					Console.WriteLine($"{i:d4}: {ex.Message}");
+					Console.WriteLine($"{i:d4}: {ex.ToString()}");
 					Console.Out.Flush();
 				}
 			}
