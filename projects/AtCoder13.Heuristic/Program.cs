@@ -34,9 +34,10 @@ public class Program
 						$"N={input.N:d2}",
 						$"M={input.M:d3}",
 						$"C={input.C:d1}",
-						$"loop={info.Loop:d8}",
-						$"up={info.Up:d5}",
+						$"loop={info.Loop:d5}",
+						$"up={info.Up:d3}",
 						$"B={info.B:d3}",
+						$"D={info.D:d3}",
 						$"T={info.T:d6}",
 						$"E={info.E:d3}",
 						$"K={info.K:d3}",
@@ -127,7 +128,7 @@ public class Program
 		if (maxOp <= 500) {
 			// 先にビームサーチを実行。
 			{
-				var temp = Plan8(rnd, sw, isLocal, input, info, maxOp, zob, limit);
+				var temp = Plan8(rnd, sw, isLocal, input, info, maxOp, 300, zob, limit);
 				var tempScore = temp.Score;
 				if (tempScore < bestScore) {
 					bestScore = tempScore;
@@ -144,7 +145,8 @@ public class Program
 			// 時間いっぱいまわす。
 			while (sw.ElapsedMilliseconds < limit) {
 				++info.Loop;
-				var temp = Plan3(rnd, sw, isLocal, input, info, maxOp, zob, out int maxStep);
+				int maxStep = rnd.Next(8, 10);
+				var temp = Plan3(rnd, sw, isLocal, input, info, maxOp, zob, maxStep);
 				var tempScore = temp.Score;
 				if (tempScore < bestScore) {
 					bestScore = tempScore;
@@ -168,7 +170,8 @@ public class Program
 					}
 
 					++info.Loop;
-					var temp = Plan3(rnd, sw, isLocal, input, info, maxOp, zob, out int maxStep);
+					int maxStep = rnd.Next(8, 10);
+					var temp = Plan3(rnd, sw, isLocal, input, info, maxOp, zob, maxStep);
 					var tempScore = temp.Score;
 					if (tempScore < bestScore) {
 						bestScore = tempScore;
@@ -206,7 +209,8 @@ public class Program
 
 			// 最後にビームサーチを時間いっぱい回す
 			{
-				var temp = Plan8(rnd, sw, isLocal, input, info, maxOp, zob, limit);
+				int width = maxOp >= 700 ? 100 : 100;
+				var temp = Plan8(rnd, sw, isLocal, input, info, maxOp, width, zob, limit);
 				var tempScore = temp.Score;
 				if (tempScore < bestScore) {
 					bestScore = tempScore;
@@ -750,14 +754,13 @@ public class Program
 		return best;
 	}
 
-	static State Plan3(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, int max, Zob zob, out int maxStep)
+	static State Plan3(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, int max, Zob zob, int maxStep)
 	{
 		var state = new State(isLocal, input, zob);
 
 		State best = state.Clone();
 		var (bestScore, _, _) = state.Calculate();
 
-		maxStep = rnd.Next(8, 9);
 		while (state.Ops.Count <= max) {
 			bool isFound = false;
 			if (state.NoErrorCount == state.Colors.Count) {
@@ -1539,33 +1542,33 @@ public class Program
 		return state;
 	}
 
-	static State Plan8(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, int depth, Zob zob, int limit)
+	static State Plan8(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, int depth, int beamWidth, Zob zob, int limit)
 	{
 		var state = new State(isLocal, input, zob);
 		State best = state.Clone();
 		long bestScore = best.Score;
 
-		int beamWidth = 200;
 		int n = input.N;
 
 		// ビーム内の状態を保持（Clone済み）
-		var beam = new List<State> { state.Clone() };
-		var visitedHashes = new HashSet<long> { state.Hash };
+		var beam = new List<State>(beamWidth) { state.Clone() };
+		var nextBeam = new List<State>(beamWidth);
+		var visitedHashes = new HashSet<long>(beamWidth * 4) { state.Hash };
+		var candidates = new List<(int parentIdx, Direction4 dir, long eval, long hash)>(beamWidth * 4);
 
+		info.B = beamWidth;
+		info.D = depth;
 		for (int d = 0; d < depth; d++) {
 			if (sw.ElapsedMilliseconds >= limit) {
+				info.D = d;
 				break;
 			}
 
-			var candidates = new List<(State state, long eval, long hash)>();
+			candidates.Clear();
 
 			// ビーム内の各状態から遷移を試す
-			foreach (var beamState in beam) {
-				if (sw.ElapsedMilliseconds >= limit) {
-					break;
-				}
-
-				var currentState = beamState;
+			for (int beamIdx = 0; beamIdx < beam.Count; beamIdx++) {
+				var currentState = beam[beamIdx];
 
 				var (hi, hj) = currentState.Head;
 				var lastDir = currentState.HeadDir;
@@ -1574,7 +1577,8 @@ public class Program
 				int oldOC = currentState.Ops.Count;
 
 				// 全方向を試す（Move→評価→Undoで効率的に探索）
-				foreach (var dir in Direction4Extensions.ForEach4()) {
+				for (int dn = 0; dn < 4; dn++) {
+					var dir = Direction4Extensions._delta4Dir[dn];
 					if (dir.Reverse() == lastDir) {
 						continue;
 					}
@@ -1607,9 +1611,7 @@ public class Program
 								best = currentState.Clone();
 							}
 
-							// 状態をCloneして候補に追加（次の深さで使用）
-							var cloned = currentState.Clone();
-							candidates.Add((cloned, eval, hash));
+							candidates.Add((beamIdx, dir, eval, hash));
 						}
 
 						// Undoで元の状態に戻す
@@ -1634,14 +1636,26 @@ public class Program
 			// 評価値でソートしてビーム幅分残す
 			candidates.Sort((a, b) => a.eval.CompareTo(b.eval));
 
-			beam.Clear();
+			nextBeam.Clear();
 			visitedHashes.Clear();
 
 			int count = Math.Min(beamWidth, candidates.Count);
 			for (int i = 0; i < count; i++) {
-				beam.Add(candidates[i].state);
-				visitedHashes.Add(candidates[i].hash);
+				var cand = candidates[i];
+				var parentState = beam[cand.parentIdx];
+
+				// 親状態をCloneして、dirで進めた状態を作る
+				var nextState = parentState.Clone();
+				nextState.Move(cand.dir);
+
+				nextBeam.Add(nextState);
+				visitedHashes.Add(cand.hash);
 			}
+
+			// ビームの入れ替え
+			var temp = beam;
+			beam = nextBeam;
+			nextBeam = temp;
 		}
 
 		return best;
@@ -2935,15 +2949,30 @@ public class State
 				break; // 深追いしすぎない
 			}
 
-			foreach (var dir in Direction4Extensions._delta4Dir) {
-				var (ni, nj) = dir.Move(ci, cj);
-				if ((uint)ni < (uint)n && (uint)nj < (uint)n) {
-					// 胴体にぶつからない
-					if (!WillBites[ni, nj] && !bfsVisited[ni, nj]) {
-						bfsVisited[ni, nj] = true;
-						bfsQueue[tail++] = (ni, nj, d + 1);
-					}
-				}
+			int ni, nj;
+
+			ni = ci + 1; nj = cj;
+			if ((uint)ni < (uint)n && (uint)nj < (uint)n && !WillBites[ni, nj] && !bfsVisited[ni, nj]) {
+				bfsVisited[ni, nj] = true;
+				bfsQueue[tail++] = (ni, nj, d + 1);
+			}
+
+			ni = ci; nj = cj - 1;
+			if ((uint)ni < (uint)n && (uint)nj < (uint)n && !WillBites[ni, nj] && !bfsVisited[ni, nj]) {
+				bfsVisited[ni, nj] = true;
+				bfsQueue[tail++] = (ni, nj, d + 1);
+			}
+
+			ni = ci - 1; nj = cj;
+			if ((uint)ni < (uint)n && (uint)nj < (uint)n && !WillBites[ni, nj] && !bfsVisited[ni, nj]) {
+				bfsVisited[ni, nj] = true;
+				bfsQueue[tail++] = (ni, nj, d + 1);
+			}
+
+			ni = ci; nj = cj + 1;
+			if ((uint)ni < (uint)n && (uint)nj < (uint)n && !WillBites[ni, nj] && !bfsVisited[ni, nj]) {
+				bfsVisited[ni, nj] = true;
+				bfsQueue[tail++] = (ni, nj, d + 1);
 			}
 		}
 
@@ -2976,6 +3005,7 @@ public class Information
 	public bool SameScore { get; set; } = false;
 
 	public int B { get; set; } = -1;
+	public int D { get; set; } = -1;
 	public int KamiCount { get; set; } = 0;
 	public int S { get; set; } = 8;
 }
@@ -2989,6 +3019,7 @@ public class Input
 	public int C { get; }
 	public int[] D { get; }
 	public int[,] F { get; }
+	public List<(int r, int c)>[] FoodPositionsByColor { get; }
 
 	public Input(IOManager io, bool isLocal)
 	{
@@ -2998,6 +3029,18 @@ public class Input
 		(N, M, C) = io.Int3();
 		D = io.ArrayInt(M);
 		F = io.Repeat(N, N, io => io.Int());
+
+		FoodPositionsByColor = new List<(int r, int c)>[C + 1];
+		for (int i = 0; i <= C; i++) {
+			FoodPositionsByColor[i] = new List<(int r, int c)>();
+		}
+		for (int r = 0; r < N; r++) {
+			for (int c = 0; c < N; c++) {
+				if (F[r, c] > 0) {
+					FoodPositionsByColor[F[r, c]].Add((r, c));
+				}
+			}
+		}
 	}
 
 	public void Output(State state)
