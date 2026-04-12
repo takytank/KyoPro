@@ -36,8 +36,8 @@ public class Program
 						$"C={input.C:d1}",
 						$"loop={info.Loop:d5}",
 						$"up={info.Up:d3}",
-						$"B={info.B:d3}",
-						$"D={info.D:d3}",
+						$"B={info.B:d4}",
+						$"D={info.D:d4}",
 						$"T={info.T:d6}",
 						$"E={info.E:d3}",
 						$"K={info.K:d3}",
@@ -128,7 +128,7 @@ public class Program
 		if (maxOp <= 500) {
 			// 先にビームサーチを実行。
 			{
-				var temp = Plan8(rnd, sw, isLocal, input, info, maxOp, 300, zob, limit);
+				var temp = Plan8(rnd, sw, isLocal, input, info, maxOp, 350, zob, limit);
 				var tempScore = temp.Score;
 				if (tempScore < bestScore) {
 					bestScore = tempScore;
@@ -209,7 +209,7 @@ public class Program
 
 			// 最後にビームサーチを時間いっぱい回す
 			{
-				int width = maxOp >= 700 ? 100 : 100;
+				int width = maxOp >= 700 ? 100 : 100; // BFSからマンハッタン距離への変更により高速化したため幅を拡大
 				var temp = Plan8(rnd, sw, isLocal, input, info, maxOp, width, zob, limit);
 				var tempScore = temp.Score;
 				if (tempScore < bestScore) {
@@ -2900,20 +2900,38 @@ public class State
 
 		val += (_input.M - NoErrorCount) * 1000000L;
 
-		// 次に必要な色への最短BFS距離を評価に組み込む
+		// 次に必要な色への最短マンハッタン距離を評価に組み込む
 		if (NoErrorCount == Colors.Count && Colors.Count < _input.M) {
 			byte nextColor = (byte)_input.D[Colors.Count];
-			int bfsDist = CalcBFS(nextColor);
-			if (bfsDist != 100000) {
+			int dist = CalcMinManhattan(nextColor);
+			if (dist != 100000) {
 				// 短手数を優先したいため距離の重みを小さすぎず大きすぎず
-				val += bfsDist * 10;
+				val += dist * 10;
 			} else {
-				// 次の目標にたどり着けない場合は落とす
+				// 次の目標が存在しない場合は落とす
 				val += 500000L;
 			}
 		}
 
 		return val;
+	}
+
+	private int CalcMinManhattan(byte targetEsa)
+	{
+		var (hi, hj) = Head;
+		int minDist = 100000;
+		// 該当色の餌の位置のリストから最小マンハッタン距離を計算
+		foreach (var (r, c) in _input.FoodPositionsByColor[targetEsa]) {
+			if (Esas[r, c] == targetEsa) {
+				int d = Math.Abs(hi - r) + Math.Abs(hj - c);
+				if (d < minDist) {
+					minDist = d;
+					if (d == 1) break; // 距離1なられ以上短くならないので打ち切り
+				}
+			}
+		}
+
+		return minDist;
 	}
 
 	private int CalcBFS(byte targetEsa)
