@@ -14,6 +14,8 @@ public class Program
 	[MethodImpl(MethodImplOptions.AggressiveOptimization)]
 	static void Main()
 	{
+		int successCount = 0;
+		long successScoreSum = 0;
 		HeuristicHelper.RunCases(
 			runCaseCount: 100,
 			testCaseCount: 50,
@@ -22,6 +24,11 @@ public class Program
 			(locker, i, ret) => {
 				var (input, info) = ret;
 				lock (locker) {
+					if (info.E == 0 && info.K == 0) {
+						successCount++;
+						successScoreSum += info.Score;
+					}
+
 					var status = new List<string> {
 						$"{i:d4}:",
 						$"N={input.N:d2}",
@@ -46,7 +53,10 @@ public class Program
 				return (info.Score, info.Loop, info.Up);
 			},
 			(tc, rc) => {
-				//Console.WriteLine($"enabled count: {count}");
+				Console.WriteLine($"success: {successCount}");
+				if (successCount > 0) {
+					Console.WriteLine($"success score ave: {(double)successScoreSum / successCount:f2}");
+				}
 			});
 	}
 
@@ -61,13 +71,29 @@ public class Program
 		var info = new Information();
 		var zob = new Zob(rnd, input);
 
-		var best = Plan4(rnd, sw, isLocal, input, info, 10000, zob);
+		var best = Plan8(rnd, sw, isLocal, input, info, 3000, zob);
 		long bestScore = best.Score;
 		info.P = 8;
 
+		int maxOp = best.Ops.Count;
+
+		{
+			var temp = Plan8(rnd, sw, isLocal, input, info, maxOp, zob);
+			var tempScore = temp.Score;
+			if (tempScore < bestScore) {
+				bestScore = tempScore;
+				best = temp;
+				info.P = 8;
+				++info.Up;
+				if (temp.E == 0 && temp.K == input.M) {
+					maxOp.UpdateMin(temp.Ops.Count);
+				}
+			}
+		}
+
 		/*
 		int limit = 1500;
-		int maxOp = best.Ops.Count;
+		
 		for (int l = 0; l < 100; l++) {
 			if (sw.ElapsedMilliseconds >= limit) {
 				break;
@@ -1448,8 +1474,7 @@ public class Program
 
 			// ビーム内の各状態から遷移を試す
 			foreach (var beamState in beam) {
-				// ★修正: beam内のStateを直接変更しないように、Cloneしてから使う
-				var currentState = beamState.Clone();
+				var currentState = beamState;
 
 				var (hi, hj) = currentState.Head;
 				var lastDir = currentState.HeadDir;
@@ -2270,6 +2295,9 @@ public class Zob
 	private long _dfsCacheHits = 0;
 	private long _dfsCacheMisses = 0;
 
+	public bool[,] BfsVisited { get; }
+	public (int i, int j, int d)[] BfsQueue { get; }
+
 	public Zob(Random rnd, Input input)
 	{
 		int n = input.N;
@@ -2302,6 +2330,9 @@ public class Zob
 		for (int i = 0; i < 5; i++) {
 			Dir[i] = rnd.NextInt64();
 		}
+
+		BfsVisited = new bool[n, n];
+		BfsQueue = new (int i, int j, int d)[n * n * 4];
 	}
 
 	public bool TryGetCache(int maxDepth, (long stateHash, int neededHash) key, out Direction4[] result)
@@ -2752,22 +2783,88 @@ public class State
 	{
 		long val = 0;
 
-		// 生スコア
-		val += Score;
+		val += Ops.Count;
 
-		// エラーなく色が沢山入っている方がよい。
-		// 生スコアだと、違う色を食べるのと何も食べないのでは前者の方が良くなるが、
-		// 後を考えると後者を優先したい。
-		// ただ、何も食べないのを優先した結果、何もないところにずっと居られても困る。
-		// 数歩あるけば餌に着くと思うので、盤面ハッシュで重複を弾いておけば良いか？
-		val += E * 1;
-		val += (_input.M - K) * 100;
-		val -= NoErrorCount * 10000;
+		// 短い手数で無駄なく進めるよう、エラー状態へのペナルティ
+		// Score ベースだとエラーした方が K が増えて Score が下がるバグがあるため、独自計算にする。
+		long errorCountVal = (K - NoErrorCount) + E;
+		if (errorCountVal > 0) {
+			val += errorCountVal * 1000000000L;
+		}
 
-		// エラーの上に積み上げよりも噛みを優先したい気持ち
-		val += (K - NoErrorCount) * 10000;
+		val += (_input.M - NoErrorCount) * 1000000L;
+
+		// 次に必要な色への最短BFS距離を評価に組み込む
+		if (NoErrorCount == Colors.Count && Colors.Count < _input.M) {
+			byte nextColor = (byte)_input.D[Colors.Count];
+			int bfsDist = CalcBFS(nextColor);
+			if (bfsDist != 100000) {
+				// 短手数を優先したいため距離の重みを小さすぎず大きすぎず
+				val += bfsDist * 10;
+			} else {
+				// 次の目標にたどり着けない場合は落とす
+				val += 500000L;
+			}
+		}
 
 		return val;
+	}
+
+	private int CalcBFS(byte targetEsa)
+	{
+		int n = _input.N;
+		var bfsVisited = _zob.BfsVisited;
+		var bfsQueue = _zob.BfsQueue;
+
+		var (hi, hj) = Head;
+
+		int head = 0, tail = 0;
+		bfsQueue[tail++] = (hi, hj, 0);
+		bfsVisited[hi, hj] = true;
+
+		// Uターン禁止の考慮を最初の1手だけ入れる
+		var lastDir = HeadDir;
+		var (bi, bj) = lastDir.Reverse().Move(hi, hj);
+		if ((uint)bi < n && (uint)bj < n) {
+			bfsVisited[bi, bj] = true; // 逆戻りは最初から訪問済み扱いにする
+		}
+
+		int minDist = 100000;
+		while (head < tail) {
+			var (ci, cj, d) = bfsQueue[head++];
+			if (ci != hi || cj != hj) { // 現在位置以外で
+				if (Esas[ci, cj] == targetEsa) {
+					minDist = d;
+					break;
+				}
+			}
+
+			if (d > 30) {
+				break; // 深追いしすぎない
+			}
+
+			foreach (var dir in Direction4Extensions._delta4Dir) {
+				var (ni, nj) = dir.Move(ci, cj);
+				if ((uint)ni < (uint)n && (uint)nj < (uint)n) {
+					// 胴体にぶつからない
+					if (!WillBites[ni, nj] && !bfsVisited[ni, nj]) {
+						bfsVisited[ni, nj] = true;
+						bfsQueue[tail++] = (ni, nj, d + 1);
+					}
+				}
+			}
+		}
+
+		// 片付け (再利用するため visited を false に戻す)
+		for (int i = 0; i < tail; i++) {
+			var (ci, cj, _) = bfsQueue[i];
+			bfsVisited[ci, cj] = false;
+		}
+		if ((uint)bi < n && (uint)bj < n) {
+			bfsVisited[bi, bj] = false;
+		}
+
+		return minDist;
 	}
 }
 
