@@ -63,7 +63,7 @@ public class Program
 
 		var best = Plan4(rnd, sw, isLocal, input, info, 10000, zob);
 		long bestScore = best.Score;
-		info.P = 4;
+		info.P = 8;
 
 		/*
 		int limit = 1500;
@@ -228,7 +228,17 @@ public class Program
 			Console.WriteLine($"  other: E={other.E}, K={other.K}, T={other.Ops.Count}, Colors.Count={other.Colors.Count}");
 			Console.WriteLine($"  calc:  e1={e1}, k1={k1}, e2={e2}, k2={k2}");
 
+			int n = input.N;
+			for (int r = 0; r < n; r++) {
+				for (int c = 0; c < n; c++) {
+					if (state.WillBites[r, c] != other.WillBites[r, c]) {
+						Console.WriteLine($"  WillBites mismatch at ({r},{c}): state={state.WillBites[r, c]}, other={other.WillBites[r, c]}");
+					}
+				}
+			}
+
 			// Colors配列の内容を比較
+
 			int mismatchCount = 0;
 			int minCount = Math.Min(state.Colors.Count, other.Colors.Count);
 			for (int i = 0; i < minCount && mismatchCount < 10; i++) {
@@ -426,64 +436,7 @@ public class Program
 			return;
 		}
 
-		// 中間あたりの胴体を目標にする
-		int targetBodyIndex = state.Boros.Count / 2;
-		var targetPos = state.Boros[targetBodyIndex];
-		Console.WriteLine($"[ValidateMoveUndo2] Phase 2: Moving towards body position {targetPos} (index {targetBodyIndex})");
-
-		// BFSで胴体への最短経路を探索
-		var queue = new Queue<(int i, int j, List<Direction4> path)>();
-		var visited = new bool[n, n];
-		var (startI, startJ) = state.Head;
-		var startDir = state.HeadDir;
-
-		queue.Enqueue((startI, startJ, new List<Direction4>()));
-		visited[startI, startJ] = true;
-
-		// Uターン禁止のため、後ろも訪問済みにする
-		var (backI, backJ) = startDir.Reverse().Move(startI, startJ);
-		if ((uint)backI < n && (uint)backJ < n) {
-			visited[backI, backJ] = true;
-		}
-
-		List<Direction4> pathToBite = null;
-
-		while (queue.Count > 0) {
-			var (ci, cj, path) = queue.Dequeue();
-
-			if ((ci, cj) == targetPos) {
-				pathToBite = path;
-				break;
-			}
-
-			var currentDir = path.Count > 0 ? path[^1] : startDir;
-
-			foreach (var dir in Direction4Extensions.ForEach4()) {
-				if (dir.Reverse() == currentDir) {
-					continue;
-				}
-
-				var (ni, nj) = dir.Move(ci, cj);
-				if ((uint)ni >= n || (uint)nj >= n) {
-					continue;
-				}
-
-				if (visited[ni, nj]) {
-					continue;
-				}
-
-				visited[ni, nj] = true;
-				var newPath = new List<Direction4>(path) { dir };
-				queue.Enqueue((ni, nj, newPath));
-			}
-		}
-
-		if (pathToBite == null) {
-			Console.WriteLine("[ValidateMoveUndo2] Could not find path to body, skipping");
-			return;
-		}
-
-		Console.WriteLine($"[ValidateMoveUndo2] Found path to body (length={pathToBite.Count})");
+		Console.WriteLine($"[ValidateMoveUndo2] Phase 2: Moving randomly until a body bite occurs");
 
 		// 噛む直前の状態を記録
 		var originalHash = state.Hash;
@@ -509,9 +462,53 @@ public class Program
 
 		// 胴体を噛むまで移動
 		var undoStack = new Stack<UndoInfo>();
-		foreach (var dir in pathToBite) {
-			var undo = state.Move(dir);
+		bool bites = false;
+		int maxRandomMoves = 10000;
+		int randomMoves = 0;
+
+		while (!bites && randomMoves < maxRandomMoves) {
+			var (hi, hj) = state.Head;
+			var lastDir = state.HeadDir;
+			Direction4? biteDir = null;
+
+			foreach (var dir in Direction4Extensions.ForEach4()) {
+				if (dir.Reverse() == lastDir) continue;
+				var (ni, nj) = dir.Move(hi, hj);
+				if ((uint)ni < n && (uint)nj < n && state.WillBites[ni, nj]) {
+					biteDir = dir;
+					break;
+				}
+			}
+
+			Direction4 moveDir;
+			if (biteDir.HasValue) {
+				moveDir = biteDir.Value;
+			} else {
+				var tempDirs = new List<Direction4>();
+				foreach (var dir in Direction4Extensions.ForEach4()) {
+					if (dir.Reverse() == lastDir) continue;
+					var (ni, nj) = dir.Move(hi, hj);
+					if ((uint)ni < n && (uint)nj < n) {
+						tempDirs.Add(dir);
+					}
+				}
+				if (tempDirs.Count > 0) {
+					moveDir = tempDirs[rnd.Next(tempDirs.Count)];
+				} else {
+					break; // 行き止まり
+				}
+			}
+
+			var undo = state.Move(moveDir);
 			undoStack.Push(undo);
+			if (undo.State == 0) {
+				bites = true;
+			}
+			randomMoves++;
+		}
+
+		if (bites == false) {
+			throw new Exception("biting not done.");
 		}
 
 		Console.WriteLine($"[ValidateMoveUndo2] Moved to body position, bite occurred: {undoStack.Peek().State == 0}");
@@ -1430,6 +1427,108 @@ public class Program
 		}
 
 		return state;
+	}
+
+	static State Plan8(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, int maxOp, Zob zob)
+	{
+		var state = new State(isLocal, input, zob);
+		State best = state.Clone();
+		long bestScore = best.Score;
+
+		int depth = 300;
+		int beamWidth = 200;
+		int n = input.N;
+
+		// ビーム内の状態を保持（Clone済み）
+		var beam = new List<State> { state.Clone() };
+		var visitedHashes = new HashSet<long> { state.Hash };
+
+		for (int d = 0; d < depth; d++) {
+			var candidates = new List<(State state, long eval, long hash)>();
+
+			// ビーム内の各状態から遷移を試す
+			foreach (var beamState in beam) {
+				// ★修正: beam内のStateを直接変更しないように、Cloneしてから使う
+				var currentState = beamState.Clone();
+
+				var (hi, hj) = currentState.Head;
+				var lastDir = currentState.HeadDir;
+
+				int oldCC = currentState.Colors.Count;
+				int oldOC = currentState.Ops.Count;
+
+				// 全方向を試す（Move→評価→Undoで効率的に探索）
+				foreach (var dir in Direction4Extensions.ForEach4()) {
+					if (dir.Reverse() == lastDir) {
+						continue;
+					}
+
+					var (ni, nj) = dir.Move(hi, hj);
+					if ((uint)ni < n && (uint)nj < n) {
+						// 既にM個集めている場合、これ以上の探索は不要
+						if (currentState.Colors.Count >= input.M) {
+							continue;
+						}
+
+						// Moveして評価
+						var undo = currentState.Move(dir);
+
+						// M個を超えた場合は候補に追加しない（本来ここには来ないはず）
+						if (currentState.Colors.Count > input.M) {
+							currentState.Undo(undo);
+							continue;
+						}
+
+						long hash = currentState.Hash;
+
+						// 重複チェック
+						if (!visitedHashes.Contains(hash)) {
+							long eval = currentState.Evaluate();
+							long tempScore = currentState.Score;
+
+							if (tempScore < bestScore) {
+								bestScore = tempScore;
+								best = currentState.Clone();
+							}
+
+							// 状態をCloneして候補に追加（次の深さで使用）
+							var cloned = currentState.Clone();
+							candidates.Add((cloned, eval, hash));
+						}
+
+						// Undoで元の状態に戻す
+						currentState.Undo(undo);
+					}
+				}
+
+				int newCC = currentState.Colors.Count;
+				int newOC = currentState.Ops.Count;
+				if (oldCC != newCC) {
+					throw new Exception($"undo failed src color count = {oldCC} dst color count = {newCC}");
+				}
+				if (oldOC != newOC) {
+					throw new Exception($"undo failed src ops count = {oldOC} dst ops count = {newOC}");
+				}
+			}
+
+			if (candidates.Count == 0) {
+				break;
+			}
+
+			// 評価値でソートしてビーム幅分残す
+			candidates.Sort((a, b) => a.eval.CompareTo(b.eval));
+
+			beam.Clear();
+			visitedHashes.Clear();
+
+			int count = Math.Min(beamWidth, candidates.Count);
+			for (int i = 0; i < count; i++) {
+				beam.Add(candidates[i].state);
+				visitedHashes.Add(candidates[i].hash);
+			}
+		}
+
+		return best;
 	}
 
 	static State Plan9(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, Zob zob)
@@ -2536,82 +2635,49 @@ public class State
 		K = undo.OldK;
 		NoErrorCount = undo.OldNoErrorCount;
 
-		switch (undo.State) {
-			case 0: // 噛み付き
-					// 頭を戻す
-				Boros.PopFront();
-
-				// 元の頭位置の胴体化を戻す
-				WillBites[undo.OldHeadPos.i, undo.OldHeadPos.j] = false;
-				// 噛み付き先（newHead）のWillBitesを復元（Move中にfalseに設定されたため）
-				WillBites[undo.NewHead.i, undo.NewHead.j] = true;
-
-				// Move後の後ろから2番目のWillBitesを復元（Move中にfalseに設定されたため）
-				WillBites[undo.NewSecondLastPos.i, undo.NewSecondLastPos.j] = undo.NewSecondLastWillBite;
-
-				// 削除されたセグメントを逆順で復元
-				// RemovedSegments[0] は最初の尻尾（色情報なし）
-				// RemovedSegments[1..] は胴体（色情報あり）
-				for (int i = undo.RemovedSegments.Count - 1; i >= 0; i--) {
-					var (pos, color, willBite) = undo.RemovedSegments[i];
-
-					// 尻尾を復元
-					Boros.PushBack(pos);
-
-					if (i > 0) {
-						// 胴体の場合、色とWillBitesを復元
-						Colors.PushBack(color);
-						WillBites[pos.i, pos.j] = willBite;
-						// PopTailColorで配置された餌を削除
-						Esas[pos.i, pos.j] = 0;
-					} else {
-						// 最初の尻尾の場合、WillBitesは常にfalse
-						WillBites[pos.i, pos.j] = false;
-					}
+		if (undo.State == 0) {
+			// 噛み付きの場合（エッジケース）：一括で WillBites を再構築
+			if (Boros.Count > 3) {
+				for (int i = 1; i < Boros.Count - 2; i++) {
+					var (r, c) = Boros[i];
+					WillBites[r, c] = false;
 				}
+			}
 
-				// Move前の後ろから2番目のWillBitesを復元
-				WillBites[undo.OldSecondLastPos.i, undo.OldSecondLastPos.j] = undo.OldSecondLastWillBite;
-				break;
+			Boros.PopFront();
+			for (int i = undo.RemovedSegments.Count - 1; i >= 0; i--) {
+				var (pos, color, _) = undo.RemovedSegments[i];
+				Boros.PushBack(pos);
+				if (i > 0) {
+					Colors.PushBack(color);
+					Esas[pos.i, pos.j] = 0;
+				}
+			}
 
-			case 1: // 餌を食べた
-					// 頭を戻す
-				Boros.PopFront();
-
-				// 元の頭位置は頭に戻るのでfalse
-				WillBites[undo.OldHeadPos.i, undo.OldHeadPos.j] = false;
-
-				// 末尾の色を削除
-				Colors.PopBack();
-
-				// 餌を戻す
-				Esas[undo.FoodPos.i, undo.FoodPos.j] = undo.EatenColor;
-
-				// Move前の後ろから2番目の WillBites を復元
-				WillBites[undo.OldSecondLastPos.i, undo.OldSecondLastPos.j] = undo.OldSecondLastWillBite;
-				// Move後の後ろから2番目の WillBites を復元
-				WillBites[undo.NewSecondLastPos.i, undo.NewSecondLastPos.j] = undo.NewSecondLastWillBite;
-				break;
-
-			case 2: // 空マスを踏んだ
-					// 頭を戻す
-				Boros.PopFront();
-
-				// 元の頭位置は頭に戻るのでfalse
-				WillBites[undo.OldHeadPos.i, undo.OldHeadPos.j] = false;
-
-				// 尻尾を復元
-				Boros.PushBack(undo.RemovedTail);
-				WillBites[undo.RemovedTail.i, undo.RemovedTail.j] = undo.RemovedTailWillBite;
-
-				// Move前の後ろから2番目の WillBites を復元
-				WillBites[undo.OldSecondLastPos.i, undo.OldSecondLastPos.j] = undo.OldSecondLastWillBite;
-				// Move後の後ろから2番目の WillBites を復元
-				WillBites[undo.NewSecondLastPos.i, undo.NewSecondLastPos.j] = undo.NewSecondLastWillBite;
-				break;
+			if (Boros.Count > 3) {
+				for (int i = 1; i < Boros.Count - 2; i++) {
+					var (r, c) = Boros[i];
+					WillBites[r, c] = true;
+				}
+			}
+		} else if (undo.State == 1) {
+			// 餌を食べた
+			WillBites[undo.NewSecondLastPos.i, undo.NewSecondLastPos.j] = undo.NewSecondLastWillBite;
+			Boros.PopFront();
+			WillBites[undo.OldHeadPos.i, undo.OldHeadPos.j] = false;
+			Colors.PopBack();
+			Esas[undo.FoodPos.i, undo.FoodPos.j] = undo.EatenColor;
+			WillBites[undo.OldSecondLastPos.i, undo.OldSecondLastPos.j] = undo.OldSecondLastWillBite;
+		} else if (undo.State == 2) {
+			// 空マスを踏んだ
+			WillBites[undo.NewSecondLastPos.i, undo.NewSecondLastPos.j] = undo.NewSecondLastWillBite;
+			Boros.PopFront();
+			WillBites[undo.OldHeadPos.i, undo.OldHeadPos.j] = false;
+			WillBites[undo.OldSecondLastPos.i, undo.OldSecondLastPos.j] = undo.OldSecondLastWillBite;
+			Boros.PushBack(undo.RemovedTail);
+			WillBites[undo.RemovedTail.i, undo.RemovedTail.j] = undo.RemovedTailWillBite;
 		}
 
-		// すべての状態復元が完了した後、最後にHashを復元
 		Hash = undo.OldHash;
 	}
 
@@ -2624,7 +2690,7 @@ public class State
 		// 元々頭があった位置が胴体になる
 		WillBites[hi, hj] = true;
 		Hash ^= _zob.Head[hi, hj];
-		Hash ^= _zob.Hebi[ni, nj];
+		Hash ^= _zob.Hebi[hi, hj];
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
