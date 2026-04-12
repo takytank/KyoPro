@@ -36,6 +36,7 @@ public class Program
 						$"C={input.C:d1}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d5}",
+						$"B={info.B:d3}",
 						$"T={info.T:d6}",
 						$"E={info.E:d3}",
 						$"K={info.K:d3}",
@@ -71,48 +72,38 @@ public class Program
 		var info = new Information();
 		var zob = new Zob(rnd, input);
 
-		var best = Plan8(rnd, sw, isLocal, input, info, 3000, zob);
-		long bestScore = best.Score;
-		info.P = 8;
-
-		int maxOp = best.Ops.Count;
-
-		{
-			var temp = Plan8(rnd, sw, isLocal, input, info, maxOp, zob);
-			var tempScore = temp.Score;
-			if (tempScore < bestScore) {
-				bestScore = tempScore;
-				best = temp;
-				info.P = 8;
-				++info.Up;
-				if (temp.E == 0 && temp.K == input.M) {
-					maxOp.UpdateMin(temp.Ops.Count);
-				}
-			}
-		}
-
-		/*
 		int limit = 1500;
-		
+
+		// まずはどのケースでもE=0 K=0を達成出来るPlan4を実行して、opの長さの目安を算出
+		var best = Plan4(rnd, sw, isLocal, input, info, 10000, zob);
+		long bestScore = best.Score;
+		info.P = 4;
+		// ただし、たまに成功しないケースもあるので、何回かやる
 		for (int l = 0; l < 100; l++) {
 			if (sw.ElapsedMilliseconds >= limit) {
 				break;
 			}
 
+			if (best.K == input.M && best.E == 0) {
+				info.B = l;
+				break;
+			}
+
 			++info.Loop;
-			var temp = Plan4(rnd, sw, isLocal, input, info, maxOp, zob);
+			var temp = Plan4(rnd, sw, isLocal, input, info, 10000, zob);
 			var tempScore = temp.Score;
 			if (tempScore < bestScore) {
 				bestScore = tempScore;
 				best = temp;
 				info.P = 4;
 				++info.Up;
-				if (temp.E == 0 && temp.K == input.M) {
-					maxOp.UpdateMin(temp.Ops.Count);
-				}
 			}
 		}
 
+		int maxOp = best.Ops.Count;
+
+		// plan2 は割と速いので共通で先にやっておく
+		// TODO やらなくていいかも
 		for (int l = 0; l < 100; l++) {
 			if (sw.ElapsedMilliseconds >= limit) {
 				break;
@@ -132,25 +123,118 @@ public class Program
 			}
 		}
 
-		for (int l = 0; l < 100; l++) {
-			if (sw.ElapsedMilliseconds >= limit) {
-				break;
-			}
-
-			++info.Loop;
-			var temp = Plan3(rnd, sw, isLocal, input, info, maxOp, zob, out int maxStep);
-			var tempScore = temp.Score;
-			if (tempScore < bestScore) {
-				bestScore = tempScore;
-				best = temp;
-				info.P = 3;
-				++info.Up;
-				info.S = maxStep;
-				if (temp.E == 0 && temp.K == input.M) {
-					maxOp.UpdateMin(temp.Ops.Count);
+		// この味点でopが少ない場合、ビームサーチが効く
+		if (maxOp <= 500) {
+			// 先にビームサーチを実行。
+			{
+				var temp = Plan8(rnd, sw, isLocal, input, info, maxOp, zob, limit);
+				var tempScore = temp.Score;
+				if (tempScore < bestScore) {
+					bestScore = tempScore;
+					best = temp;
+					info.P = 8;
+					++info.Up;
+					if (temp.E == 0 && temp.K == input.M) {
+						maxOp.UpdateMin(temp.Ops.Count);
+					}
 				}
 			}
-		}*/
+
+			// ビームサーチの評価値も完璧でないので、Plan3 が上回ることもある。
+			// 時間いっぱいまわす。
+			while (sw.ElapsedMilliseconds < limit) {
+				++info.Loop;
+				var temp = Plan3(rnd, sw, isLocal, input, info, maxOp, zob, out int maxStep);
+				var tempScore = temp.Score;
+				if (tempScore < bestScore) {
+					bestScore = tempScore;
+					best = temp;
+					info.P = 3;
+					++info.Up;
+					info.S = maxStep;
+					if (temp.E == 0 && temp.K == input.M) {
+						maxOp.UpdateMin(temp.Ops.Count);
+					}
+				}
+			}
+		} else {
+			// plan2 や 3 はおそらく成功しないので、plan4 を回す
+			// が、opが比較的少ない場合は回す。
+			if (maxOp <= 1000) {
+				// 但し、ビムサが動くように少なめ
+				for (int l = 0; l < 10; l++) {
+					if (sw.ElapsedMilliseconds >= limit) {
+						break;
+					}
+
+					++info.Loop;
+					var temp = Plan3(rnd, sw, isLocal, input, info, maxOp, zob, out int maxStep);
+					var tempScore = temp.Score;
+					if (tempScore < bestScore) {
+						bestScore = tempScore;
+						best = temp;
+						info.P = 3;
+						++info.Up;
+						info.S = maxStep;
+						if (temp.E == 0 && temp.K == input.M) {
+							maxOp.UpdateMin(temp.Ops.Count);
+						}
+					}
+				}
+			}
+
+			if (info.P == 4) {
+				for (int l = 0; l < 100; l++) {
+					if (sw.ElapsedMilliseconds >= limit) {
+						break;
+					}
+
+					++info.Loop;
+					var temp = Plan4(rnd, sw, isLocal, input, info, maxOp, zob);
+					var tempScore = temp.Score;
+					if (tempScore < bestScore) {
+						bestScore = tempScore;
+						best = temp;
+						info.P = 4;
+						++info.Up;
+						if (temp.E == 0 && temp.K == input.M) {
+							maxOp.UpdateMin(temp.Ops.Count);
+						}
+					}
+				}
+			}
+
+			// 最後にビームサーチを時間いっぱい回す
+			{
+				var temp = Plan8(rnd, sw, isLocal, input, info, maxOp, zob, limit);
+				var tempScore = temp.Score;
+				if (tempScore < bestScore) {
+					bestScore = tempScore;
+					best = temp;
+					info.P = 8;
+					++info.Up;
+					if (temp.E == 0 && temp.K == input.M) {
+						maxOp.UpdateMin(temp.Ops.Count);
+					}
+				}
+			}
+
+			// ビームサーチが思ったより速く終わったときよう
+			while (sw.ElapsedMilliseconds < limit) {
+				++info.Loop;
+				var temp = Plan4(rnd, sw, isLocal, input, info, maxOp, zob);
+				var tempScore = temp.Score;
+				if (tempScore < bestScore) {
+					bestScore = tempScore;
+					best = temp;
+					info.P = 4;
+					++info.Up;
+					if (temp.E == 0 && temp.K == input.M) {
+						maxOp.UpdateMin(temp.Ops.Count);
+					}
+				}
+			}
+		}
 
 		input.Output(best);
 		info.T = best.Ops.Count;
@@ -1455,13 +1539,12 @@ public class Program
 		return state;
 	}
 
-	static State Plan8(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, int maxOp, Zob zob)
+	static State Plan8(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, int depth, Zob zob, int limit)
 	{
 		var state = new State(isLocal, input, zob);
 		State best = state.Clone();
 		long bestScore = best.Score;
 
-		int depth = 300;
 		int beamWidth = 200;
 		int n = input.N;
 
@@ -1470,10 +1553,18 @@ public class Program
 		var visitedHashes = new HashSet<long> { state.Hash };
 
 		for (int d = 0; d < depth; d++) {
+			if (sw.ElapsedMilliseconds >= limit) {
+				break;
+			}
+
 			var candidates = new List<(State state, long eval, long hash)>();
 
 			// ビーム内の各状態から遷移を試す
 			foreach (var beamState in beam) {
+				if (sw.ElapsedMilliseconds >= limit) {
+					break;
+				}
+
 				var currentState = beamState;
 
 				var (hi, hj) = currentState.Head;
@@ -1556,6 +1647,7 @@ public class Program
 		return best;
 	}
 
+	/*
 	static State Plan9(Random rnd, Stopwatch sw, bool isLocal, Input input, Information info, Zob zob)
 	{
 		var state = new State(isLocal, input, zob);
@@ -1624,7 +1716,7 @@ public class Program
 		}
 
 		return best;
-	}
+	}*/
 
 	/// <summary>
 	/// DFSで指定歩数先まで探索し、必要な色を最も多く（同数なら最短歩数で）拾える経路を返す
@@ -2883,6 +2975,7 @@ public class Information
 	public int P { get; set; } = 0;
 	public bool SameScore { get; set; } = false;
 
+	public int B { get; set; } = -1;
 	public int KamiCount { get; set; } = 0;
 	public int S { get; set; } = 8;
 }
