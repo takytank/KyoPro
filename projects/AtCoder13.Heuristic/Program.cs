@@ -765,12 +765,12 @@ public class Program
 			bool isFound = false;
 			if (state.NoErrorCount == state.Colors.Count) {
 				int moveMax = Math.Min(maxStep, input.M - state.Colors.Count);
-				var neededColors = new byte[moveMax];
+				Span<byte> neededColors = stackalloc byte[moveMax];
 				for (int i = 0; i < moveMax; i++) {
 					neededColors[i] = (byte)input.D[state.Colors.Count + i];
 				}
 
-				var path = FindBestPathDFS3(state, input, neededColors.ToArray(), maxStep, -1);
+				var path = FindBestPathDFS3(state, input, neededColors, maxStep, -1);
 				if (path is not null) {
 					isFound = true;
 					foreach (var dir in path) {
@@ -809,6 +809,10 @@ public class Program
 		var state = new State(isLocal, input, zob);
 		int n = input.N;
 		int m = input.M;
+
+		var bfsQueue = new Queue<(int i, int j)>();
+		var bfsVisited = new bool[n, n];
+		var bfsPrev = new (int pi, int pj, Direction4 fromDir)[n, n];
 
 		// 何行配置できるか（最大N行、またはM-5個の色を全て配置できる行数）
 		// 初期の5個は既に保持しているため、盤面に配置する必要があるのはM-5個
@@ -857,9 +861,10 @@ public class Program
 					}
 
 					// 次に必要な色の配列を作成（最大8個先まで）
-					var neededColors = new List<byte>();
+					int neededCount = Math.Min(8, targetCountForRow - targetFromBack);
+					Span<byte> neededColors = stackalloc byte[neededCount];
 					bool isFinalRow = (row == maxRows - 1);
-					for (int i = 0; i < Math.Min(8, targetCountForRow - targetFromBack); i++) {
+					for (int i = 0; i < neededCount; i++) {
 						int index;
 						if (isFinalRow) {
 							// 最終行は前から（配置済みの行を食べるための準備）
@@ -868,22 +873,22 @@ public class Program
 							// それ以外は後ろから（配置のための準備）
 							index = m - 1 - targetFromBackStart - targetFromBack - i;
 						}
-						neededColors.Add((byte)input.D[index]);
+						neededColors[i] = (byte)input.D[index];
 					}
 
-					if (isDebugPlan4 && neededColors.Count > 0) {
+					if (isDebugPlan4 && neededColors.Length > 0) {
 						Console.Write("  Needed colors: [");
-						for (int i = 0; i < neededColors.Count; i++) {
+						for (int i = 0; i < neededColors.Length; i++) {
 							Console.Write($"{neededColors[i]}");
-							if (i < neededColors.Count - 1) Console.Write(", ");
+							if (i < neededColors.Length - 1) Console.Write(", ");
 						}
 						Console.WriteLine("]");
 					}
 
-					if (neededColors.Count == 0) break;
+					if (neededColors.Length == 0) break;
 
 					// FindBestPathDFSで経路を探索（既に配置した行は避ける）
-					var path = FindBestPathDFS3(state, input, neededColors.ToArray(), 8, row - 1);
+					var path = FindBestPathDFS3(state, input, neededColors, 8, row - 1);
 
 					if (isDebugPlan4) {
 						if (path != null && path.Length > 0) {
@@ -997,9 +1002,8 @@ public class Program
 							}
 
 							byte bfsTargetColor = neededColors[0];
-							var bfsQueue = new Queue<(int i, int j)>();
-							var bfsVisited = new bool[n, n];
-							var bfsPrev = new (int pi, int pj, Direction4 fromDir)[n, n];
+							bfsQueue.Clear();
+							Array.Clear(bfsVisited, 0, bfsVisited.Length);
 
 							bfsVisited[hi, hj] = true;
 							{
@@ -1847,25 +1851,11 @@ public class Program
 	{
 		int n = input.N;
 
-		// 距離pruning用: 色ごとの餌位置を事前計算（DFS中はEsasを確認して存在チェック）
-		var foodsByColor = new List<(int i, int j)>[input.C + 1];
-		for (int col = 0; col <= input.C; col++) {
-			foodsByColor[col] = [];
-		}
-		for (int di = 0; di < n; di++) {
-			for (int dj = 0; dj < n; dj++) {
-				byte esa = state.Esas[di, dj];
-				if (esa > 0) {
-					foodsByColor[esa].Add((di, dj));
-				}
-			}
-		}
-
 		// (fi, fj) から color の餌までの最小マンハッタン距離を返す
 		int CalcMinManhattan(int fi, int fj, byte color)
 		{
 			int min = int.MaxValue;
-			foreach (var (pi, pj) in foodsByColor[color]) {
+			foreach (var (pi, pj) in input.FoodPositionsByColor[color]) {
 				if (state.Esas[pi, pj] == color) {
 					int dist = Math.Abs(fi - pi) + Math.Abs(fj - pj);
 					if (dist < min) {
@@ -2002,29 +1992,15 @@ public class Program
 	/// <param name="maxDepth">探索する最大歩数</param>
 	/// <param name="avoidRowsBelow">この行番号以下には侵入しない（既に配置済みの行を避ける）</param>
 	/// <returns>最適な移動経路。1つも拾えない場合はnull</returns>
-	static Direction4[] FindBestPathDFS3(State state, Input input, byte[] neededColors, int maxDepth, int avoidRowsBelow = -1)
+	static Direction4[] FindBestPathDFS3(State state, Input input, ReadOnlySpan<byte> neededColors, int maxDepth, int avoidRowsBelow = -1)
 	{
 		int n = input.N;
-
-		// 距離pruning用: 色ごとの餌位置を事前計算（DFS中はEsasを確認して存在チェック）
-		var foodsByColor = new List<(int i, int j)>[input.C + 1];
-		for (int col = 0; col <= input.C; col++) {
-			foodsByColor[col] = [];
-		}
-		for (int di = 0; di < n; di++) {
-			for (int dj = 0; dj < n; dj++) {
-				byte esa = state.Esas[di, dj];
-				if (esa > 0) {
-					foodsByColor[esa].Add((di, dj));
-				}
-			}
-		}
 
 		// (fi, fj) から color の餌までの最小マンハッタン距離を返す
 		int CalcMinManhattan(int fi, int fj, byte color)
 		{
 			int min = int.MaxValue;
-			foreach (var (pi, pj) in foodsByColor[color]) {
+			foreach (var (pi, pj) in input.FoodPositionsByColor[color]) {
 				if (state.Esas[pi, pj] == color) {
 					int dist = Math.Abs(fi - pi) + Math.Abs(fj - pj);
 					if (dist < min) {
@@ -2040,7 +2016,7 @@ public class Program
 		int bestCollected = 0;
 		int bestSteps = int.MaxValue;
 
-		void DFS(int depth, List<Direction4> currentPath, int collectedIndex)
+		void DFS(int depth, List<Direction4> currentPath, int collectedIndex, ReadOnlySpan<byte> nc)
 		{
 			// 現在の経路を評価（より良い経路なら更新）
 			if (collectedIndex > bestCollected ||
@@ -2056,7 +2032,7 @@ public class Program
 			}
 
 			// 必要な色を全て拾い終えたら終了
-			if (collectedIndex >= neededColors.Length) {
+			if (collectedIndex >= nc.Length) {
 				return;
 			}
 
@@ -2065,7 +2041,7 @@ public class Program
 
 			// 距離pruning: 次の必要な色に残り手数内で届かないなら枝刈り
 			int remaining = maxDepth - depth;
-			if (CalcMinManhattan(hi, hj, neededColors[collectedIndex]) > remaining) {
+			if (CalcMinManhattan(hi, hj, nc[collectedIndex]) > remaining) {
 				return;
 			}
 
@@ -2095,7 +2071,7 @@ public class Program
 				// 餌がある場合、必要な色かチェック
 				byte esa = state.Esas[ni, nj];
 				if (esa > 0) {
-					byte neededColor = neededColors[collectedIndex];
+					byte neededColor = nc[collectedIndex];
 					if (esa != neededColor) {
 						// 必要な色以外の餌は拾わない
 						continue;
@@ -2113,7 +2089,7 @@ public class Program
 				}
 
 				// 再帰探索
-				DFS(depth + 1, currentPath, newCollectedIndex);
+				DFS(depth + 1, currentPath, newCollectedIndex, nc);
 
 				// Undo
 				currentPath.RemoveAt(currentPath.Count - 1);
@@ -2121,7 +2097,7 @@ public class Program
 			}
 		}
 
-		DFS(0, new List<Direction4>(), 0);
+		DFS(0, new List<Direction4>(), 0, neededColors);
 
 		return bestCollected > 0 ? bestPath : null;
 	}
