@@ -27,6 +27,9 @@ public class Program
 						//$"N={input.N:d2}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
+						$"M={info.Move:d5}",
+						$"T={info.Turn:d4}",
+						$"W={info.W:d4}",
 						$"score={info.Score:d5}",
 						$"elapsed={info.Elapsed:d4}",
 					};
@@ -52,14 +55,295 @@ public class Program
 		var input = new Input(io, isLocal);
 		var info = new Information();
 
+		var best = Plan1(isLocal, rnd, sw, input);
+		info.W = 1;
+		long bestScore = best.Calculate();
+
+		{
+			var state = Plan2(isLocal, rnd, sw, input);
+			Update(state, 2);
+		}
+
+		input.Output(best);
+		if (isLocal) {
+			info.Move = best.Moves.Count;
+			info.Turn = best.ZipMoves().Count;
+			info.Score = best.Calculate();
+		}
+
+		info.Elapsed = sw.ElapsedMilliseconds;
+
+		return (input, info);
+
+		void Update(State state, int w)
+		{
+			var tempScore = state.Calculate();
+			if (tempScore > bestScore) {
+				best = state;
+				bestScore = tempScore;
+				info.W = w;
+			}
+		}
+	}
+
+	static State Plan2(bool isLocal, Random rnd, Stopwatch sw, Input input)
+	{
+		var state = new State(isLocal, input);
+		int stuckCount = 0;
+		Move? lastMove = null;
+
+		for (int turn = 0; turn < 4000; turn++) {
+			if (IsFinished(state, input)) {
+				break;
+			}
+
+			// DP for non-crossing matching
+			double[,] dp = new double[input.R + 1, input.R + 1];
+			int[,] prev = new int[input.R + 1, input.R + 1];
+			int[,] prevK = new int[input.R + 1, input.R + 1];
+
+			for (int i = 1; i <= input.R; i++) {
+				for (int j = 1; j <= input.R; j++) {
+					dp[i, j] = dp[i - 1, j];
+					prev[i, j] = 0;
+					prevK[i, j] = 0;
+
+					if (dp[i, j - 1] > dp[i, j]) {
+						dp[i, j] = dp[i, j - 1];
+						prev[i, j] = 1;
+						prevK[i, j] = 0;
+					}
+
+					var (score0, k0) = ScoreStartToAvoid(state, input, i - 1, j - 1, rnd, stuckCount);
+					if (score0 > 0 && dp[i - 1, j - 1] + score0 > dp[i, j]) {
+						dp[i, j] = dp[i - 1, j - 1] + score0;
+						prev[i, j] = 2;
+						prevK[i, j] = k0;
+					}
+
+					var (score1, k1) = ScoreAvoidToStart(state, input, i - 1, j - 1, rnd, stuckCount);
+					if (score1 > 0 && dp[i - 1, j - 1] + score1 > dp[i, j]) {
+						dp[i, j] = dp[i - 1, j - 1] + score1;
+						prev[i, j] = 3;
+						prevK[i, j] = k1;
+					}
+				}
+			}
+
+			int ci = input.R;
+			int cj = input.R;
+			var turnMoves = new List<Move>();
+
+			while (ci > 0 && cj > 0) {
+				int p = prev[ci, cj];
+				int k = prevK[ci, cj];
+				if (p == 0) {
+					ci--;
+				} else if (p == 1) {
+					cj--;
+				} else {
+					ci--;
+					cj--;
+					if (p == 2) {
+						turnMoves.Add(new Move(0, ci, cj, k));
+					} else if (p == 3) {
+						turnMoves.Add(new Move(1, ci, cj, k));
+					}
+				}
+			}
+
+			turnMoves.Reverse();
+
+			if (turnMoves.Count == 0) {
+				stuckCount++;
+				if (stuckCount > 30) break; // Deadlock escape exhausted or no possible moves
+			} else {
+				if (turnMoves.Count == 1 && lastMove != null && IsReverse(turnMoves[0], lastMove.Value)) {
+					stuckCount++;
+					turnMoves.Clear();
+				} else {
+					stuckCount = 0;
+				}
+			}
+
+			if (turnMoves.Count > 0) {
+				if (turnMoves.Count == 1) lastMove = turnMoves[0];
+				else lastMove = null;
+			}
+
+			foreach (var move in turnMoves) {
+				state.Add(move);
+			}
+		}
+
+		return state;
+	}
+
+	static bool IsFinished(State state, Input input)
+	{
+		for (int i = 0; i < input.R; i++) {
+			if (state.Starts[i].Count != input.N) return false;
+			for (int j = 0; j < input.N; j++) {
+				if (state.Starts[i][j] != i * input.N + j) {
+					return false;
+				}
+			}
+		}
+		return true;
+	}
+
+	static int GetCorrectCount(State state, Input input, int i)
+	{
+		int count = 0;
+		for (int j = 0; j < state.Starts[i].Count; j++) {
+			if (state.Starts[i][j] == i * input.N + j) {
+				count++;
+			} else {
+				break;
+			}
+		}
+		return count;
+	}
+
+	static bool IsReverse(Move a, Move b)
+	{
+		if (a.Type == 0 && b.Type == 1 && a.I == b.I && a.J == b.J && a.K == b.K) return true;
+		if (a.Type == 1 && b.Type == 0 && a.I == b.I && a.J == b.J && a.K == b.K) return true;
+		return false;
+	}
+
+	static (double score, int k) ScoreStartToAvoid(State state, Input input, int i, int j, Random rnd, int stuckCount)
+	{
+		int correctCount = GetCorrectCount(state, input, i);
+		int maxK = Math.Min(state.Starts[i].Count - correctCount, input.MaxAvoid - state.Avoids[j].Count);
+		if (maxK <= 0) return (-1, 0);
+
+		double bestScore = -100000;
+		int bestK = 0;
+		double noise = rnd.NextDouble();
+
+		for (int k = 1; k <= maxK; k++) {
+			int x = state.Starts[i][state.Starts[i].Count - k];
+			int destX = x / input.N;
+			double delta = 10.0 * k; // 出発線から邪魔なものをどける基本報酬
+
+			if (state.Avoids[j].Count > 0) {
+				int y = state.Avoids[j].Front;
+				int destY = y / input.N;
+
+				if (destX != destY) delta -= 50.0 * k; // 違う行のものが混ざるペナルティ
+
+				if (x < y) {
+					delta += 50.0 * k; // 正しく降順（上が小さい）なら報酬
+					if (y - x == 1) delta += 100.0 * k; // 連番なら大ボーナス
+				} else {
+					delta -= 200.0 * k; // 逆転（上が大きい）は大きなペナルティ
+				}
+			} else {
+				if (destX == j) delta += 30.0 * k; // 自分の行用の待避線ならボーナス
+			}
+
+			if (k > 1) {
+				int prevX = state.Starts[i][state.Starts[i].Count - k + 1];
+				if (x < prevX) delta += 50.0 * k;
+				else delta -= 100.0 * k;
+			}
+
+			delta += noise; // 完全なループを防ぐためのノイズ
+
+			if (stuckCount > 0) {
+				delta += stuckCount * 200.0 * rnd.NextDouble(); // スタック解消時は強引に移動させる
+			}
+
+			if (delta > bestScore) {
+				bestScore = delta;
+				bestK = k;
+			}
+		}
+
+		return (bestScore, bestK);
+	}
+
+	static (double score, int k) ScoreAvoidToStart(State state, Input input, int i, int j, Random rnd, int stuckCount)
+	{
+		int maxK = Math.Min(state.Avoids[j].Count, input.MaxStart - state.Starts[i].Count);
+		if (maxK <= 0) return (-1, 0);
+
+		int correctCount = GetCorrectCount(state, input, i);
+
+		double bestScore = -100000;
+		int bestK = 0;
+		double noise = rnd.NextDouble();
+
+		for (int k = 1; k <= maxK; k++) {
+			int topMoved = state.Avoids[j].Front;
+			int bottomMoved = state.Avoids[j][k - 1];
+			int destX = bottomMoved / input.N;
+
+			bool perfect = false;
+			if (i == destX && state.Starts[i].Count == correctCount) {
+				perfect = true;
+				for (int m = 0; m < k; m++) {
+					int train = state.Avoids[j][k - 1 - m];
+					if (train != i * input.N + correctCount + m) {
+						perfect = false;
+						break;
+					}
+				}
+			}
+
+			// 完全に次に必要な車両の場合は超大ボーナス（確定）
+			if (perfect) {
+				double score = 10000.0 * k + noise;
+				if (score > bestScore) {
+					bestScore = score;
+					bestK = k;
+				}
+				continue;
+			}
+
+			double delta = -10.0 * k; // 基本的に目的以外の出発線に戻すのはペナルティ
+
+			if (state.Starts[i].Count == correctCount) {
+				delta -= 100.0 * k; // 綺麗な状態の出発線を汚すのは強く避ける
+			} else {
+				int startTop = state.Starts[i].Back;
+				if (startTop > bottomMoved) delta += 10.0 * k; // 少なくとも上に小さいものを置けるなら少しマシ
+				else delta -= 10.0 * k;
+			}
+
+			if (state.Avoids[j].Count > k) {
+				int y = state.Avoids[j][k]; // どけたことによって次に見えるようになる車両
+				int destY = y / input.N;
+
+				if ((topMoved / input.N) != destY) delta += 50.0 * k;
+				if (topMoved < y) delta -= 50.0 * k; // 本来良い並びだったものを崩すのはペナルティ
+				else delta += 150.0 * k; // 待避線内の逆転現象（悪い状態）を解消するための発掘移動なら報酬
+			}
+
+			delta += noise;
+
+			if (stuckCount > 0) {
+				delta += stuckCount * 200.0 * rnd.NextDouble(); // スタック解消
+			}
+
+			if (delta > bestScore) {
+				bestScore = delta;
+				bestK = k;
+			}
+		}
+
+		if (bestScore <= 0 && stuckCount == 0) return (-1, 0);
+
+		return (bestScore, bestK);
+	}
+
+	static State Plan1(bool isLocal, Random rnd, Stopwatch sw, Input input)
+	{
 		var state = new State(isLocal, input);
 		int railCount = input.R * input.N;
 		var moves = new List<Move>();
 		for (int k = 0; k < railCount; k++) {
-			if (k == 50) {
-				io.Write("");
-			}
-
 			int ti = k / input.N;
 			int tj = k % input.N;
 			// 番号kの車両を探す
@@ -116,11 +400,7 @@ public class Program
 			}
 		}
 
-		input.Output(state);
-		info.Score = state.Calculate();
-		info.Elapsed = sw.ElapsedMilliseconds;
-
-		return (input, info);
+		return state;
 	}
 }
 
@@ -351,6 +631,9 @@ public class Information
 	public int Up { get; set; } = 0;
 	public long Elapsed { get; set; } = 0;
 
+	public int W { get; set; } = 0;
+	public int Move { get; set; } = 0;
+	public int Turn { get; set; } = 0;
 }
 
 public class Input
