@@ -26,6 +26,7 @@ public class Program
 						$"{i:d4}:",
 						//$"N={input.N:d2}",
 						$"loop={info.Loop:d8}",
+						$"ack={info.Ack:d4}",
 						$"up={info.Up:d4}",
 						$"M={info.Move:d5}",
 						$"T={info.Turn:d4}",
@@ -59,17 +60,23 @@ public class Program
 		info.W = 4;
 		long bestScore = best.Calculate().score;
 
+		/*
 		{
 			var state = Plan2(isLocal, rnd, sw, input);
 			Update(state, 2);
-		}
-		/*
-		{
-			// plan3 の動作確認の為にplan3が適用されるようにする
-			//bestScore = 0;
-			var state = Plan3(isLocal, rnd, sw, input);
-			Update(state, 3);
 		}*/
+
+		int limit = 1900;
+		while (sw.ElapsedMilliseconds < limit) {
+			++info.Loop;
+			var temp = Plan5(isLocal, rnd, sw, input, best);
+			if (temp is null) {
+				continue;
+			}
+
+			Update(temp, 5);
+		}
+
 
 		input.Output(best);
 		if (isLocal) {
@@ -85,8 +92,14 @@ public class Program
 		{
 			var tempScore = state.Calculate().score;
 			if (tempScore > bestScore) {
+				++info.Ack;
+				++info.Up;
 				best = state;
 				bestScore = tempScore;
+				info.W = w;
+			} else if (tempScore == bestScore) {
+				++info.Ack;
+				best = state;
 				info.W = w;
 			}
 		}
@@ -179,112 +192,6 @@ public class Program
 
 			foreach (var move in turnMoves) {
 				state.Add(move);
-			}
-		}
-
-		return state;
-	}
-
-	static State Plan3(bool isLocal, Random rnd, Stopwatch sw, Input input)
-	{
-		var state = new State(isLocal, input);
-		int stuckCount = 0;
-		List<Move> lastTurnMoves = new List<Move>();
-
-		for (int turn = 0; turn < 4000; turn++) {
-			if (IsFinished(state, input)) {
-				break;
-			}
-
-			// DP for non-crossing matching
-			double[,] dp = new double[input.R + 1, input.R + 1];
-			int[,] prev = new int[input.R + 1, input.R + 1];
-			int[,] prevK = new int[input.R + 1, input.R + 1];
-
-			for (int i = 1; i <= input.R; i++) {
-				for (int j = 1; j <= input.R; j++) {
-					dp[i, j] = dp[i - 1, j];
-					prev[i, j] = 0;
-					prevK[i, j] = 0;
-
-					if (dp[i, j - 1] > dp[i, j]) {
-						dp[i, j] = dp[i, j - 1];
-						prev[i, j] = 1;
-						prevK[i, j] = 0;
-					}
-
-					var (score0, k0) = ScoreStartToAvoid3(state, input, i - 1, j - 1, rnd, stuckCount);
-					if (score0 > 0 && dp[i - 1, j - 1] + score0 > dp[i, j]) {
-						dp[i, j] = dp[i - 1, j - 1] + score0;
-						prev[i, j] = 2;
-						prevK[i, j] = k0;
-					}
-
-					var (score1, k1) = ScoreAvoidToStart3(state, input, i - 1, j - 1, rnd, stuckCount);
-					if (score1 > 0 && dp[i - 1, j - 1] + score1 > dp[i, j]) {
-						dp[i, j] = dp[i - 1, j - 1] + score1;
-						prev[i, j] = 3;
-						prevK[i, j] = k1;
-					}
-				}
-			}
-
-			int ci = input.R;
-			int cj = input.R;
-			var turnMoves = new List<Move>();
-
-			while (ci > 0 && cj > 0) {
-				int p = prev[ci, cj];
-				int k = prevK[ci, cj];
-				if (p == 0) {
-					ci--;
-				} else if (p == 1) {
-					cj--;
-				} else {
-					ci--;
-					cj--;
-					if (p == 2) {
-						turnMoves.Add(new Move(0, ci, cj, k));
-					} else if (p == 3) {
-						turnMoves.Add(new Move(1, ci, cj, k));
-					}
-				}
-			}
-
-			turnMoves.Reverse();
-
-			if (turnMoves.Count == 0) {
-				stuckCount++;
-				if (stuckCount > 30) break; // Deadlock escape exhausted
-			} else {
-				bool isReversing = false;
-				if (lastTurnMoves.Count > 0 && turnMoves.Count == lastTurnMoves.Count) {
-					isReversing = true;
-					for (int i = 0; i < turnMoves.Count; i++) {
-						if (!IsReverse(turnMoves[i], lastTurnMoves[i])) {
-							isReversing = false;
-							break;
-						}
-					}
-				} else if (turnMoves.Count == 1 && lastTurnMoves.Count == 1) {
-					if (IsReverse(turnMoves[0], lastTurnMoves[0])) {
-						isReversing = true;
-					}
-				}
-
-				if (isReversing) {
-					stuckCount++;
-					turnMoves.Clear();
-				} else {
-					stuckCount = 0;
-				}
-			}
-
-			if (turnMoves.Count > 0) {
-				lastTurnMoves = turnMoves;
-				foreach (var move in turnMoves) {
-					state.Add(move);
-				}
 			}
 		}
 
@@ -450,234 +357,113 @@ public class Program
 		return (bestScore, bestK);
 	}
 
-	static (double score, int k) ScoreStartToAvoid3(State state, Input input, int i, int j, Random rnd, int stuckCount)
-	{
-		int correctCount = GetCorrectCount(state, input, i);
-		int maxK = Math.Min(state.Starts[i].Count - correctCount, input.MaxAvoid - state.Avoids[j].Count);
-		if (maxK <= 0) return (-1, 0);
-
-		double bestScore = -100000;
-		int bestK = 0;
-		double noise = rnd.NextDouble() * 0.1;
-
-		for (int k = 1; k <= maxK; k++) {
-			int bottomMoved = state.Starts[i].Back; // Startsから最初に移る（Avoidではyに乗る）車両
-			int destBottom = bottomMoved / input.N;
-			double delta = 10.0 * k;
-
-			if (state.Avoids[j].Count > 0) {
-				int y = state.Avoids[j].Front;
-				int destY = y / input.N;
-
-				if (destBottom == destY) {
-					if (bottomMoved < y) {
-						delta += 50.0 * k;
-						if (y - bottomMoved == 1) delta += 150.0 * k; // 完全連番なら特大ボーナス
-					} else {
-						delta -= 200.0 * k; // 同じ行き先での逆転は厳しいペナルティ
-					}
-				}
-				// 違う行き先の場合は逆転は許容される。ただしわずかにマイナス
-				else {
-					delta -= 5.0 * k;
-				}
-			} else {
-				if (destBottom == j) delta += 50.0 * k; // 空き待避線の活用
-			}
-
-			int badCount = 0;
-			int goodPairs = 0;
-			for (int m = 1; m < k; m++) {
-				int lowerInAvoid = state.Starts[i][state.Starts[i].Count - m];
-				int upperInAvoid = state.Starts[i][state.Starts[i].Count - m - 1];
-				if (upperInAvoid / input.N == lowerInAvoid / input.N) {
-					if (upperInAvoid < lowerInAvoid) {
-						goodPairs++;
-					} else {
-						badCount++;
-					}
-				}
-			}
-
-			if (badCount > 0) delta -= 300.0 * badCount; // 内部分解や逆順を嫌う
-			if (goodPairs > 0) delta += 100.0 * goodPairs;
-
-			delta += noise;
-
-			if (stuckCount > 0) {
-				delta += stuckCount * 200.0 * rnd.NextDouble();
-			}
-
-			if (delta > bestScore) {
-				bestScore = delta;
-				bestK = k;
-			}
-		}
-
-		if (bestScore <= 0 && stuckCount == 0) return (-1, 0);
-
-		return (bestScore, bestK);
-	}
-
-	static (double score, int k) ScoreAvoidToStart3(State state, Input input, int i, int j, Random rnd, int stuckCount)
-	{
-		int maxK = Math.Min(state.Avoids[j].Count, input.MaxStart - state.Starts[i].Count);
-		if (maxK <= 0) return (-1, 0);
-
-		int correctCount = GetCorrectCount(state, input, i);
-
-		double bestScore = -100000;
-		int bestK = 0;
-		double noise = rnd.NextDouble() * 0.1;
-
-		for (int k = 1; k <= maxK; k++) {
-			int topMoved = state.Avoids[j].Front;     // Startに最初に移る
-			int bottomMoved = state.Avoids[j][k - 1]; // Startに最後に移る
-			int destTop = topMoved / input.N;
-
-			bool perfect = false;
-			if (i == destTop && state.Starts[i].Count == correctCount) {
-				perfect = true;
-				for (int m = 0; m < k; m++) {
-					int train = state.Avoids[j][m];
-					if (train != i * input.N + correctCount + m) {
-						perfect = false;
-						break;
-					}
-				}
-			}
-
-			if (perfect) {
-				// 完全な連番移動はKが大きいほど超ボーナス
-				double score = 10000.0 * k + noise;
-				if (score > bestScore) {
-					bestScore = score;
-					bestK = k;
-				}
-				continue;
-			}
-
-			double delta = -10.0 * k; // 目的以外なら基本ペナルティ
-
-			if (state.Starts[i].Count == correctCount) {
-				delta -= 200.0 * k; // 綺麗な状態の出発線を汚すのは避ける
-			} else {
-				int startTop = state.Starts[i].Back;
-				if (startTop / input.N == topMoved / input.N) {
-					if (startTop < topMoved) delta += 50.0 * k;
-					else delta -= 100.0 * k; // 同じ出発線で逆転はかなりマイナス
-				}
-			}
-
-			if (state.Avoids[j].Count > k) {
-				int y = state.Avoids[j][k]; // どけたことによって次に見えるようになる車両
-				if (bottomMoved / input.N == y / input.N) {
-					if (bottomMoved > y) delta += 100.0 * k; // 同じ行き先で逆転している悪い状態の解消
-					else delta -= 200.0 * k; // 良いペアを割るのはペナルティ
-				} else {
-					delta += 30.0 * k; // 違う行き先のために掘り起こすのはOK
-				}
-			}
-
-			// 動かすブロックが同じ行き先で連番（またはソートされている）ならまとめて動かすボーナス
-			int goodPairs = 0;
-			for (int m = 0; m < k - 1; m++) {
-				int upper = state.Avoids[j][m];
-				int lower = state.Avoids[j][m + 1];
-				if (upper / input.N == lower / input.N) {
-					if (upper < lower) goodPairs++;
-					else delta -= 100.0; // 逆転をまとめてStartに送るのはダメ
-				}
-			}
-			if (goodPairs > 0) {
-				delta += 50.0 * goodPairs; // まとめて動かす
-			}
-
-			delta += noise;
-
-			if (stuckCount > 0) {
-				delta += stuckCount * 200.0 * rnd.NextDouble();
-			}
-
-			if (delta > bestScore) {
-				bestScore = delta;
-				bestK = k;
-			}
-		}
-
-		if (bestScore <= 0 && stuckCount == 0) return (-1, 0);
-
-		return (bestScore, bestK);
-	}
-
-	static State Plan1(bool isLocal, Random rnd, Stopwatch sw, Input input)
-	{
-		var state = new State(isLocal, input);
-		int railCount = input.R * input.N;
-		var moves = new List<Move>();
-		for (int k = 0; k < railCount; k++) {
-			int ti = k / input.N;
-			int tj = k % input.N;
-			// 番号kの車両を探す
-			var ret = state.FindTrain(k);
-			if (ret.isStart && ret.i == ti && ret.j == tj) {
-				// もう適切な位置にいるので何もしない。
-				continue;
-			}
-
-			if (ret.isStart) {
-				// kが待避線の先頭に来るようにどける
-				int moveCount = state.Starts[ret.i].Count - ret.j;
-				int tagJ = state.FindAvoidLine(moveCount);
-				state.Add(new Move(0, ret.i, tagJ, moveCount));
-
-				// kの行き先をあける
-				if (state.Starts[ti].Count > tj) {
-					moveCount = state.Starts[ti].Count - tj;
-					int tagJ2 = state.FindAvoidLine2(moveCount, tagJ);
-					state.Add(new Move(0, ti, tagJ2, moveCount));
-				}
-
-				// kを移動。次がすぐに移動出来るようにkだけ。
-				// 待避線が足りないときは後で考える。
-				state.Add(new Move(1, ti, tagJ, 1));
-			} else {
-				// kが先頭で無い場合、上をどける
-				int moveCount = 0;
-				if (ret.j > 0) {
-					moveCount = ret.j;
-					int tagI2 = state.FindStartLine2(moveCount, ti);
-					if (tagI2 >= 0) {
-						state.Add(new Move(1, tagI2, ret.i, moveCount));
-					} else {
-						while (moveCount > 0) {
-							var moveRet = state.TryFindStartLine(ti);
-							int moveCount2 = Math.Min(moveCount, moveRet.count);
-							state.Add(new Move(1, moveRet.i, ret.i, moveCount2));
-							moveCount -= moveCount2;
-						}
-					}
-				}
-
-				// kの行き先をあける
-				if (state.Starts[ti].Count > tj) {
-					moveCount = state.Starts[ti].Count - tj;
-					int tagJ2 = state.FindAvoidLine2(moveCount, ret.i);
-					state.Add(new Move(0, ti, tagJ2, moveCount));
-				}
-
-				// kを移動。次がすぐに移動出来るようにkだけ。
-				// 待避線が足りないときは後で考える。
-				state.Add(new Move(1, ti, ret.i, 1));
-			}
-		}
-
-		return state;
-	}
-
 	static State Plan4(bool isLocal, Random rnd, Stopwatch sw, Input input)
 	{
 		var state = new State(isLocal, input);
+		return Plan4Core(isLocal, rnd, sw, input, state);
+	}
+
+	static State Plan5(bool isLocal, Random rnd, Stopwatch sw, Input input, State best)
+	{
+		var state = new State(isLocal, input);
+		// 挿入位置を決定
+		int tag = rnd.Next(0, best.Moves.Count);
+		// そこまで進める
+		for (int t = 0; t < tag; t++) {
+			state.Add(best.Moves[t]);
+		}
+
+		// ここで良い手を探す
+
+		// どっちから動かすか
+		if (rnd.Next(0, 2) == 0) {
+			// 八者側
+			// 動かす対象
+			int i = rnd.Next(0, input.R);
+			if (state.Starts[i].Count == 0) {
+				// 何もない
+				return null;
+			}
+
+			int u = state.Starts[i][^1];
+			int ui = u / input.N;
+			int uj = u % input.N;
+			if (ui == i && uj == state.Starts[i].Count - 1) {
+				// 既に正しく格納されているやつは動かさない
+				return null;
+			}
+
+			// 上の車両と連番のとき、まとめて動かす。
+			int moveCount = 1;
+			while (true) {
+				if (state.Starts[i].Count > moveCount) {
+					int v = state.Starts[i][^(moveCount + 1)];
+					int vi = v / input.N;
+					if (v == u - moveCount && ui == vi) {
+						++moveCount;
+					} else {
+						break;
+					}
+				} else {
+					break;
+				}
+			}
+
+			// 移動先
+			// とりあえずランダムにする。真下の方が採用率は高そうだが、効果があるかは微妙。
+			// くっつく車両があれば探すべき？
+			int j = rnd.Next(0, input.R);
+			if (state.Avoids[j].Count + moveCount > input.MaxAvoid) {
+				return null;
+			}
+
+			state.Add(new Move(0, i, j, moveCount));
+		} else {
+			// 退避側
+
+			// 動かす対象
+			int j = rnd.Next(0, input.R);
+			if (state.Avoids[j].Count == 0) {
+				// 何もない
+				return null;
+			}
+
+			int u = state.Avoids[j][0];
+			int ui = u / input.N;
+			int uj = u % input.N;
+			// 下の車両と連番のとき、まとめて動かす
+			int moveCount = 1;
+			while (true) {
+				if (state.Avoids[j].Count > moveCount) {
+					int v = state.Avoids[j][moveCount];
+					int vi = v / input.N;
+					if (v == u + moveCount && ui == vi) {
+						++moveCount;
+					} else {
+						break;
+					}
+				} else {
+					break;
+				}
+			}
+
+			// 移動先
+			// とりあえずランダムにする。
+			int i = rnd.Next(0, input.R);
+			if (state.Starts[i].Count + moveCount > input.MaxStart) {
+				return null;
+			}
+
+			state.Add(new Move(1, i, j, moveCount));
+		}
+
+
+		// 以降は貪欲で
+		return Plan4Core(isLocal, rnd, sw, input, state);
+	}
+
+	static State Plan4Core(bool isLocal, Random rnd, Stopwatch sw, Input input, State state)
+	{
 		int railCount = input.R * input.N;
 		var moves = new List<Move>();
 		for (int k = 0; k < railCount; k++) {
@@ -1054,6 +840,7 @@ public class Information
 	public long Time { get; set; } = 0;
 	public long Score { get; set; } = 0;
 	public int Loop { get; set; } = 0;
+	public int Ack { get; set; } = 0;
 	public int Up { get; set; } = 0;
 	public long Elapsed { get; set; } = 0;
 
