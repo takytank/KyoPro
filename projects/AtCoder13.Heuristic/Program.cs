@@ -704,8 +704,23 @@ public class Program
 				}
 
 				// kを移動。次がすぐに移動出来るようにkだけ。
+				// ただし、次に動かすべきものがすぐ下にいる場合には一緒に動かす。
+				moveCount = 1;
+				while (true) {
+					if (state.Avoids[tagJ].Count > moveCount) {
+						int v = state.Avoids[tagJ][moveCount];
+						int vi = v / input.N;
+						if (v == k + moveCount && ti == vi) {
+							++moveCount;
+						} else {
+							break;
+						}
+					} else {
+						break;
+					}
+				}
 				// 待避線が足りないときは後で考える。
-				state.Add(new Move(1, ti, tagJ, 1));
+				state.Add(new Move(1, ti, tagJ, moveCount));
 			} else {
 				// kが先頭で無い場合、上をどける
 				int moveCount = 0;
@@ -732,8 +747,23 @@ public class Program
 				}
 
 				// kを移動。次がすぐに移動出来るようにkだけ。
+				// ただし、次に動かすべきものがすぐ下にいる場合には一緒に動かす。
+				moveCount = 1;
+				while (true) {
+					if (state.Avoids[ret.i].Count > moveCount) {
+						int v = state.Avoids[ret.i][moveCount];
+						int vi = v / input.N;
+						if (v == k + moveCount && ti == vi) {
+							++moveCount;
+						} else {
+							break;
+						}
+					} else {
+						break;
+					}
+				}
 				// 待避線が足りないときは後で考える。
-				state.Add(new Move(1, ti, ret.i, 1));
+				state.Add(new Move(1, ti, ret.i, moveCount));
 			}
 		}
 
