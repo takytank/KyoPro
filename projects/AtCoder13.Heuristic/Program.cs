@@ -46,15 +46,300 @@ public class Program
 	static (Input input, Information info)
 		Run(int caseNumber)
 	{
-		var (isDebug, sw, rnd) = HeuristicHelper.Initialize();
-		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC056\tools\in\", caseNumber);
+		var (isLocal, sw, rnd) = HeuristicHelper.Initialize();
+		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC064\tools\in\", caseNumber);
 
-		var input = new Input(io, isDebug);
+		var input = new Input(io, isLocal);
 		var info = new Information();
 
+		var state = new State(isLocal, input);
+		int railCount = input.R * input.N;
+		var moves = new List<Move>();
+		for (int k = 0; k < railCount; k++) {
+			if (k == 50) {
+				io.Write("");
+			}
+
+			int ti = k / input.N;
+			int tj = k % input.N;
+			// 番号kの車両を探す
+			var ret = state.FindTrain(k);
+			if (ret.isStart && ret.i == ti && ret.j == tj) {
+				// もう適切な位置にいるので何もしない。
+				continue;
+			}
+
+			if (ret.isStart) {
+				// kが待避線の先頭に来るようにどける
+				int moveCount = state.Starts[ret.i].Count - ret.j;
+				int tagJ = state.FindAvoidLine(moveCount);
+				state.Add(new Move(0, ret.i, tagJ, moveCount));
+
+				// kの行き先をあける
+				if (state.Starts[ti].Count > tj) {
+					moveCount = state.Starts[ti].Count - tj;
+					int tagJ2 = state.FindAvoidLine(moveCount, tagJ);
+					state.Add(new Move(0, ti, tagJ2, moveCount));
+				}
+
+				// kを移動。次がすぐに移動出来るようにkだけ。
+				// 待避線が足りないときは後で考える。
+				state.Add(new Move(1, ti, tagJ, 1));
+			} else {
+				// kが先頭で無い場合、上をどける
+				int moveCount = 0;
+				if (ret.j > 0) {
+					moveCount = ret.j;
+					int tagI2 = state.FindStartLine(moveCount, ti);
+					if (tagI2 >= 0) {
+						state.Add(new Move(1, tagI2, ret.i, moveCount));
+					} else {
+						while (moveCount > 0) {
+							var moveRet = state.TryFindStartLine(ti);
+							int moveCount2 = Math.Min(moveCount, moveRet.count);
+							state.Add(new Move(1, moveRet.i, ret.i, moveCount2));
+							moveCount -= moveCount2;
+						}
+					}
+				}
+
+				// kの行き先をあける
+				if (state.Starts[ti].Count > tj) {
+					moveCount = state.Starts[ti].Count - tj;
+					int tagJ2 = state.FindAvoidLine(moveCount, ret.i);
+					state.Add(new Move(0, ti, tagJ2, moveCount));
+				}
+
+				// kを移動。次がすぐに移動出来るようにkだけ。
+				// 待避線が足りないときは後で考える。
+				state.Add(new Move(1, ti, ret.i, 1));
+			}
+		}
+
+		input.Output(state);
+		info.Score = state.Calculate();
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
+	}
+}
+
+public class State
+{
+	private readonly bool _isLocal;
+	private readonly Input _input;
+
+	public List<Move> Moves { get; private set; } = [];
+
+	public Deque<int>[] Starts { get; private set; }
+	public Deque<int>[] Avoids { get; private set; }
+
+	public State(bool isLocal, Input input)
+	{
+		_isLocal = isLocal;
+		_input = input;
+
+		Starts = Helper.Array1(input.R, x => new Deque<int>());
+		for (int i = 0; i < input.R; i++) {
+			for (int j = 0; j < input.N; j++) {
+				Starts[i].PushBack(input.Y[i, j]);
+			}
+		}
+
+		Avoids = Helper.Array1(input.R, x => new Deque<int>());
+	}
+
+	public void Add(Move move)
+	{
+		if (move.Type == 0) {
+			for (int k = 0; k < move.K; k++) {
+				Avoids[move.J].PushFront(Starts[move.I].PopBack());
+			}
+		} else {
+			for (int k = 0; k < move.K; k++) {
+				Starts[move.I].PushBack(Avoids[move.J].PopFront());
+			}
+		}
+
+		Moves.Add(move);
+	}
+
+	public long Calculate()
+	{
+		var operations = ZipMoves();
+
+		bool ok = true;
+		long temp = 0;
+		for (int i = 0; i < _input.R; i++) {
+			for (int j = 0; j < Starts[i].Count; j++) {
+				int v = Starts[i][j];
+				if (v / _input.N == i) {
+					++temp;
+					if (v % _input.N == j) {
+						temp += 9;
+					} else {
+						ok = false;
+					}
+				} else {
+					ok = false;
+				}
+			}
+		}
+
+		long score = ok
+			? (100 * _input.R) + 4000 - operations.Count
+			: temp;
+		return score;
+	}
+
+	public List<Operation> ZipMoves()
+	{
+		var operations = new List<Operation>();
+		var op = new Operation();
+		foreach (var move in Moves) {
+			if (op.CanAdd(move)) {
+				op.Moves.Add(move);
+			} else {
+				operations.Add(op);
+				op = new Operation();
+				op.Moves.Add(move);
+			}
+		}
+
+		if (op.Moves.Count > 0) {
+			operations.Add(op);
+		}
+
+		return operations;
+	}
+
+	public (bool isStart, int i, int j) FindTrain(int k)
+	{
+		for (int i = 0; i < _input.R; i++) {
+			for (int j = 0; j < Starts[i].Count; j++) {
+				if (Starts[i][j] == k) {
+					return (true, i, j);
+				}
+			}
+
+			for (int j = 0; j < Avoids[i].Count; j++) {
+				if (Avoids[i][j] == k) {
+					return (false, i, j);
+				}
+			}
+		}
+
+		// ここには来ない
+		return (false, 0, 0);
+	}
+
+	public int FindAvoidLine(int count)
+	{
+		for (int i = 0; i < _input.R; i++) {
+			if (Avoids[i].Count + count <= _input.MaxAvoid) {
+				return i;
+			}
+		}
+
+		return -1;
+	}
+
+	public int FindAvoidLine(int count, int dame)
+	{
+		for (int i = 0; i < _input.R; i++) {
+			if (i == dame) {
+				continue;
+			}
+
+			if (Avoids[i].Count + count <= _input.MaxAvoid) {
+				return i;
+			}
+		}
+
+		return -1;
+	}
+
+	public int FindStartLine(int count)
+	{
+		for (int i = 0; i < _input.R; i++) {
+			if (Starts[i].Count + count <= _input.MaxStart) {
+				return i;
+			}
+		}
+
+		return -1;
+	}
+
+	public int FindStartLine(int count, int dame)
+	{
+		for (int i = 0; i < _input.R; i++) {
+			if (i == dame) {
+				continue;
+			}
+
+			if (Starts[i].Count + count <= _input.MaxStart) {
+				return i;
+			}
+		}
+
+		return -1;
+	}
+
+	public (int i, int count) TryFindStartLine(int dame)
+	{
+		for (int i = 0; i < _input.R; i++) {
+			if (i == dame) {
+				continue;
+			}
+
+			int can = _input.MaxStart - Starts[i].Count;
+			if (can > 0) {
+				return (i, can);
+			}
+		}
+
+		return (0, -1);
+	}
+}
+
+public class Operation
+{
+	public List<Move> Moves { get; set; } = [];
+
+	public bool CanAdd(Move move)
+	{
+		foreach (var src in Moves) {
+			if (src.IsCross(move)) {
+				return false;
+			}
+		}
+
+		return true;
+	}
+}
+
+public readonly struct Move
+{
+	public readonly int Type;
+	public readonly int I;
+	public readonly int J;
+	public readonly int K;
+	public Move(int type, int i, int j, int k)
+	{
+		Type = type;
+		I = i;
+		J = j;
+		K = k;
+	}
+
+	public override string ToString()
+	{
+		return $"{Type} {I} {J} {K}";
+	}
+
+	public bool IsCross(Move other)
+	{
+		return ((I < other.I && J < other.J) == false) && ((I > other.I && J > other.J) == false);
 	}
 }
 
@@ -71,14 +356,236 @@ public class Information
 public class Input
 {
 	private readonly IOManager _io;
-	private readonly bool _isDebug;
+	private readonly bool _isLocal;
 
-	public Input(IOManager io, bool isDebug)
+	public int R { get; private set; }
+	public int[,] Y { get; private set; }
+
+	public int N { get; private set; } = 10;
+	public int MaxStart { get; private set; } = 15;
+	public int MaxAvoid { get; private set; } = 20;
+
+	public Input(IOManager io, bool isLocal)
 	{
 		_io = io;
-		_isDebug = isDebug;
+		_isLocal = isLocal;
+
+		R = io.Int();
+		Y = io.Repeat(R, N, io => io.Int());
+	}
+
+	public void Output(State state)
+	{
+		var operations = state.ZipMoves();
+		_io.WriteLine(operations.Count);
+		foreach (var op in operations) {
+			int k = op.Moves.Count;
+			_io.WriteLine(k);
+			foreach (var move in op.Moves) {
+				_io.WriteLine(move.ToString());
+			}
+		}
 	}
 }
+
+public class Deque<T> : IEnumerable<T>
+{
+	/// <summary>リングバッファのサイズ</summary>
+	private int _capacity;
+	/// <summary>両端キューの実体であるリングバッファ</summary>
+	private T[] _ringBuffer;
+	/// <summary>キューの先頭のインデックス</summary>
+	/// <remarks>
+	/// キューに格納されている要素を閉区間[front, back]の範囲で持つ。
+	/// 閉区間のため、中身が空のときはbackがfront-1の位置にある。
+	/// </remarks>
+	private int _front;
+	/// <summary>キューの末尾のインデックス</summary>
+	private int _back;
+
+	/// <summary>格納されている要素数</summary>
+	public int Count { get; private set; } = 0;
+	/// <summary>キューの先頭の要素</summary>
+	public T Front => _ringBuffer[_front];
+	/// <summary>キューの末尾の要素</summary>
+	public T Back => _ringBuffer[_back];
+
+	/// <summary>ランダムアクセス</summary>
+	/// <remarks>
+	/// 範囲チェックは省いてあるので注意。
+	/// </remarks>
+	public T this[int index]
+	{
+		get
+		{
+			index += _front;
+			// バッファの終端を超えた場合は先頭に戻る
+			return _ringBuffer[index < _capacity ? index : index - _capacity];
+		}
+	}
+
+	/// <summary>既定のサイズでインスタンスを生成</summary>
+	public Deque() : this(1024) { }
+	/// <summary>
+	/// 指定したサイズでインスタンスを生成
+	/// </summary>
+	/// <param name="capacity">リングバッファのサイズ</param>
+	public Deque(int capacity)
+	{
+		if (capacity <= 0) {
+			capacity = 1024;
+		}
+
+		_capacity = capacity;
+		_ringBuffer = new T[capacity];
+		Clear();
+	}
+
+	/// <summary>
+	/// キューの中身を空にする O(1)
+	/// </summary>
+	public void Clear()
+	{
+		_front = 0;
+		_back = _capacity - 1;
+		Count = 0;
+		// バッファのクリアはしない。
+		// 再度バッファにアクセスされる際には新しい値に上書きされるので問題無い。
+	}
+
+	/// <summary>
+	/// キューの先頭に要素を追加する amortized O(1)
+	/// </summary>
+	/// <param name="item">追加する要素</param>
+	public void PushFront(T item)
+	{
+		// リングバッファが一杯の場合、バッファサイズを倍に拡張する。
+		// この部分がならしO(1)。
+		if (Count == _capacity) {
+			Extend(_capacity * 2);
+		}
+
+		// 要素が格納されている区間を前方向に拡張。
+		// バッファの先頭を超えた場合は末尾に追加する。
+		--_front;
+		if (_front < 0) {
+			_front += _capacity;
+		}
+
+		++Count;
+		_ringBuffer[_front] = item;
+	}
+
+	/// <summary>
+	/// キューの末尾に要素を追加する amortized O(1)
+	/// </summary>
+	/// <param name="item">追加する要素</param>
+	public void PushBack(T item)
+	{
+		// リングバッファが一杯の場合、バッファサイズを倍に拡張する。
+		// この部分がならしO(1)。
+		if (Count == _capacity) {
+			Extend(_capacity * 2);
+		}
+
+		// 要素が格納されている区間を後ろ方向に拡張。
+		// バッファの末尾を超えた場合は先頭に追加する。
+		++_back;
+		if (_back >= _capacity) {
+			_back -= _capacity;
+		}
+
+		++Count;
+		_ringBuffer[_back] = item;
+	}
+
+	/// <summary>
+	/// キューの先頭から要素を取り出す O(1)
+	/// </summary>
+	/// <returns>取り出した要素</returns>
+	public T PopFront()
+	{
+		if (Count == 0) {
+			// 例外を投げるべき？
+			return default(T);
+		}
+
+		T ret = _ringBuffer[_front];
+		--Count;
+		// 要素が格納されている区間の先頭を縮小。
+		// バッファの末尾を超えた場合は先頭を指すようにする。
+		++_front;
+		if (_front >= _capacity) {
+			_front -= _capacity;
+		}
+
+		return ret;
+	}
+
+	/// <summary>
+	/// キューの末尾から要素を取り出す O(1)
+	/// </summary>
+	/// <returns>取り出した要素</returns>
+	public T PopBack()
+	{
+		if (Count == 0) {
+			// 例外を投げるべき？
+			return default(T);
+		}
+
+		T ret = _ringBuffer[_back];
+		--Count;
+		// 要素が格納されている区間の末尾を縮小。
+		// バッファの先頭を超えた場合は末尾を指すようにする。
+		--_back;
+		if (_back < 0) {
+			_back += _capacity;
+		}
+
+		return ret;
+	}
+
+	/// <summary>
+	/// バッファサイズを倍に拡張
+	/// </summary>
+	/// <remarks>
+	/// この処理自体はO(N)かかるのであるが、
+	/// 呼ばれるタイイングがサイズNのバッファーが埋まったときなので、
+	/// 実際に使われるケースでの計算量はならしO(1)となる。
+	/// </remarks>
+	/// <param name="newSize">拡張後のサイズ</param>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void Extend(int newSize)
+	{
+		var newBuffer = new T[newSize];
+		if (Count > 0) {
+			if (_front <= _back) {
+				// ここにくるのは実質frontが0でbackが^1のときだけ。
+				Array.Copy(_ringBuffer, _front, newBuffer, 0, Count);
+			} else {
+				// [front, 末尾] と [先頭, back] の2回に分けてコピーする必要がある。
+				int prevLength = _ringBuffer.Length - _front;
+				Array.Copy(_ringBuffer, _front, newBuffer, 0, prevLength);
+				Array.Copy(_ringBuffer, 0, newBuffer, prevLength, _back + 1);
+			}
+		}
+
+		_ringBuffer = newBuffer;
+		_capacity = newSize;
+		_front = 0;
+		_back = Count - 1;
+	}
+
+	public IEnumerator<T> GetEnumerator()
+	{
+		for (int i = 0; i < Count; i++) {
+			yield return this[i];
+		}
+	}
+
+	IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+}
+
 
 [Flags]
 public enum Direction4

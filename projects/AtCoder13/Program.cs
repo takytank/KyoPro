@@ -1,4 +1,5 @@
 ﻿using System.Collections;
+using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
 using System.Runtime.CompilerServices;
@@ -16,6 +17,318 @@ public class Program
 
 	}
 }
+
+[DebuggerTypeProxy(typeof(LazySegmentTree<,>.DebugView))]
+public class LazySegmentTree<TData, TUpdate> : IEnumerable<TData>
+		where TUpdate : IEquatable<TUpdate>
+{
+	private readonly int _n;
+	private readonly TData[] _data;
+	private readonly TUpdate[] _lazy;
+	private readonly Func<TData, TData, TData> _operate;
+	private readonly Func<TData, TUpdate, int, TData> _update;
+
+	/// <summary>遅延評価分を合成するデリゲート</summary>
+	/// <remarks>
+	/// (f, g) => h で、h(x) = (f・g)(x) となる。
+	/// すなわち、第一引数の方が新しい更新分で、後に適用される。
+	/// 演算がupdateの場合は、fを返せばよい。
+	/// </remarks>
+	private readonly Func<TUpdate, TUpdate, TUpdate> _compose;
+
+	private readonly TData _unitData;
+	private readonly TUpdate _unitUpdate;
+
+	public int Count { get; }
+
+	public TData this[int index]
+	{
+		get => Query(index);
+		set
+		{
+			Down(index);
+			_data[index + _n] = value;
+			Up(index);
+		}
+	}
+
+	public LazySegmentTree(
+		int count,
+		TData unitData,
+		TUpdate unitUpdate,
+		Func<TData, TData, TData> operate,
+		Func<TData, TUpdate, int, TData> update,
+		Func<TUpdate, TUpdate, TUpdate> compose)
+	{
+		Count = count;
+		_n = 1;
+		while (_n < count) {
+			_n <<= 1;
+		}
+
+		_data = new TData[_n << 1];
+		for (int i = 0; i < _data.Length; i++) {
+			_data[i] = unitData;
+		}
+
+		_lazy = new TUpdate[_n << 1];
+		for (int i = 0; i < _lazy.Length; i++) {
+			_lazy[i] = unitUpdate;
+		}
+
+		_unitData = unitData;
+		_unitUpdate = unitUpdate;
+		_operate = operate;
+		_update = update;
+		_compose = compose;
+	}
+
+	public LazySegmentTree(
+		IReadOnlyList<TData> src,
+		TData unitData,
+		TUpdate unitUpdate,
+		Func<TData, TData, TData> operate,
+		Func<TData, TUpdate, int, TData> update,
+		Func<TUpdate, TUpdate, TUpdate> compose)
+		: this(src.Count, unitData, unitUpdate, operate, update, compose)
+	{
+		for (int i = 0; i < src.Count; i++) {
+			_data[i + _n] = src[i];
+		}
+
+		for (int i = _n - 1; i > 0; --i) {
+			_data[i] = _operate(_data[i << 1], _data[(i << 1) | 1]);
+		}
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Update(int v, TUpdate value)
+		=> Update(v, v + 1, value);
+	//[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	//public void Update(Range range, TUpdate value)
+	//	=> Update(range.Start.Value, range.End.Value, value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public void Update(int left, int right, TUpdate value)
+		=> UpdateCore(left, right, 1, 0, _n, value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void UpdateCore(int left, int right, int v, int l, int r, TUpdate value)
+	{
+		if (left <= l && r <= right) {
+			Propagate(v, l, r, ref value);
+		} else if (left < r && l < right) {
+			int lc = v << 1;
+			int rc = (v << 1) | 1;
+			int mid = (l + r) >> 1;
+			Propagate(lc, l, mid, v);
+			UpdateCore(left, right, lc, l, mid, value);
+			Propagate(rc, mid, r, v);
+			UpdateCore(left, right, rc, mid, r, value);
+			_data[v] = _operate(_data[lc], _data[rc]);
+			_lazy[v] = _unitUpdate;
+		}
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public TData Query(int v) => Query(v, v + 1);
+	//[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	//public TData Query(Range range) => Query(range.Start.Value, range.End.Value);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public TData Query(int left, int right)
+		=> QueryCore(left, right, 1, 0, _n);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private TData QueryCore(int left, int right, int v, int l, int r)
+	{
+		if (left <= l && r <= right) {
+			return _data[v];
+		} else if (r <= left || right <= l) {
+			return _unitData;
+		} else {
+			int lc = v << 1;
+			int rc = (v << 1) | 1;
+			int mid = (l + r) >> 1;
+			Propagate(lc, l, mid, v);
+			Propagate(rc, mid, r, v);
+			_lazy[v] = _unitUpdate;
+			return _operate(
+				QueryCore(left, right, lc, l, mid),
+				QueryCore(left, right, rc, mid, r)
+			);
+		}
+	}
+
+	//[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	//public int FindLeftest(Range range, Func<TData, bool> check)
+	//	=> FindLeftest(range.Start.Value, range.End.Value, check);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public int FindLeftest(int left, int right, Func<TData, bool> check)
+		=> FindLeftestCore(left, right, 1, 0, _n, check);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private int FindLeftestCore(int left, int right, int v, int l, int r, Func<TData, bool> check)
+	{
+		if (check(_data[v]) == false || r <= left || right <= l || Count <= left) {
+			return right;
+		} else if (v >= _n) {
+			return v - _n;
+		} else {
+			int lc = v << 1;
+			int rc = (v << 1) | 1;
+			int mid = (l + r) >> 1;
+			Propagate(lc, l, mid, v);
+			Propagate(rc, mid, r, v);
+			_lazy[v] = _unitUpdate;
+
+			int vl = FindLeftestCore(left, right, lc, l, mid, check);
+			if (vl != right) {
+				return vl;
+			} else {
+				return FindLeftestCore(left, right, rc, mid, r, check);
+			}
+		}
+	}
+
+	//[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	//public int FindRightest(Range range, Func<TData, bool> check)
+	//	=> FindRightest(range.Start.Value, range.End.Value, check);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	public int FindRightest(int left, int right, Func<TData, bool> check)
+		=> FindRightestCore(left, right, 1, 0, _n, check);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private int FindRightestCore(int left, int right, int v, int l, int r, Func<TData, bool> check)
+	{
+		if (check(_data[v]) == false || r <= left || right <= l || Count <= left) {
+			return left - 1;
+		} else if (v >= _n) {
+			return v - _n;
+		} else {
+			int lc = v << 1;
+			int rc = (v << 1) | 1;
+			int mid = (l + r) >> 1;
+			Propagate(lc, l, mid, v);
+			Propagate(rc, mid, r, v);
+			_lazy[v] = _unitUpdate;
+
+			int vr = FindRightestCore(left, right, rc, mid, r, check);
+			if (vr != left - 1) {
+				return vr;
+			} else {
+				return FindRightestCore(left, right, lc, l, mid, check);
+			}
+		}
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void Propagate(int v, int l, int r, int p)
+		=> Propagate(v, l, r, ref _lazy[p]);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void Propagate(int v, int l, int r, ref TUpdate value)
+	{
+		if (value.Equals(_unitUpdate)) {
+			return;
+		}
+
+		_data[v] = _update(_data[v], value, r - l);
+		_lazy[v] = _compose(value, _lazy[v]);
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void Up(int v)
+	{
+		v += _n;
+		v >>= 1;
+		while (v > 0) {
+			_data[v] = _operate(_data[v << 1], _data[(v << 1) | 1]);
+			v >>= 1;
+		}
+	}
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void Down(int v) => DownCore(v, v + 1, 1, 0, _n);
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void DownCore(int left, int right, int v, int l, int r)
+	{
+		if ((left <= l && r <= right) || (r <= left || right <= l)) {
+			return;
+		} else {
+			int lc = v << 1;
+			int rc = (v << 1) | 1;
+			int mid = (l + r) >> 1;
+			Propagate(lc, l, mid, v);
+			Propagate(rc, mid, r, v);
+			_lazy[v] = _unitUpdate;
+			DownCore(left, right, lc, l, mid);
+			DownCore(left, right, rc, mid, r);
+		}
+	}
+
+	public IEnumerator<TData> GetEnumerator()
+	{
+		for (int i = 0; i < Count; i++) {
+			yield return this[i];
+		}
+	}
+
+	IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
+
+	[DebuggerDisplay("data= {" + nameof(data_) + "}, lazy= {" + nameof(lazy_) + "}", Name = "{" + nameof(key_) + ",nq}")]
+	private struct DebugItem
+	{
+		[DebuggerBrowsable(DebuggerBrowsableState.Never)]
+		private readonly string key_;
+		[DebuggerBrowsable(DebuggerBrowsableState.Never)]
+		private readonly TData data_;
+		[DebuggerBrowsable(DebuggerBrowsableState.Never)]
+		private readonly TUpdate lazy_;
+		public DebugItem(int l, int r, TData data, TUpdate lazy)
+		{
+			if (r - l == 1) {
+				key_ = $"[{l}]";
+			} else {
+				key_ = $"[{l}-{r})";
+			}
+
+			data_ = data;
+			lazy_ = lazy;
+		}
+	}
+
+	private class DebugView
+	{
+		private readonly LazySegmentTree<TData, TUpdate> tree_;
+		public DebugView(LazySegmentTree<TData, TUpdate> tree)
+		{
+			tree_ = tree;
+		}
+
+		[DebuggerBrowsable(DebuggerBrowsableState.RootHidden)]
+		public DebugItem[] Items
+		{
+			get
+			{
+				var items = new List<DebugItem>(tree_.Count);
+				int length = tree_._n;
+				while (length > 0) {
+					int unit = tree_._n / length;
+					for (int i = 0; i < length; i++) {
+						int l = i * unit;
+						int r = l + unit;
+						if (l < tree_.Count) {
+							int dataIndex = i + length;
+							items.Add(new DebugItem(
+								l,
+								r,
+								tree_._data[dataIndex],
+								tree_._lazy[dataIndex]));
+						}
+					}
+
+					length >>= 1;
+				}
+
+				return items.ToArray();
+			}
+		}
+	}
+};
 
 public readonly struct BitFlag(int flags)
 {
