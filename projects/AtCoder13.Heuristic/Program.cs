@@ -27,6 +27,7 @@ public class Program
 						//$"N={input.N:d2}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
+						$"Be={info.Be:d3}",
 						$"B={info.B:d3}",
 						$"M={info.M:d5}",
 						$"score={info.Score:d5}",
@@ -66,146 +67,6 @@ public class Program
 		return (input, info);
 	}
 
-	static State Plan2(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var best = new State(isLocal, input);
-
-		int n = input.N;
-		// 2x2渦巻きコンベアの配置
-		int mCount = 0;
-		var edgeToOp = new Dictionary<((int i, int j), (int i, int j)), (int m, bool fwd)>();
-		var adj = new List<(int i, int j)>[n, n];
-		for (int i = 0; i < n; i++) {
-			for (int j = 0; j < n; j++) {
-				adj[i, j] = new List<(int i, int j)>();
-			}
-		}
-
-		for (int i = 0; i < n - 1; i++) {
-			for (int j = 0; j < n - 1; j++) {
-				if ((i + j) % 2 == 0) {
-					var con = new List<(int i, int j)> {
-						(i, j), (i, j + 1), (i + 1, j + 1), (i + 1, j)
-					};
-					int m = mCount++;
-					best.AddConveyor(con);
-					for (int k = 0; k < 4; k++) {
-						var u = con[k];
-						var v = con[(k + 1) % 4];
-						edgeToOp[(u, v)] = (m, true);
-						edgeToOp[(v, u)] = (m, false);
-						if (!adj[u.i, u.j].Contains(v)) {
-							adj[u.i, u.j].Add(v);
-							adj[v.i, v.j].Add(u);
-						}
-					}
-				}
-			}
-		}
-
-		int nn = n * n;
-		// 出口周辺（DI, DJ）から各マスへのマンハッタン距離を事前計算
-		var distToGoal = new int[n, n];
-		for (int i = 0; i < n; i++) {
-			for (int j = 0; j < n; j++) {
-				distToGoal[i, j] = -1;
-			}
-		}
-
-		var goal = (i: input.DI, j: input.DJ);
-		var q = new Queue<(int i, int j)>();
-		q.Enqueue(goal);
-		distToGoal[goal.i, goal.j] = 0;
-
-		while (q.Count > 0) {
-			var u = q.Dequeue();
-			foreach (var v in adj[u.i, u.j]) {
-				if (distToGoal[v.i, v.j] == -1) {
-					distToGoal[v.i, v.j] = distToGoal[u.i, u.j] + 1;
-					q.Enqueue(v);
-				}
-			}
-		}
-
-		for (int turn = 0; turn < nn; turn++) {
-			while (true) {
-				var start = best.Find(turn);
-				if (start.i == -1) {
-					// 目的の箱がすでに出口から搬出されて消えている
-					break;
-				}
-
-				if (start == goal) {
-					// 目的の箱がゴールにいるが、まだ搬出判定されていない場合
-					if (adj[goal.i, goal.j].Count > 0) {
-						var neighbor = adj[goal.i, goal.j][0];
-						var op = edgeToOp[(goal, neighbor)];
-						best.Move(op.m, op.fwd);
-					} else {
-						best.Move(0, true);
-					}
-					continue;
-				}
-
-				int bestOpM = -1;
-				bool bestOpFwd = true;
-				long bestScore = long.MaxValue;
-
-				var candidates = new List<(int i, int j)>();
-				foreach (var v in adj[start.i, start.j]) {
-					if (distToGoal[v.i, v.j] < distToGoal[start.i, start.j]) {
-						candidates.Add(v);
-					}
-				}
-
-				if (candidates.Count == 0) {
-					// 万が一見つからなかった場合は適当に回してスタック回避
-					best.Move(rnd.Next(mCount), true);
-					continue;
-				}
-
-				// 全てのコンベアの順方向・逆方向をシミュレートせずに、候補先へ行くものだけ検証
-				foreach (var nextPos in candidates) {
-					var op = edgeToOp[(start, nextPos)];
-					best.Move(op.m, op.fwd, true);
-
-					long currentScore = 0;
-					// k (turn) は次に進むので、次のターゲットである k+1, k+2 の距離でタイブレーク評価
-					if (turn + 1 < nn) {
-						var pos1 = best.Find(turn + 1);
-						if (pos1.i != -1 && distToGoal[pos1.i, pos1.j] != -1) {
-							currentScore += distToGoal[pos1.i, pos1.j] * 10L;
-						}
-					}
-					if (turn + 2 < nn) {
-						var pos2 = best.Find(turn + 2);
-						if (pos2.i != -1 && distToGoal[pos2.i, pos2.j] != -1) {
-							currentScore += distToGoal[pos2.i, pos2.j];
-						}
-					}
-
-					// シミュレートを元に戻す
-					best.UndoMove();
-
-					if (currentScore < bestScore) {
-						bestScore = currentScore;
-						bestOpM = op.m;
-						bestOpFwd = op.fwd;
-					}
-				}
-
-				// 一番評価の良かった手を実際に打つ
-				if (bestOpM != -1) {
-					best.Move(bestOpM, bestOpFwd);
-				} else {
-					best.Move(rnd.Next(mCount), true);
-				}
-			}
-		}
-
-		return best;
-	}
-
 	static State Plan4(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var best = new State(isLocal, input);
@@ -230,22 +91,26 @@ public class Program
 		int nn = n * n;
 		int numConveyors = best.Conveyors.Count;
 
-		var cellToConveyors = new List<int>[n, n];
+		var cellToConveyors = new List<(int m, int idx)>[n, n];
 		for (int i = 0; i < n; i++) {
 			for (int j = 0; j < n; j++) {
-				cellToConveyors[i, j] = new List<int>();
+				cellToConveyors[i, j] = new List<(int m, int idx)>();
 			}
 		}
 
 		for (int m = 0; m < numConveyors; m++) {
-			foreach (var pos in best.Conveyors[m]) {
-				cellToConveyors[pos.i, pos.j].Add(m);
+			for (int k = 0; k < best.Conveyors[m].Count; k++) {
+				var pos = best.Conveyors[m][k];
+				cellToConveyors[pos.i, pos.j].Add((m, k));
 			}
 		}
 
-		int beamWidth = 16;
+		int beamWidth = 5;
 		var states = new List<State>() { best };
 		int maxTime = 1800; // milliseconds
+
+		bool[] fwdAllowed = new bool[numConveyors];
+		bool[] bwdAllowed = new bool[numConveyors];
 
 		while (states.Count > 0) {
 			if (sw.ElapsedMilliseconds > maxTime) break;
@@ -262,46 +127,62 @@ public class Program
 					continue;
 				}
 
-				var activeConveyors = new HashSet<int>();
-				int maxLook = Math.Min(nn, st.B + 6);
+				Array.Clear(fwdAllowed, 0, numConveyors);
+				Array.Clear(bwdAllowed, 0, numConveyors);
+				bool anyOp = false;
+
+				int maxLook = Math.Min(nn, st.B + 8);
 				for (int b = st.B; b < maxLook; b++) {
 					var pos = st.Find(b);
 					if (pos.i != -1) {
-						foreach (var m in cellToConveyors[pos.i, pos.j]) {
-							activeConveyors.Add(m);
+						int curDist = Math.Abs(pos.i - input.DI) + Math.Abs(pos.j - input.DJ);
+						foreach (var (m, idx) in cellToConveyors[pos.i, pos.j]) {
+							var con = best.Conveyors[m];
+							var posFwd = con[(idx + 1) % con.Count];
+							int distFwd = Math.Abs(posFwd.i - input.DI) + Math.Abs(posFwd.j - input.DJ);
+							if (distFwd <= curDist) {
+								fwdAllowed[m] = true;
+								anyOp = true;
+							}
+
+							var posBwd = con[(idx - 1 + con.Count) % con.Count];
+							int distBwd = Math.Abs(posBwd.i - input.DI) + Math.Abs(posBwd.j - input.DJ);
+							if (distBwd <= curDist) {
+								bwdAllowed[m] = true;
+								anyOp = true;
+							}
 						}
 					}
 				}
 
-				if (activeConveyors.Count == 0) {
+				if (!anyOp) {
 					var pos = st.Find(st.B);
 					if (pos.i != -1) {
-						foreach (var m in cellToConveyors[pos.i, pos.j]) {
-							activeConveyors.Add(m);
+						foreach (var (m, _) in cellToConveyors[pos.i, pos.j]) {
+							fwdAllowed[m] = true;
+							bwdAllowed[m] = true;
 						}
 					} else {
-						activeConveyors.Add(0);
+						fwdAllowed[0] = true;
 					}
 				}
 
-				foreach (int m in activeConveyors) {
-					bool skipFwd = false;
-					bool skipBwd = false;
+				for (int m = 0; m < numConveyors; m++) {
 					if (st.Op.Count > 0) {
 						var lastOp = st.Op[^1];
 						if (lastOp.m == m) {
-							if (lastOp.d == -1) skipFwd = true;
-							if (lastOp.d == 1) skipBwd = true;
+							if (lastOp.d == -1) fwdAllowed[m] = false;
+							if (lastOp.d == 1) bwdAllowed[m] = false;
 						}
 					}
 
-					if (!skipFwd) {
+					if (fwdAllowed[m]) {
 						var st1 = st.Clone();
 						st1.Move(m, true);
 						nextStates.Add((st1, EvaluatePlan4(st1, input)));
 					}
 
-					if (!skipBwd) {
+					if (bwdAllowed[m]) {
 						var st2 = st.Clone();
 						st2.Move(m, false);
 						nextStates.Add((st2, EvaluatePlan4(st2, input)));
@@ -326,6 +207,7 @@ public class Program
 		}
 
 		var bestState = states.OrderBy(x => EvaluatePlan4(x, input)).First();
+		info.Be = bestState.B;
 		FinishWithPlan1(bestState, input);
 
 		return bestState;
@@ -375,8 +257,8 @@ public class Program
 		long score = 0;
 		int currentB = state.B;
 
-		int maxLook = Math.Min(n * n, currentB + 6);
-		long weight = 1000000;
+		int maxLook = Math.Min(n * n, currentB + 8);
+		long weight = 10000000;
 		for (int b = currentB; b < maxLook; b++) {
 			var pos = state.Find(b);
 			if (pos.i != -1) {
@@ -392,125 +274,6 @@ public class Program
 		score -= currentB * 1000000000L;
 
 		return score;
-	}
-
-	static State Plan3(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var best = new State(isLocal, input);
-
-		int n = input.N;
-		// 縦コン
-		for (int j = 0; j < n; j += 2) {
-			var con = new List<(int i, int j)>();
-			for (int i = 0; i < n; i++) con.Add((i, j));
-			for (int i = n - 1; i >= 0; i--) con.Add((i, j + 1));
-			best.AddConveyor(con);
-		}
-
-		// 横コン
-		for (int i = 0; i < n; i += 2) {
-			var con = new List<(int i, int j)>();
-			for (int j = 0; j < n; j++) con.Add((i, j));
-			for (int j = n - 1; j >= 0; j--) con.Add((i + 1, j));
-			best.AddConveyor(con);
-		}
-
-		int nn = n * n;
-
-		for (int turn = 0; turn < nn; turn++) {
-			while (true) {
-				var (ti, tj) = best.Find(turn);
-				if (ti == -1) break;
-
-				if (ti == input.DI && tj == input.DJ) {
-					best.Move(0, true);
-					continue;
-				}
-
-				if (ti > 0) {
-					// 縦コンベアで上へ
-					int m_v = tj / 2;
-					int desc_j = (tj % 2 == 0) ? tj + 1 : tj - 1;
-
-					int escape_m_h = -1;
-					bool escape_fwd = true;
-
-					for (int r = 0; r < n; r++) {
-						if (r == ti) continue;
-
-						int boxId = best.Map[r, desc_j];
-						if (boxId >= 0) {
-							int m_h = n / 2 + r / 2;
-							var con_h = best.Conveyors[m_h];
-							int idx = con_h.IndexOf((r, desc_j));
-
-							int prevIdx = (idx - 1 + con_h.Count) % con_h.Count;
-							if (best.Map[con_h[prevIdx].i, con_h[prevIdx].j] == -1) {
-								escape_m_h = m_h;
-								escape_fwd = true;
-								break;
-							}
-
-							int nextIdx = (idx + 1) % con_h.Count;
-							if (best.Map[con_h[nextIdx].i, con_h[nextIdx].j] == -1) {
-								escape_m_h = m_h;
-								escape_fwd = false;
-								break;
-							}
-						}
-					}
-
-					if (escape_m_h != -1) {
-						best.Move(escape_m_h, escape_fwd);
-					} else {
-						bool fwd = (tj % 2 != 0); // 偶数列は backward(-1) で上、奇数列は forward(1) で上
-						best.Move(m_v, fwd);
-					}
-				} else if (tj != input.DJ) {
-					// 横コンベアで目的地へ
-					int m_h = n / 2 + ti / 2;
-					int desc_i = (ti % 2 == 0) ? ti + 1 : ti - 1;
-					bool targetGoRight = tj < input.DJ;
-
-					int escape_m_v = -1;
-					bool escape_fwd = true;
-
-					for (int c = 0; c < n; c++) {
-						if (c == tj) continue;
-
-						int boxId = best.Map[desc_i, c];
-						if (boxId >= 0) {
-							int m_v = c / 2;
-							var con_v = best.Conveyors[m_v];
-							int idx = con_v.IndexOf((desc_i, c));
-
-							int prevIdx = (idx - 1 + con_v.Count) % con_v.Count;
-							if (best.Map[con_v[prevIdx].i, con_v[prevIdx].j] == -1) {
-								escape_m_v = m_v;
-								escape_fwd = true;
-								break;
-							}
-
-							int nextIdx = (idx + 1) % con_v.Count;
-							if (best.Map[con_v[nextIdx].i, con_v[nextIdx].j] == -1) {
-								escape_m_v = m_v;
-								escape_fwd = false;
-								break;
-							}
-						}
-					}
-
-					if (escape_m_v != -1) {
-						best.Move(escape_m_v, escape_fwd);
-					} else {
-						bool fwd = (ti % 2 == 0) ? targetGoRight : !targetGoRight;
-						best.Move(m_h, fwd);
-					}
-				}
-			}
-		}
-
-		return best;
 	}
 
 	static State Plan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
@@ -756,6 +519,7 @@ public class Information
 	public int Up { get; set; } = 0;
 	public long Elapsed { get; set; } = 0;
 
+	public int Be { get; set; } = 0;
 	public int B { get; set; } = 0;
 	public int M { get; set; } = 0;
 }
