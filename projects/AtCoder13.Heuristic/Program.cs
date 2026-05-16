@@ -46,15 +46,176 @@ public class Program
 	static (Input input, Information info)
 		Run(int caseNumber)
 	{
-		var (isDebug, sw, rnd) = HeuristicHelper.Initialize();
-		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC056\tools\in\", caseNumber);
+		var (isLocal, sw, rnd) = HeuristicHelper.Initialize();
+		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC065\tools\in\", caseNumber);
 
-		var input = new Input(io, isDebug);
+		var input = new Input(io, isLocal);
 		var info = new Information();
 
+		var best = new State(isLocal, input);
+
+		int n = input.N;
+		// 縦コン
+		for (int j = 0; j < n; j += 2) {
+			var con = new List<(int i, int j)>();
+			for (int i = 0; i < n; i++) {
+				con.Add((i, j));
+			}
+
+			for (int i = n - 1; i >= 0; i--) {
+				con.Add((i, j + 1));
+			}
+
+			best.AddConveyor(con);
+		}
+
+		// 横コン
+		for (int i = 0; i < n; i += 2) {
+			var con = new List<(int i, int j)>();
+			for (int j = 0; j < n; j++) {
+				con.Add((i, j));
+			}
+
+			for (int j = n - 1; j >= 0; j--) {
+				con.Add((i + 1, j));
+			}
+
+			best.AddConveyor(con);
+		}
+
+		int nn = n * n;
+		for (int turn = 0; turn < nn; turn++) {
+			var (ti, tj) = best.Find(turn);
+			if (ti == -1) {
+				continue;
+			}
+
+			int m = tj / 2;
+			while (ti > 0) {
+				if (tj % 2 == 0) {
+					best.Move(m, false);
+					--ti;
+				} else {
+					best.Move(m, true);
+					--ti;
+				}
+			}
+
+			m = n / 2;
+			while (tj != input.DJ) {
+				if (tj < input.DJ) {
+					best.Move(m, true);
+					++tj;
+				} else {
+					best.Move(m, false);
+					--tj;
+				}
+			}
+		}
+
+		input.Output(best);
+
+		info.Score = best.Calculate();
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
+	}
+}
+
+public class State
+{
+	private readonly bool _isLocal;
+	private readonly Input _input;
+
+	public List<List<(int i, int j)>> Conveyors { get; } = [];
+
+	public List<(int m, int d)> Op { get; } = [];
+	public int B { get; private set; }
+	public int[,] Map { get; }
+
+	public State(bool isLocal, Input input)
+	{
+		_isLocal = isLocal;
+		_input = input;
+
+		B = 0;
+		Map = new int[input.N, input.N];
+		for (int i = 0; i < input.N; i++) {
+			for (int j = 0; j < input.N; j++) {
+				Map[i, j] = input.A[i, j];
+			}
+		}
+
+		if (Map[input.DI, input.DJ] == 0) {
+			Map[input.DI, input.DJ] = -1;
+			++B;
+		}
+	}
+
+	public void AddConveyor(List<(int i, int j)> conveyor)
+	{
+		Conveyors.Add(conveyor);
+	}
+
+	public void Move(int m, bool forword)
+	{
+		int d = forword ? 1 : -1;
+		Op.Add((m, d));
+
+		var con = Conveyors[m];
+		if (d == -1) {
+			var a = Map[con[0].i, con[0].j];
+			for (int k = 0; k < con.Count - 1; k++) {
+				var (ci, cj) = con[k];
+				var (ni, nj) = con[k + 1];
+				Map[ci, cj] = Map[ni, nj];
+			}
+
+			Map[con[^1].i, con[^1].j] = a;
+		} else {
+			var a = Map[con[^1].i, con[^1].j];
+			for (int k = con.Count - 1; k > 0; k--) {
+				var (ci, cj) = con[k];
+				var (ni, nj) = con[k - 1];
+				Map[ci, cj] = Map[ni, nj];
+			}
+
+			Map[con[0].i, con[0].j] = a;
+		}
+
+		if (Map[_input.DI, _input.DJ] == B) {
+			Map[_input.DI, _input.DJ] = -1;
+			++B;
+		}
+	}
+
+	public long Calculate()
+	{
+		int n = _input.N;
+		int nn = n * n;
+		int b = B;
+		long score = 0;
+		if (b == nn) {
+			int t = Op.Count;
+			score = 1000000 + (long)Math.Round(1e6 * Math.Log2(1e5 / t));
+		} else {
+			score = (long)Math.Round(1e6 * b / nn);
+		}
+
+		return score;
+	}
+
+	public (int i, int j) Find(int tag)
+	{
+		for (int i = 0; i < _input.N; i++) {
+			for (int j = 0; j < _input.N; j++) {
+				if (Map[i, j] == tag) {
+					return (i, j);
+				}
+			}
+		}
+
+		return (-1, -1);
 	}
 }
 
@@ -71,12 +232,47 @@ public class Information
 public class Input
 {
 	private readonly IOManager _io;
-	private readonly bool _isDebug;
+	private readonly bool _isLocal;
 
-	public Input(IOManager io, bool isDebug)
+	public int N { get; }
+	public int[,] A { get; }
+
+	public int DI { get; }
+	public int DJ { get; }
+
+	public Input(IOManager io, bool isLocal)
 	{
 		_io = io;
-		_isDebug = isDebug;
+		_isLocal = isLocal;
+
+		N = io.Int();
+		A = io.Repeat<int>(N, N, io => io.Int());
+
+		DI = 0;
+		DJ = N / 2;
+	}
+
+	public void Output(State state)
+	{
+		int m = state.Conveyors.Count;
+		_io.WriteLine(m);
+		foreach (var con in state.Conveyors) {
+			int l = con.Count;
+			var list = new List<int>();
+			list.Add(l);
+			foreach (var (i, j) in con) {
+				list.Add(i);
+				list.Add(j);
+			}
+
+			_io.Join(list);
+		}
+
+		int t = state.Op.Count;
+		_io.WriteLine(t);
+		foreach (var (mm, dd) in state.Op) {
+			_io.WriteLine($"{mm} {dd}");
+		}
 	}
 }
 
