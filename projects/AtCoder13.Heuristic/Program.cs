@@ -105,9 +105,12 @@ public class Program
 			}
 		}
 
-		int beamWidth = 5;
+		int beamWidth = 20;
 		var states = new List<State>() { best };
 		int maxTime = 1800; // milliseconds
+
+		best.SkipOpAdd = true;
+		var trace = new Trace<(int m, int d)>();
 
 		bool[] fwdAllowed = new bool[numConveyors];
 		bool[] bwdAllowed = new bool[numConveyors];
@@ -168,23 +171,24 @@ public class Program
 				}
 
 				for (int m = 0; m < numConveyors; m++) {
-					if (st.Op.Count > 0) {
-						var lastOp = st.Op[^1];
-						if (lastOp.m == m) {
-							if (lastOp.d == -1) fwdAllowed[m] = false;
-							if (lastOp.d == 1) bwdAllowed[m] = false;
+					if (st.OpCount > 0) {
+						if (st.LastOpM == m) {
+							if (st.LastOpD == -1) fwdAllowed[m] = false;
+							if (st.LastOpD == 1) bwdAllowed[m] = false;
 						}
 					}
 
 					if (fwdAllowed[m]) {
 						var st1 = st.Clone();
 						st1.Move(m, true);
+						st1.TraceID = trace.Add((m, 1), st.TraceID);
 						nextStates.Add((st1, EvaluatePlan4(st1, input)));
 					}
 
 					if (bwdAllowed[m]) {
 						var st2 = st.Clone();
 						st2.Move(m, false);
+						st2.TraceID = trace.Add((m, -1), st.TraceID);
 						nextStates.Add((st2, EvaluatePlan4(st2, input)));
 					}
 				}
@@ -207,6 +211,13 @@ public class Program
 		}
 
 		var bestState = states.OrderBy(x => EvaluatePlan4(x, input)).First();
+
+		var route = trace.GetRouteTo(bestState.TraceID);
+		bestState.SkipOpAdd = false;
+		foreach (var op in route) {
+			bestState.Op.Add(op);
+		}
+
 		info.Be = bestState.B;
 		FinishWithPlan1(bestState, input);
 
@@ -269,7 +280,7 @@ public class Program
 			if (weight == 0) weight = 1;
 		}
 
-		score += state.Op.Count * 10L;
+		score += state.OpCount * 10L;
 		// Bが進むごとに大幅なボーナス
 		score -= currentB * 1000000000L;
 
@@ -348,12 +359,18 @@ public class State
 	private readonly bool _isLocal;
 	private readonly Input _input;
 
-	public List<List<(int i, int j)>> Conveyors { get; } = [];
+	public List<List<(int i, int j)>> Conveyors { get; set; } = [];
 
 	public List<(int m, int d)> Op { get; } = [];
 	public int B { get; set; }
 	public int[,] Map { get; }
 	public (int i, int j)[] Pos { get; }
+
+	public bool SkipOpAdd { get; set; }
+	public int OpCount { get; set; }
+	public int LastOpM { get; set; } = -1;
+	public int LastOpD { get; set; }
+	public int TraceID { get; set; }
 
 	public State(bool isLocal, Input input)
 	{
@@ -396,8 +413,15 @@ public class State
 		state.B = B;
 		Array.Copy(Map, state.Map, Map.Length);
 		Array.Copy(Pos, state.Pos, Pos.Length);
-		state.Conveyors.AddRange(Conveyors);
-		state.Op.AddRange(Op);
+		state.Conveyors = Conveyors;
+		state.SkipOpAdd = SkipOpAdd;
+		state.OpCount = OpCount;
+		state.LastOpM = LastOpM;
+		state.LastOpD = LastOpD;
+		state.TraceID = TraceID;
+		if (!SkipOpAdd) {
+			state.Op.AddRange(Op);
+		}
 		return state;
 	}
 
@@ -441,7 +465,12 @@ public class State
 		}
 
 		if (!isSimulate) {
-			Op.Add((m, d));
+			if (!SkipOpAdd) {
+				Op.Add((m, d));
+			}
+			LastOpM = m;
+			LastOpD = d;
+			OpCount++;
 		} else {
 			_simulatedOps.Push((m, d, prevB));
 		}
