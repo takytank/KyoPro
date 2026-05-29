@@ -16,7 +16,7 @@ public class Program
 	{
 		HeuristicHelper.RunCases(
 			runCaseCount: 100,
-			testCaseCount: 150,
+			testCaseCount: 50,
 			isParallel: false,
 			i => Run(i),
 			(locker, i, ret) => {
@@ -24,7 +24,9 @@ public class Program
 				lock (locker) {
 					var status = new List<string> {
 						$"{i:d4}:",
-						//$"N={input.N:d2}",
+						$"N={input.N:d2}",
+						$"M={input.M:d2}",
+						$"T={input.T:d5}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
 						$"score={info.Score:d5}",
@@ -47,14 +49,164 @@ public class Program
 		Run(int caseNumber)
 	{
 		var (isDebug, sw, rnd) = HeuristicHelper.Initialize();
-		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC056\tools\in\", caseNumber);
+		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC066\tools\in\", caseNumber);
 
 		var input = new Input(io, isDebug);
 		var info = new Information();
 
+		var state = new State(input, isDebug);
+		for (int k = 0; k < input.M; k++) {
+			var (ci, cj) = state.Robo;
+			var (si, sj, ti, tj) = input.Balls[k];
+
+			var ret = input.Map.Bfs(ci, cj, si, sj);
+			foreach (var dir in ret) {
+				if (state.Direction != dir) {
+					var rot = state.Direction.Rotate(dir);
+					foreach (var rr in rot) {
+						state.Rotate(rr);
+					}
+				}
+
+				state.Foward();
+			}
+
+			state.Exchange();
+
+			ret = input.Map.Bfs(si, sj, ti, tj);
+			foreach (var dir in ret) {
+				if (state.Direction != dir) {
+					var rot = state.Direction.Rotate(dir);
+					foreach (var rr in rot) {
+						state.Rotate(rr);
+					}
+				}
+
+				state.Foward();
+			}
+
+			state.Exchange();
+		}
+
+		input.Output(state);
+
+		info.Score = state.Calculate();
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
+	}
+}
+
+public class State
+{
+	private readonly Input _input;
+	private readonly bool _isDebug;
+
+	public List<char> Ops { get; } = [];
+
+	public (int i, int j) Robo { get; private set; }
+	public Direction4 Direction { get; private set; }
+	public (int i, int j)[] Balls { get; } = [];
+	public int TakeBall { get; private set; } = -1;
+
+	public State(Input input, bool isDebug)
+	{
+		_input = input;
+		_isDebug = isDebug;
+
+		Robo = (0, 0);
+		Direction = Direction4.R;
+		Balls = new (int i, int j)[_input.M];
+		for (int k = 0; k < _input.M; k++) {
+			Balls[k] = (_input.Balls[k].b, _input.Balls[k].c);
+		}
+	}
+
+	public void Foward() => AddOp('F');
+	public void Exchange() => AddOp('S');
+
+	public void Rotate(Rotation rot)
+	{
+		switch (rot) {
+			case Rotation.N:
+				break;
+
+			case Rotation.L:
+				AddOp('L');
+				break;
+
+			case Rotation.R:
+				AddOp('R');
+				break;
+
+			default:
+				break;
+		}
+	}
+
+
+
+	public void AddOp(char op)
+	{
+		switch (op) {
+			case 'F':
+				if (_input.Map.CanMove(Robo.i, Robo.j, Direction)) {
+					Robo = Direction.Move(Robo.i, Robo.j);
+				}
+				break;
+
+			case 'R':
+				Direction = Direction.Rotate(Rotation.R);
+				break;
+
+			case 'L':
+				Direction = Direction.Rotate(Rotation.L);
+				break;
+
+			case 'S':
+				int take = TakeBall;
+				TakeBall = -1;
+				for (int k = 0; k < _input.M; k++) {
+					var (i, j) = Balls[k];
+					if (i == Robo.i && j == Robo.j) {
+						TakeBall = k;
+						Balls[k] = (-1, -1);
+						break;
+					}
+				}
+
+				if (take >= 0) {
+					Balls[take] = (Robo.i, Robo.j);
+				}
+
+				break;
+
+			default:
+				break;
+		}
+
+		Ops.Add(op);
+	}
+
+	public long Calculate()
+	{
+		int a = Ops.Count;
+		int v = 0;
+		for (int k = 0; k < _input.M; k++) {
+			var (bi, bj) = Balls[k];
+			if (bi == _input.Balls[k].d && bj == _input.Balls[k].e) {
+				++v;
+			}
+		}
+
+		long score;
+		if (v == _input.M) {
+			score = a;
+		} else {
+			score = (long)_input.T * (_input.M - v);
+		}
+
+		return score;
 	}
 }
 
@@ -73,10 +225,327 @@ public class Input
 	private readonly IOManager _io;
 	private readonly bool _isDebug;
 
+	public int N { get; }
+	public int M { get; }
+	public int T { get; }
+	public string[] V { get; }
+	public string[] H { get; }
+	public (int b, int c, int d, int e)[] Balls { get; }
+
+	public Maze Map { get; }
 	public Input(IOManager io, bool isDebug)
 	{
 		_io = io;
 		_isDebug = isDebug;
+
+		(N, M, T) = io.Int3();
+		V = io.ArrayString(N);
+		H = io.ArrayString(N - 1);
+		Balls = io.Repeat<(int b, int c, int d, int e)>(M, io => io.Int4());
+
+		Map = new Maze(N, N, V, H);
+	}
+
+	public void Output(State state)
+	{
+		int count = 0;
+		foreach (var op in state.Ops) {
+			_io.WriteLine(op);
+
+			++count;
+			if (count == T) {
+				break;
+			}
+		}
+	}
+}
+
+public class Maze
+{
+	/// <summary>BFSなどをする時に使う配列</summary>
+	/// <remarks>
+	/// 領域を使い回すためにフィールドにする。
+	/// </remarks>
+	private int[,] _distances = null;
+
+	/// <summary>迷路の水平方向のマス数</summary>
+	public int Width { get; private set; }
+	/// <summary>迷路の垂直方向のマス数</summary>
+	public int Height { get; private set; }
+	/// <summary>各マスから動ける方向の一覧</summary>
+	public Direction4[,][] Moveables { get; private set; }
+	/// <summary>各マスから指定方向に動けるか</summary>
+	public bool[,][] CanMoves { get; private set; }
+	public bool CanMove(int i, int j, Direction4 dir) => CanMoves[i, j][dir.ToIndex4()];
+	/// <summary>各マスから移動可能な隣接4マスの座標情報</summary>
+	public (int i, int j)[,][] Adjacence4 { get; private set; }
+
+	/// <summary>
+	/// 指定した壁の情報で迷路を作成
+	/// </summary>
+	/// <param name="width">迷路の水平方向のマス数</param>
+	/// <param name="height">迷路の垂直方向のマス数</param>
+	/// <param name="verticalWalls">
+	/// 垂直な壁情報。
+	/// つまり、水平方向に移動可能かどうかを表す[height, width-1]個の情報。
+	/// 対応するサイズの文字列配列として与えられ、
+	/// 0の場合に壁が無いことを、1の場合に壁があることを表す。
+	/// </param>
+	/// <param name="horizontalWalls">
+	/// 水平な壁情報。
+	/// つまり、垂直方向に移動可能かどうかを表す[height-1, width]個の情報。
+	/// あとは垂直と同じ。
+	/// </param>
+	/// <param name="canStay">
+	/// true: 動かないということが可能。CanMoveに Dir.N が追加される。
+	/// </param>
+	public Maze(int width, int height, string[] verticalWalls, string[] horizontalWalls, bool canStay = false)
+	{
+		var tempVerticals = new bool[height, width - 1];
+		for (int i = 0; i < height; i++) {
+			for (int j = 0; j < width - 1; j++) {
+				tempVerticals[i, j] = verticalWalls[i][j] == '1';
+			}
+		}
+
+		var tempHorizontals = new bool[height - 1, width];
+		for (int i = 0; i < height - 1; i++) {
+			for (int j = 0; j < width; j++) {
+				tempHorizontals[i, j] = horizontalWalls[i][j] == '1';
+			}
+		}
+
+		InitializeCore(width, height, tempVerticals, tempHorizontals, canStay);
+	}
+
+	/// <summary>
+	/// 指定した壁の情報で迷路を作成
+	/// </summary>
+	/// <param name="width">迷路の水平方向のマス数</param>
+	/// <param name="height">迷路の垂直方向のマス数</param>
+	/// <param name="verticalWalls">
+	/// 垂直な壁情報。
+	/// つまり、水平方向に移動可能かどうかを表す[height, width-1]個の情報。
+	/// trueの場合に壁がある。
+	/// </param>
+	/// <param name="horizontalWalls">
+	/// 水平な壁情報。
+	/// つまり、垂直方向に移動可能かどうかを表す[height-1, width]個の情報。
+	/// trueの場合に壁がある。
+	/// </param>
+	/// <param name="canStay">
+	/// true: 動かないということが可能。CanMoveに Dir.N が追加される。
+	/// </param>
+	public Maze(int width, int height, bool[,] verticalWalls, bool[,] horizontalWalls, bool canStay = false)
+		=> InitializeCore(width, height, verticalWalls, horizontalWalls, canStay);
+
+	private void InitializeCore(int width, int height, bool[,] verticalWalls, bool[,] horizontalWalls, bool canStay = false)
+	{
+		Width = width;
+		Height = height;
+		_distances = new int[Height, Width];
+
+		Moveables = new Direction4[Height, Width][];
+		CanMoves = new bool[Height, Width][];
+		for (int i = 0; i < Height; i++) {
+			for (int j = 0; j < Width; j++) {
+				var moves = new List<Direction4>();
+				if (canStay) {
+					moves.Add(Direction4.N);
+				}
+
+				if (i > 0 && horizontalWalls[i - 1, j] == false) {
+					moves.Add(Direction4.U);
+				}
+
+				if (i < Height - 1 && horizontalWalls[i, j] == false) {
+					moves.Add(Direction4.D);
+				}
+
+				if (j > 0 && verticalWalls[i, j - 1] == false) {
+					moves.Add(Direction4.L);
+				}
+
+				if (j < Width - 1 && verticalWalls[i, j] == false) {
+					moves.Add(Direction4.R);
+				}
+
+				Moveables[i, j] = moves.ToArray();
+
+				CanMoves[i, j] = new bool[5];
+				foreach (var d in moves) {
+					CanMoves[i, j][d.ToIndex4()] = true;
+				}
+			}
+		}
+
+		Adjacence4 = new (int i, int j)[Height, Width][];
+		for (int i = 0; i < Height; i++) {
+			for (int j = 0; j < Width; j++) {
+				var temp = new List<(int i, int j)>();
+				foreach (var dir in Moveables[i, j]) {
+					if (dir == Direction4.N) {
+						continue;
+					}
+
+					temp.Add(dir.Move(i, j));
+				}
+
+				Adjacence4[i, j] = temp.ToArray();
+			}
+		}
+	}
+
+	/// <summary>
+	/// 指定した位置から距離length以内のマスをBFSで列挙
+	/// </summary>
+	/// <param name="si">探索開始位置Y座標</param>
+	/// <param name="sj">探索開始位置X座標</param>
+	/// <param name="length">探索距離</param>
+	/// <returns>
+	/// positions -> 距離length以内のマスの集合
+	/// trace -> 経路復元のためのオブジェクト
+	/// </returns>
+	public ((int i, int j, int d, int id)[] positions, Trace<Direction4> trace) Bfs(int si, int sj, int length)
+	{
+		MemoryMarshal.CreateSpan(ref _distances[0, 0], _distances.Length).Fill(int.MaxValue);
+
+		var que = new Queue<(int i, int j, int id)>();
+		var ret = new List<(int i, int j, int d, int id)>();
+		var trace = new Trace<Direction4>();
+		que.Enqueue((si, sj, 0));
+		_distances[si, sj] = 0;
+
+		while (que.Count > 0) {
+			var (i, j, id) = que.Dequeue();
+			int nd = _distances[i, j] + 1;
+			if (nd > length) {
+				continue;
+			}
+
+			ret.Add((i, j, _distances[i, j], id));
+
+			foreach (var dir in Moveables[i, j]) {
+				var (ni, nj) = dir.Move(i, j);
+				if (_distances[ni, nj] != int.MaxValue) {
+					continue;
+				}
+
+				_distances[ni, nj] = nd;
+				int nextID = trace.Add(dir, id);
+				que.Enqueue((ni, nj, nextID));
+			}
+		}
+
+		return (ret.ToArray(), trace);
+	}
+
+	/// <summary>
+	/// 指定した位置から条件に合うマスを1つ見つけるまでBFS
+	/// </summary>
+	/// <param name="si">探索開始位置Y座標</param>
+	/// <param name="sj">探索開始位置X座標</param>
+	/// <param name="moveables">移動可能な方向</param>
+	/// <param name="needs">条件に合うマスのときにtrueを返すデリゲート</param>
+	/// <returns>
+	/// positions -> 探索したマスの集合
+	/// trace -> 経路復元のためのオブジェクト
+	/// found -> true:条件に合うマスを見つけた
+	/// </returns>
+	public ((int i, int j, int d, int id)[] positions, Trace<Direction4> trace, bool found)
+		Bfs(
+		int si, int sj, Direction4[] moveables, Predicate<(int i, int j)> needs)
+	{
+		MemoryMarshal.CreateSpan(ref _distances[0, 0], _distances.Length).Fill(int.MaxValue);
+
+		var que = new Queue<(int i, int j, int id)>();
+		var ret = new List<(int i, int j, int d, int id)>();
+		var trace = new Trace<Direction4>();
+		que.Enqueue((si, sj, 0));
+		_distances[si, sj] = 0;
+
+		while (que.Count > 0) {
+			var (i, j, id) = que.Dequeue();
+			int nd = _distances[i, j] + 1;
+
+			if (needs.Invoke((i, j))) {
+				ret.Add((i, j, _distances[i, j], id));
+				return (ret.ToArray(), trace, true);
+			}
+
+			foreach (var dir in moveables) {
+				if (CanMove(i, j, dir) == false) {
+					continue;
+				}
+
+				var (ni, nj) = dir.Move(i, j);
+				if (_distances[ni, nj] != int.MaxValue) {
+					continue;
+				}
+
+				_distances[ni, nj] = nd;
+				int nextID = trace.Add(dir, id);
+				que.Enqueue((ni, nj, nextID));
+			}
+		}
+
+		return (ret.ToArray(), trace, false);
+	}
+
+	/// <summary>
+	/// 指定したスタート位置から目標位置までの最短経路をBFSで探索し、移動方向を返す
+	/// </summary>
+	/// <param name="si">探索開始位置Y座標</param>
+	/// <param name="sj">探索開始位置X座標</param>
+	/// <param name="ti">目標位置Y座標</param>
+	/// <param name="tj">目標位置X座標</param>
+	/// <returns>最短経路の移動方向の配列。到達不可能な場合は空配列を返す。</returns>
+	public Direction4[] Bfs(int si, int sj, int ti, int tj)
+	{
+		if (si == ti && sj == tj) {
+			return [];
+		}
+
+		MemoryMarshal.CreateSpan(ref _distances[0, 0], _distances.Length).Fill(int.MaxValue);
+
+		var que = new Queue<(int i, int j, int id)>();
+		var trace = new Trace<Direction4>();
+		que.Enqueue((si, sj, 0));
+		_distances[si, sj] = 0;
+
+		int goalId = -1;
+
+		while (que.Count > 0) {
+			var (i, j, id) = que.Dequeue();
+			int nd = _distances[i, j] + 1;
+
+			foreach (var dir in Moveables[i, j]) {
+				var (ni, nj) = dir.Move(i, j);
+				if (_distances[ni, nj] != int.MaxValue) {
+					continue;
+				}
+
+				_distances[ni, nj] = nd;
+				int nextID = trace.Add(dir, id);
+
+				if (ni == ti && nj == tj) {
+					goalId = nextID;
+					break;
+				}
+
+				que.Enqueue((ni, nj, nextID));
+			}
+
+			if (goalId != -1) {
+				break;
+			}
+		}
+
+		if (goalId == -1) {
+			return [];
+		}
+
+		return trace.GetRouteTo(goalId).ToArray();
 	}
 }
 
@@ -155,7 +624,7 @@ public static class Direction4Extensions
 		};
 	}
 
-	public static Direction4 Rorate(this Direction4 dir, Rotation rot)
+	public static Direction4 Rotate(this Direction4 dir, Rotation rot)
 	{
 		if (rot == Rotation.N) {
 			return dir;
@@ -169,6 +638,23 @@ public static class Direction4Extensions
 			Direction4.R => rot == Rotation.L ? Direction4.U : Direction4.D,
 			_ => Direction4.N,
 		};
+	}
+
+	public static Rotation[] Rotate(this Direction4 src, Direction4 dst)
+	{
+		if (src == dst) {
+			return [];
+		}
+
+		if (src.Reverse() == dst) {
+			return [Rotation.R, Rotation.R];
+		}
+
+		if (src.Rotate(Rotation.R) == dst) {
+			return [Rotation.R];
+		} else {
+			return [Rotation.L];
+		}
 	}
 
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
