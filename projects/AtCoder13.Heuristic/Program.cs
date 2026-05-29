@@ -29,6 +29,8 @@ public class Program
 						$"T={input.T:d5}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
+						$"ML={info.ML:d3}",
+						$"A={info.A:d5}",
 						$"score={info.Score:d5}",
 						$"elapsed={info.Elapsed:d4}",
 					};
@@ -48,13 +50,30 @@ public class Program
 	static (Input input, Information info)
 		Run(int caseNumber)
 	{
-		var (isDebug, sw, rnd) = HeuristicHelper.Initialize();
+		var (isLocal, sw, rnd) = HeuristicHelper.Initialize();
 		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC066\tools\in\", caseNumber);
 
-		var input = new Input(io, isDebug);
+		var input = new Input(io, isLocal);
 		var info = new Information();
 
-		var state = new State(input, isDebug);
+		var best = Plan1(isLocal, sw, rnd, input, info);
+
+		{
+			best = Plan2(isLocal, sw, rnd, input, info, best);
+		}
+
+		input.Output(best);
+
+		info.A = best.Ops.Count;
+		info.Score = best.Calculate();
+		info.Elapsed = sw.ElapsedMilliseconds;
+
+		return (input, info);
+	}
+
+	static State Plan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(input, isLocal);
 		for (int k = 0; k < input.M; k++) {
 			var (ci, cj) = state.Robo;
 			var (si, sj, ti, tj) = input.Balls[k];
@@ -88,12 +107,77 @@ public class Program
 			state.Exchange();
 		}
 
-		input.Output(state);
+		return state;
+	}
 
-		info.Score = state.Calculate();
-		info.Elapsed = sw.ElapsedMilliseconds;
+	static State Plan2(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info, State temp)
+	{
+		var ops = temp.Ops.ToArray();
+		var bestOp = ops.ToArray();
 
-		return (input, info);
+		int maxLen = Math.Min(10, ops.Length);
+		for (int l = 2; l <= maxLen; l++) {
+			for (int i = 0; i < ops.Length - l; i++) {
+				var template = ops.AsSpan().Slice(i, l);
+				var list = new List<int>();
+				for (int j = 0; j < ops.Length - l; j++) {
+					bool ok = true;
+					for (int k = 0; k < template.Length; k++) {
+						if (ops[j + k] != template[k]) {
+							ok = false;
+							break;
+						}
+					}
+
+					if (ok) {
+						list.Add(j);
+						j += l - 1;
+					}
+				}
+
+				int len = ops.Length - ((list.Count - 1) * (l - 1)) + 2;
+				if (len < bestOp.Length) {
+					var tempOp = new List<char>();
+					int fj = list[0];
+					int tj = -1;
+					int tl = 0;
+
+					for (int j = 0; j < ops.Length; j++) {
+						if (j == fj) {
+							tempOp.Add('M');
+							tempOp.Add(ops[j]);
+							if (tl < list.Count - 1) {
+								++tl;
+								tj = list[tl];
+							}
+						} else if (j == tj) {
+							tempOp.Add('P');
+							j += l - 1;
+							if (tl < list.Count - 1) {
+								++tl;
+								tj = list[tl];
+							}
+						} else {
+							tempOp.Add(ops[j]);
+						}
+
+						if (j == fj + l - 1) {
+							tempOp.Add('M');
+						}
+					}
+
+					info.ML = l;
+					bestOp = tempOp.ToArray();
+				}
+			}
+		}
+
+		var state = new State(input, isLocal);
+		foreach (var op in bestOp) {
+			state.AddOp(op);
+		}
+
+		return state;
 	}
 }
 
@@ -108,6 +192,10 @@ public class State
 	public Direction4 Direction { get; private set; }
 	public (int i, int j)[] Balls { get; } = [];
 	public int TakeBall { get; private set; } = -1;
+
+	public bool IsMacro { get; private set; } = false;
+	public char[] Macro { get; private set; } = [];
+	public List<char> NextMacro { get; } = [];
 
 	public State(Input input, bool isDebug)
 	{
@@ -144,9 +232,7 @@ public class State
 		}
 	}
 
-
-
-	public void AddOp(char op)
+	public void AddOp(char op, bool macroNow = false)
 	{
 		switch (op) {
 			case 'F':
@@ -181,11 +267,33 @@ public class State
 
 				break;
 
+			case 'M':
+				if (IsMacro) {
+					Macro = NextMacro.ToArray();
+				} else {
+					NextMacro.Clear();
+				}
+
+				IsMacro = !IsMacro;
+				break;
+
+			case 'P':
+				foreach (var mac in Macro) {
+					AddOp(mac, macroNow: true);
+				}
+				break;
+
 			default:
 				break;
 		}
 
-		Ops.Add(op);
+		if (IsMacro && op != 'M' && op != 'P') {
+			NextMacro.Add(op);
+		}
+
+		if (macroNow == false) {
+			Ops.Add(op);
+		}
 	}
 
 	public long Calculate()
@@ -218,6 +326,8 @@ public class Information
 	public int Up { get; set; } = 0;
 	public long Elapsed { get; set; } = 0;
 
+	public int ML { get; set; } = 0;
+	public int A { get; set; } = 0;
 }
 
 public class Input
