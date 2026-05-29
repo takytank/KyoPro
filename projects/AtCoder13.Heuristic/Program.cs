@@ -56,7 +56,7 @@ public class Program
 		var input = new Input(io, isLocal);
 		var info = new Information();
 
-		var best = Plan1(isLocal, sw, rnd, input, info);
+		var best = Plan3(isLocal, sw, rnd, input, info);
 
 		{
 			best = Plan2(isLocal, sw, rnd, input, info, best);
@@ -175,6 +175,45 @@ public class Program
 		var state = new State(input, isLocal);
 		foreach (var op in bestOp) {
 			state.AddOp(op);
+		}
+
+		return state;
+	}
+
+	static State Plan3(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(input, isLocal);
+		for (int k = 0; k < input.M; k++) {
+			var (ci, cj) = state.Robo;
+			var (si, sj, ti, tj) = input.Balls[k];
+
+			var ret = input.Map.Bfs(ci, cj, si, sj, state.Direction);
+			foreach (var dir in ret) {
+				if (state.Direction != dir) {
+					var rot = state.Direction.Rotate(dir);
+					foreach (var rr in rot) {
+						state.Rotate(rr);
+					}
+				}
+
+				state.Foward();
+			}
+
+			state.Exchange();
+
+			ret = input.Map.Bfs(si, sj, ti, tj, state.Direction);
+			foreach (var dir in ret) {
+				if (state.Direction != dir) {
+					var rot = state.Direction.Rotate(dir);
+					foreach (var rr in rot) {
+						state.Rotate(rr);
+					}
+				}
+
+				state.Foward();
+			}
+
+			state.Exchange();
 		}
 
 		return state;
@@ -656,6 +695,83 @@ public class Maze
 		}
 
 		return trace.GetRouteTo(goalId).ToArray();
+	}
+
+	/// <summary>
+	/// 指定したスタート位置から目標位置までの最短経路を、向きの変更を考慮してBFSで探索し、移動方向を返す
+	/// </summary>
+	/// <param name="si">探索開始位置Y座標</param>
+	/// <param name="sj">探索開始位置X座標</param>
+	/// <param name="ti">目標位置Y座標</param>
+	/// <param name="tj">目標位置X座標</param>
+	/// <param name="startDir">開始時の向き</param>
+	/// <returns>最短経路の移動方向の配列。到達不可能な場合は空配列を返す。</returns>
+	public Direction4[] Bfs(int si, int sj, int ti, int tj, Direction4 startDir)
+	{
+		if (si == ti && sj == tj) {
+			return [];
+		}
+
+		var distances = new int[Height, Width, 5];
+		if (distances.Length > 0) {
+			MemoryMarshal.CreateSpan(ref distances[0, 0, 0], distances.Length).Fill(int.MaxValue);
+		}
+
+		var que = new Queue<(int i, int j, Direction4 dir, int id)>();
+		var trace = new Trace<Direction4>();
+
+		int sIdx = startDir.ToIndex4();
+		que.Enqueue((si, sj, startDir, 0));
+		distances[si, sj, sIdx] = 0;
+
+		int goalId = -1;
+
+		while (que.Count > 0) {
+			var (i, j, dir, id) = que.Dequeue();
+			int nd = distances[i, j, dir.ToIndex4()] + 1;
+
+			if (CanMove(i, j, dir)) {
+				var (ni, nj) = dir.Move(i, j);
+				if (distances[ni, nj, dir.ToIndex4()] == int.MaxValue) {
+					distances[ni, nj, dir.ToIndex4()] = nd;
+					int nextID = trace.Add(dir, id);
+					if (ni == ti && nj == tj) {
+						goalId = nextID;
+						break;
+					}
+					que.Enqueue((ni, nj, dir, nextID));
+				}
+			}
+
+			var rotL = dir.Rotate(Rotation.L);
+			if (distances[i, j, rotL.ToIndex4()] == int.MaxValue) {
+				distances[i, j, rotL.ToIndex4()] = nd;
+				int nextID = trace.Add(Direction4.N, id);
+				que.Enqueue((i, j, rotL, nextID));
+			}
+
+			var rotR = dir.Rotate(Rotation.R);
+			if (distances[i, j, rotR.ToIndex4()] == int.MaxValue) {
+				distances[i, j, rotR.ToIndex4()] = nd;
+				int nextID = trace.Add(Direction4.N, id);
+				que.Enqueue((i, j, rotR, nextID));
+			}
+		}
+
+		if (goalId == -1) {
+			return [];
+		}
+
+		var route = trace.GetRouteTo(goalId);
+		var result = new List<Direction4>();
+		while (route.Count > 0) {
+			var r = route.Pop();
+			if (r != Direction4.N) {
+				result.Add(r);
+			}
+		}
+
+		return [.. result];
 	}
 }
 
