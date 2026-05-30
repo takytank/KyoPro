@@ -26,8 +26,10 @@ public class Program
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
 						$"P={info.P:d2}",
-						$"ML={info.ML:d3}",
-						$"RA={info.RA:d5}",
+						$"W={info.Width:d4}",
+						$"D={info.Depth:d4}",
+						//$"ML={info.ML:d3}",
+						//$"RA={info.RA:d5}",
 						$"A={info.A:d5}",
 						$"score={info.Score:d5}",
 						$"elapsed={info.Elapsed:d4}",
@@ -68,9 +70,13 @@ public class Program
 
 		var state6 = Plan6(isLocal, sw, rnd, input, info);
 		//if (state6.Ops.Count < best.Ops.Count) {
-		best = state6;
-		info.P = 6;
+		//best = state6;
+		//info.P = 6;
 		//}
+
+		var state7 = Plan7(isLocal, sw, rnd, input, info);
+		best = state7;
+		info.P = 7;
 
 		/*
 		var state5 = Plan5(isLocal, sw, rnd, input, info);
@@ -258,6 +264,31 @@ public class Program
 		}
 	}
 
+	// Plan7用: 動的マクロ状態を持つビームノード
+	class BeamNode7 : IComparable<BeamNode7>
+	{
+		public (int i, int j) Robo;
+		public Direction4 Dir;
+		public int TakeBall;         // 手に持っているボールのインデックス (-1なら持っていない)
+		public ulong CompletedBalls; // 各ボールがかごに入っているか (ビットフラグ)
+		public (int i, int j)[] BallPositions;
+
+		// MacroState: 0=未作成, 1=記録中, 2=完成
+		public int MacroState;
+		public string MacroContent; // 記録済み/記録中のマクロ文字列
+
+		public int OpsCount;
+		public int EvalScore;
+
+		public BeamNode7 Parent;
+		public char LastOp;
+
+		public int CompareTo(BeamNode7 other)
+		{
+			return EvalScore.CompareTo(other.EvalScore);
+		}
+	}
+
 	static State Plan6(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		int N = input.N;
@@ -354,6 +385,45 @@ public class Program
 			}
 		}
 
+		// マクロ選定（1回のみ）: 最短マクロを選ぶ
+		var allMacros6 = GenerateMacros().OrderBy(x => x.Length).ToList();
+		var dirs6 = new[] { Direction4.D, Direction4.L, Direction4.U, Direction4.R };
+		string bestMacro6 = null;
+		(int i, int j, Direction4 dir, bool ok)[,,] macroDest6 = null;
+		foreach (var candidate in allMacros6) {
+			var dest = new (int i, int j, Direction4 dir, bool ok)[N, N, 4];
+			bool anyOk = false;
+			for (int i = 0; i < N; i++) {
+				for (int j = 0; j < N; j++) {
+					foreach (var dir in dirs6) {
+						int nr = i, nc = j;
+						Direction4 nd = dir;
+						bool mOk = true;
+						foreach (var op in candidate) {
+							if (op == 'F') {
+								if (!input.Map.CanMove(nr, nc, nd)) { mOk = false; break; }
+								var moved = nd.Move(nr, nc);
+								nr = moved.i; nc = moved.j;
+							} else if (op == 'L') {
+								nd = nd.Rotate(Rotation.L);
+							} else if (op == 'R') {
+								nd = nd.Rotate(Rotation.R);
+							}
+						}
+						dest[i, j, dir.ToIndex4()] = (nr, nc, nd, mOk);
+						if (mOk) anyOk = true;
+					}
+				}
+			}
+			if (anyOk) {
+				bestMacro6 = candidate;
+				macroDest6 = dest;
+				break;
+			}
+		}
+		int macroOpsCost6 = bestMacro6 != null ? bestMacro6.Length : 0;
+		info.Macro = bestMacro6 ?? "";
+
 		BeamNode initialNode = new BeamNode {
 			Robo = (0, 0),
 			Dir = Direction4.R,
@@ -420,12 +490,11 @@ public class Program
 		initialNode.EvalScore = ComputeEvalScore(initialNode);
 
 		var beam = new List<BeamNode> { initialNode };
-		int beamWidth = 1000;
+		// ビーム幅: ノード1個あたりの処理コストが M*N に比例するため逆数スケーリング
+		int beamWidth = Math.Max(200, 250000 / (M * N));
+		if (isLocal) beamWidth = Math.Max(100, beamWidth / 2);
 		double timeLimit = 1900.0;
-		if (isLocal) {
-			beamWidth = 500;
-			timeLimit = 1900.0;
-		}
+		info.Width = beamWidth;
 
 		BeamNode bestGoal = null;
 
@@ -547,7 +616,28 @@ public class Program
 					nextBeam.Add(nextS);
 				}
 SkipS:;
-			}
+
+				// P: マクロ実行
+				if (bestMacro6 != null && node.LastOp != 'P') {
+					var md = macroDest6[node.Robo.i, node.Robo.j, node.Dir.ToIndex4()];
+					if (md.ok) {
+						var nextP = new BeamNode {
+							Robo = (md.i, md.j),
+							Dir = md.dir,
+							TakeBall = node.TakeBall,
+							CompletedBalls = node.CompletedBalls,
+							BallPositions = (ValueTuple<int, int>[])node.BallPositions.Clone(),
+							OpsCount = node.OpsCount + 1,
+							Parent = node,
+							LastOp = 'P'
+						};
+						nextP.EvalScore = ComputeEvalScore(nextP);
+						nextBeam.Add(nextP);
+					}
+				}
+			} // foreach node
+
+			if (bestGoal != null) break;
 
 			// 枝刈りとソート
 			nextBeam.Sort();
@@ -561,6 +651,7 @@ SkipS:;
 		if (bestGoal == null && beam.Count > 0) {
 			bestGoal = beam[0];
 		}
+		info.Depth = step;
 
 		var finalState = new State(input, isLocal);
 		if (bestGoal != null) {
@@ -571,6 +662,426 @@ SkipS:;
 				curr = curr.Parent;
 			}
 			opsList.Reverse();
+
+			// マクロを使用している場合、最初の 'P' を 'M' + bestMacro6 + 'M' に置換する
+			if (bestMacro6 != null && opsList.Contains('P')) {
+				int firstP = opsList.IndexOf('P');
+				var newOps = new List<char>();
+				for (int i = 0; i < firstP; i++) newOps.Add(opsList[i]);
+				newOps.Add('M');
+				foreach (var c in bestMacro6) newOps.Add(c);
+				newOps.Add('M');
+				for (int i = firstP + 1; i < opsList.Count; i++) newOps.Add(opsList[i]);
+				opsList = newOps;
+			}
+
+			foreach (var c in opsList) {
+				finalState.AddOp(c);
+			}
+		}
+
+		return finalState;
+	}
+
+	static State Plan7(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		int N = input.N;
+		int M = input.M;
+
+		// Plan6と同じ逆BFS前計算
+		int[,,,] distToGoal = new int[M, N, N, 4];
+		for (int k = 0; k < M; k++) {
+			for (int i = 0; i < N; i++)
+				for (int j = 0; j < N; j++)
+					for (int d = 0; d < 4; d++)
+						distToGoal[k, i, j, d] = 999999;
+		}
+
+		for (int k = 0; k < M; k++) {
+			int goal_i = input.Balls[k].d;
+			int goal_j = input.Balls[k].e;
+			var q = new Queue<(int i, int j, int dir)>();
+			for (int d = 0; d < 4; d++) {
+				distToGoal[k, goal_i, goal_j, d] = 0;
+				q.Enqueue((goal_i, goal_j, Direction4Extensions._delta4Dir[d].ToIndex4()));
+			}
+			while (q.Count > 0) {
+				var (ci, cj, cdir) = q.Dequeue();
+				int cdist = distToGoal[k, ci, cj, cdir];
+				var cdirEnum = Direction4Extensions._delta4Dir[cdir];
+				var prevDir = Direction4Extensions.Rotate((Direction4)cdirEnum, Rotation.R).Rotate(Rotation.R);
+				int pi = ci + (prevDir == Direction4.D ? 1 : prevDir == Direction4.U ? -1 : 0);
+				int pj = cj + (prevDir == Direction4.R ? 1 : prevDir == Direction4.L ? -1 : 0);
+				if (pi >= 0 && pi < N && pj >= 0 && pj < N) {
+					if (input.Map.CanMove(pi, pj, cdirEnum)) {
+						if (distToGoal[k, pi, pj, cdir] > cdist + 1) {
+							distToGoal[k, pi, pj, cdir] = cdist + 1;
+							q.Enqueue((pi, pj, cdir));
+						}
+					}
+				}
+				int pdirL = Direction4Extensions.Rotate(cdirEnum, Rotation.L).ToIndex4();
+				if (distToGoal[k, ci, cj, pdirL] > cdist + 1) {
+					distToGoal[k, ci, cj, pdirL] = cdist + 1;
+					q.Enqueue((ci, cj, pdirL));
+				}
+				int pdirR = Direction4Extensions.Rotate(cdirEnum, Rotation.R).ToIndex4();
+				if (distToGoal[k, ci, cj, pdirR] > cdist + 1) {
+					distToGoal[k, ci, cj, pdirR] = cdist + 1;
+					q.Enqueue((ci, cj, pdirR));
+				}
+			}
+		}
+
+		int[,] rawDist = new int[N * N, N * N];
+		for (int i = 0; i < N * N; i++) {
+			for (int j = 0; j < N * N; j++) rawDist[i, j] = 999999;
+			rawDist[i, i] = 0;
+		}
+		for (int r = 0; r < N; r++) {
+			for (int c = 0; c < N; c++) {
+				int start = r * N + c;
+				var q = new Queue<int>();
+				q.Enqueue(start);
+				while (q.Count > 0) {
+					int u = q.Dequeue();
+					int ui = u / N, uj = u % N;
+					foreach (var d in input.Map.Moveables[ui, uj]) {
+						var (nr, nc) = d.Move(ui, uj);
+						int v = nr * N + nc;
+						if (rawDist[start, v] > rawDist[start, u] + 1) {
+							rawDist[start, v] = rawDist[start, u] + 1;
+							q.Enqueue(v);
+						}
+					}
+				}
+			}
+		}
+
+		// マクロを実行したときの遷移先を計算するキャッシュ (macroStr -> dest[N,N,4])
+		var macroDestCache = new Dictionary<string, (int i, int j, Direction4 dir, bool ok)[,,]>();
+		(int i, int j, Direction4 dir, bool ok)[,,] GetMacroDest(string mac)
+		{
+			if (macroDestCache.TryGetValue(mac, out var cached)) return cached;
+			var dest = new (int i, int j, Direction4 dir, bool ok)[N, N, 4];
+			for (int i = 0; i < N; i++) {
+				for (int j = 0; j < N; j++) {
+					foreach (var dir in new[] { Direction4.D, Direction4.L, Direction4.U, Direction4.R }) {
+						int nr = i, nc = j;
+						Direction4 nd = dir;
+						bool mOk = true;
+						foreach (var op in mac) {
+							if (op == 'F') {
+								if (!input.Map.CanMove(nr, nc, nd)) { mOk = false; break; }
+								var moved = nd.Move(nr, nc);
+								nr = moved.i; nc = moved.j;
+							} else if (op == 'L') {
+								nd = nd.Rotate(Rotation.L);
+							} else if (op == 'R') {
+								nd = nd.Rotate(Rotation.R);
+							}
+						}
+						dest[i, j, dir.ToIndex4()] = (nr, nc, nd, mOk);
+					}
+				}
+			}
+			macroDestCache[mac] = dest;
+			return dest;
+		}
+
+		const int MACRO_MIN = 3;
+		const int MACRO_MAX = 10;
+
+		BeamNode7 initialNode = new BeamNode7 {
+			Robo = (0, 0),
+			Dir = Direction4.R,
+			TakeBall = -1,
+			CompletedBalls = 0UL,
+			BallPositions = new (int i, int j)[M],
+			MacroState = 0,
+			MacroContent = "",
+			OpsCount = 0,
+			Parent = null,
+			LastOp = '\0'
+		};
+		for (int k = 0; k < M; k++) {
+			initialNode.BallPositions[k] = (input.Balls[k].b, input.Balls[k].c);
+		}
+
+		int ComputeEvalScore7(BeamNode7 node)
+		{
+			int ballTargetCost = 0;
+			int minDistToAnyBall = int.MaxValue;
+			int roboPos = node.Robo.i * N + node.Robo.j;
+			int completedCount = 0;
+
+			for (int k = 0; k < M; k++) {
+				if ((node.CompletedBalls & (1UL << k)) != 0) {
+					completedCount++;
+					continue;
+				}
+				if (node.TakeBall == k) {
+					ballTargetCost += distToGoal[k, node.Robo.i, node.Robo.j, node.Dir.ToIndex4()];
+					minDistToAnyBall = 0;
+				} else {
+					var bPos = node.BallPositions[k];
+					int bp = bPos.i * N + bPos.j;
+					int minD = int.MaxValue;
+					for (int d = 0; d < 4; d++) {
+						if (distToGoal[k, bPos.i, bPos.j, d] < minD) minD = distToGoal[k, bPos.i, bPos.j, d];
+					}
+					ballTargetCost += minD;
+					int dToBall = rawDist[roboPos, bp];
+					if (dToBall < minDistToAnyBall) minDistToAnyBall = dToBall;
+				}
+			}
+
+			if (minDistToAnyBall == int.MaxValue) minDistToAnyBall = 0;
+			if (node.TakeBall != -1) minDistToAnyBall = 0;
+
+			// マクロ作成コスト相殺: 記録中/完成時はM2回分+マクロ長をopsCountから引いて評価を公平にする
+			int effectiveOps = node.OpsCount;
+			if (node.MacroState == 1) {
+				// 記録中: まだ完成していないが将来Pで回収できる見込みとして軽く優遇
+				effectiveOps -= (2 + node.MacroContent.Length);
+			} else if (node.MacroState == 2) {
+				// 完成: 2M+マクロ長分は投資と見なして相殺
+				effectiveOps -= (2 + node.MacroContent.Length);
+			}
+
+			int score = effectiveOps
+				- completedCount * 10000
+				+ ballTargetCost * 10
+				+ minDistToAnyBall * 2;
+			if (node.TakeBall != -1) score -= 50;
+			return score;
+		}
+
+		initialNode.EvalScore = ComputeEvalScore7(initialNode);
+
+		var beam = new List<BeamNode7> { initialNode };
+		// Plan7 は遷移種類が多い (M開始/終了/P) ので Plan6 より少し小さく
+		int beamWidth = Math.Max(150, 150000 / (M * N));
+		if (isLocal) beamWidth = Math.Max(75, beamWidth / 2);
+		double timeLimit = 1900.0;
+		info.Width = beamWidth;
+
+		BeamNode7 bestGoal = null;
+
+		int step7 = 0;
+		while (beam.Count > 0 && sw.Elapsed.TotalMilliseconds < timeLimit && step7 < input.T) {
+			step7++;
+			var nextBeam = new List<BeamNode7>();
+
+			foreach (var node in beam) {
+				++info.Loop;
+				if (node.CompletedBalls == (1UL << M) - 1) {
+					if (bestGoal == null || node.OpsCount < bestGoal.OpsCount) {
+						++info.Up;
+						bestGoal = node;
+					}
+					continue;
+				}
+
+				// ---- F: 前進 ----
+				if (input.Map.CanMove(node.Robo.i, node.Robo.j, node.Dir)
+					&& !(node.MacroState == 1 && node.MacroContent.Length >= MACRO_MAX)) {
+					var nextRobo = node.Dir.Move(node.Robo.i, node.Robo.j);
+					var nf = new BeamNode7 {
+						Robo = nextRobo,
+						Dir = node.Dir,
+						TakeBall = node.TakeBall,
+						CompletedBalls = node.CompletedBalls,
+						BallPositions = (ValueTuple<int, int>[])node.BallPositions.Clone(),
+						MacroState = node.MacroState,
+						MacroContent = node.MacroState == 1 ? node.MacroContent + "F" : node.MacroContent,
+						OpsCount = node.OpsCount + 1,
+						Parent = node,
+						LastOp = 'F'
+					};
+					nf.EvalScore = ComputeEvalScore7(nf);
+					nextBeam.Add(nf);
+				}
+
+				// ---- L: 左回転 ----
+				if (node.LastOp != 'R'
+					&& !(node.MacroState == 1 && node.MacroContent.Length >= MACRO_MAX)) {
+					var nl = new BeamNode7 {
+						Robo = node.Robo,
+						Dir = node.Dir.Rotate(Rotation.L),
+						TakeBall = node.TakeBall,
+						CompletedBalls = node.CompletedBalls,
+						BallPositions = (ValueTuple<int, int>[])node.BallPositions.Clone(),
+						MacroState = node.MacroState,
+						MacroContent = node.MacroState == 1 ? node.MacroContent + "L" : node.MacroContent,
+						OpsCount = node.OpsCount + 1,
+						Parent = node,
+						LastOp = 'L'
+					};
+					nl.EvalScore = ComputeEvalScore7(nl);
+					nextBeam.Add(nl);
+				}
+
+				// ---- R: 右回転 ----
+				if (node.LastOp != 'L'
+					&& !(node.MacroState == 1 && node.MacroContent.Length >= MACRO_MAX)) {
+					var nr2 = new BeamNode7 {
+						Robo = node.Robo,
+						Dir = node.Dir.Rotate(Rotation.R),
+						TakeBall = node.TakeBall,
+						CompletedBalls = node.CompletedBalls,
+						BallPositions = (ValueTuple<int, int>[])node.BallPositions.Clone(),
+						MacroState = node.MacroState,
+						MacroContent = node.MacroState == 1 ? node.MacroContent + "R" : node.MacroContent,
+						OpsCount = node.OpsCount + 1,
+						Parent = node,
+						LastOp = 'R'
+					};
+					nr2.EvalScore = ComputeEvalScore7(nr2);
+					nextBeam.Add(nr2);
+				}
+
+				// ---- S: 交換 ----
+				if (node.LastOp != 'S' && node.MacroState != 1) { // 記録中はS不可
+					var ns = new BeamNode7 {
+						Robo = node.Robo,
+						Dir = node.Dir,
+						TakeBall = -1,
+						CompletedBalls = node.CompletedBalls,
+						BallPositions = (ValueTuple<int, int>[])node.BallPositions.Clone(),
+						MacroState = node.MacroState,
+						MacroContent = node.MacroContent,
+						OpsCount = node.OpsCount + 1,
+						Parent = node,
+						LastOp = 'S'
+					};
+					int take = node.TakeBall;
+					int currentTake = -1;
+					bool hasBallHere = false;
+					for (int k = 0; k < M; k++) {
+						if (ns.BallPositions[k].i == node.Robo.i && ns.BallPositions[k].j == node.Robo.j) {
+							hasBallHere = true;
+							currentTake = k;
+							ns.BallPositions[k] = (-1, -1);
+							break;
+						}
+					}
+					if (take == -1 && !hasBallHere) goto SkipS7;
+					if (currentTake >= 0 && (node.Robo.i == input.Balls[currentTake].d && node.Robo.j == input.Balls[currentTake].e)) goto SkipS7;
+					ns.TakeBall = currentTake;
+					if (take >= 0) {
+						ns.BallPositions[take] = (node.Robo.i, node.Robo.j);
+						if (node.Robo.i == input.Balls[take].d && node.Robo.j == input.Balls[take].e) {
+							ns.CompletedBalls |= (1UL << take);
+						} else {
+							ns.CompletedBalls &= ~(1UL << take);
+						}
+					}
+					ns.EvalScore = ComputeEvalScore7(ns);
+					nextBeam.Add(ns);
+				}
+SkipS7:;
+
+				// ---- M: マクロ記録開始 (MacroState==0 のときのみ) ----
+				if (node.MacroState == 0) {
+					var nm = new BeamNode7 {
+						Robo = node.Robo,
+						Dir = node.Dir,
+						TakeBall = node.TakeBall,
+						CompletedBalls = node.CompletedBalls,
+						BallPositions = (ValueTuple<int, int>[])node.BallPositions.Clone(),
+						MacroState = 1,
+						MacroContent = "",
+						OpsCount = node.OpsCount + 1,
+						Parent = node,
+						LastOp = 'M'
+					};
+					nm.EvalScore = ComputeEvalScore7(nm);
+					nextBeam.Add(nm);
+				}
+
+				// ---- M: マクロ記録終了 (記録中かつMACRO_MIN以上またはMACRO_MAX到達) ----
+				if (node.MacroState == 1 && (node.MacroContent.Length >= MACRO_MIN || node.MacroContent.Length >= MACRO_MAX)) {
+					var nm = new BeamNode7 {
+						Robo = node.Robo,
+						Dir = node.Dir,
+						TakeBall = node.TakeBall,
+						CompletedBalls = node.CompletedBalls,
+						BallPositions = (ValueTuple<int, int>[])node.BallPositions.Clone(),
+						MacroState = 2,
+						MacroContent = node.MacroContent,
+						OpsCount = node.OpsCount + 1,
+						Parent = node,
+						LastOp = 'M'
+					};
+					nm.EvalScore = ComputeEvalScore7(nm);
+					nextBeam.Add(nm);
+				}
+
+				// ---- P: マクロ実行 (MacroState==2 かつ直前がPでない) ----
+				if (node.MacroState == 2 && node.LastOp != 'P') {
+					var dest = GetMacroDest(node.MacroContent);
+					var md = dest[node.Robo.i, node.Robo.j, node.Dir.ToIndex4()];
+					if (md.ok) {
+						// P実行でボールが一緒に動く（持っているボールを移動）
+						var newBalls = (ValueTuple<int, int>[])node.BallPositions.Clone();
+						// 持っているボールはロボットと一緒に動く(位置は変わらない: TakeBallで管理)
+						var np = new BeamNode7 {
+							Robo = (md.i, md.j),
+							Dir = md.dir,
+							TakeBall = node.TakeBall,
+							CompletedBalls = node.CompletedBalls,
+							BallPositions = newBalls,
+							MacroState = 2,
+							MacroContent = node.MacroContent,
+							OpsCount = node.OpsCount + 1,
+							Parent = node,
+							LastOp = 'P'
+						};
+						// Pの結果として現在地にボールが来たら完了判定
+						if (node.TakeBall >= 0) {
+							int kb = node.TakeBall;
+							if (md.i == input.Balls[kb].d && md.j == input.Balls[kb].e) {
+								// SをP後に打つことになるが、評価上は到達分の加点のみ
+							}
+						}
+						np.EvalScore = ComputeEvalScore7(np);
+						nextBeam.Add(np);
+					}
+				}
+			} // foreach node
+
+			if (bestGoal != null) break;
+
+			nextBeam.Sort();
+			if (nextBeam.Count > beamWidth) {
+				nextBeam.RemoveRange(beamWidth, nextBeam.Count - beamWidth);
+			}
+			beam = nextBeam;
+		}
+
+		if (bestGoal == null && beam.Count > 0) {
+			bestGoal = beam[0];
+		}
+
+		info.Depth = step7;
+		// 最終的なマクロを info.Macro に記録
+		if (bestGoal != null && bestGoal.MacroState == 2) {
+			info.Macro = bestGoal.MacroContent;
+		}
+
+		var finalState = new State(input, isLocal);
+		if (bestGoal != null) {
+			var opsList = new List<char>();
+			var curr = bestGoal;
+			while (curr.Parent != null) {
+				opsList.Add(curr.LastOp);
+				curr = curr.Parent;
+			}
+			opsList.Reverse();
+
+			// opsListには M(開始) ... M(終了) ... P ... の形で入っているので
+			// State.AddOp がそのまま M/P のセマンティクスを処理してくれる
 			foreach (var c in opsList) {
 				finalState.AddOp(c);
 			}
@@ -1104,6 +1615,8 @@ public class Information
 	public int ML { get; set; } = 0;
 	public int RA { get; set; } = 0;
 	public int A { get; set; } = 0;
+	public int Width { get; set; } = 0;
+	public int Depth { get; set; } = 0;
 }
 
 public class Input
