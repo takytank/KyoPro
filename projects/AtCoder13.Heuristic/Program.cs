@@ -11,7 +11,7 @@ public class Program
 	static void Main()
 	{
 		HeuristicHelper.RunCases(
-			runCaseCount: 10,
+			runCaseCount: 100,
 			testCaseCount: 50,
 			isParallel: false,
 			i => Run(i),
@@ -263,30 +263,75 @@ public class Program
 		int N = input.N;
 		int M = input.M;
 
-		// 全ペア最短距離の事前計算
-		// インデックス: 0~(M-1) は各ボールの初期位置、M~(2M-1) は各かごの位置、2M=ロボット初期位置
-		// ※動的な現在地に対しては BFS を毎回回すのは重いため、各マス間の距離を前計算しておく
-		int[,] dist = new int[N * N, N * N];
-		for (int i = 0; i < N * N; i++) {
-			for (int j = 0; j < N * N; j++) {
-				dist[i, j] = 999999;
-			}
-			dist[i, i] = 0;
-		}
-
-		for (int r = 0; r < N; r++) {
-			for (int c = 0; c < N; c++) {
-				int u = r * N + c;
-				var moves = input.Map.Moveables[r, c];
-				foreach (var d in moves) {
-					var (nr, nc) = d.Move(r, c);
-					int v = nr * N + nc;
-					dist[u, v] = 1;
+		// かごの位置を始点として、向きも考慮した逆BFSでボールごとの距離を前計算する
+		// distToGoal[k, i, j, dir] : ボールkのかごに向けた、現在地(i,j) 向きdir からの最短操作数
+		int[,,,] distToGoal = new int[M, N, N, 4];
+		for (int k = 0; k < M; k++) {
+			for (int i = 0; i < N; i++) {
+				for (int j = 0; j < N; j++) {
+					for (int d = 0; d < 4; d++) {
+						distToGoal[k, i, j, d] = 999999;
+					}
 				}
 			}
 		}
 
-		// ワーシャル–フロイド等でもOKだが、BFSの方が早くて確実
+		for (int k = 0; k < M; k++) {
+			int goal_i = input.Balls[k].d;
+			int goal_j = input.Balls[k].e;
+
+			var q = new Queue<(int i, int j, int dir)>();
+			for (int d = 0; d < 4; d++) {
+				distToGoal[k, goal_i, goal_j, d] = 0;
+				q.Enqueue((goal_i, goal_j, Direction4Extensions._delta4Dir[d].ToIndex4()));
+			}
+
+			while (q.Count > 0) {
+				var (ci, cj, cdir) = q.Dequeue();
+				int cdist = distToGoal[k, ci, cj, cdir];
+
+				// Fの逆：自分が前のマスにいて、cdirの方向へ進んだら(ci,cj)に来る場合
+				// -> 前のマスは(ci, cj)からcdirの逆方向へ1マス移動した位置
+				var cdirEnum = Direction4Extensions._delta4Dir[cdir];
+				var prevDir = Direction4Extensions.Rotate((Direction4)cdirEnum, Rotation.R).Rotate(Rotation.R); // cdirの180度反転
+				int pi = ci + (prevDir == Direction4.D ? 1 : prevDir == Direction4.U ? -1 : 0);
+				int pj = cj + (prevDir == Direction4.R ? 1 : prevDir == Direction4.L ? -1 : 0);
+
+				if (pi >= 0 && pi < N && pj >= 0 && pj < N) {
+					// 移動可能かチェック: pi,pj から cdir方向へ移動して ci,cj へ行けるか
+					if (input.Map.CanMove(pi, pj, cdirEnum)) {
+						if (distToGoal[k, pi, pj, cdir] > cdist + 1) {
+							distToGoal[k, pi, pj, cdir] = cdist + 1;
+							q.Enqueue((pi, pj, cdir));
+						}
+					}
+				}
+
+				// Rの逆：最後にRしたら cdirになった -> ひとつ前は cdir をL回転した向き
+				int pdirL = Direction4Extensions.Rotate(cdirEnum, Rotation.L).ToIndex4();
+				if (distToGoal[k, ci, cj, pdirL] > cdist + 1) {
+					distToGoal[k, ci, cj, pdirL] = cdist + 1;
+					q.Enqueue((ci, cj, pdirL));
+				}
+
+				// Lの逆：最後にLしたら cdirになった -> ひとつ前は cdir をR回転した向き
+				int pdirR = Direction4Extensions.Rotate(cdirEnum, Rotation.R).ToIndex4();
+				if (distToGoal[k, ci, cj, pdirR] > cdist + 1) {
+					distToGoal[k, ci, cj, pdirR] = cdist + 1;
+					q.Enqueue((ci, cj, pdirR));
+				}
+			}
+		}
+
+		// ボール同士の距離などは適宜簡易計算とするために、単純なBFS距離も残しておく(ロボット->ボールなどのため)
+		int[,] rawDist = new int[N * N, N * N];
+		for (int i = 0; i < N * N; i++) {
+			for (int j = 0; j < N * N; j++) {
+				rawDist[i, j] = 999999;
+			}
+			rawDist[i, i] = 0;
+		}
+
 		for (int r = 0; r < N; r++) {
 			for (int c = 0; c < N; c++) {
 				int start = r * N + c;
@@ -300,8 +345,8 @@ public class Program
 					foreach (var d in moves) {
 						var (nr, nc) = d.Move(ui, uj);
 						int v = nr * N + nc;
-						if (dist[start, v] > dist[start, u] + 1) {
-							dist[start, v] = dist[start, u] + 1;
+						if (rawDist[start, v] > rawDist[start, u] + 1) {
+							rawDist[start, v] = rawDist[start, u] + 1;
 							q.Enqueue(v);
 						}
 					}
@@ -327,34 +372,59 @@ public class Program
 		int ComputeEvalScore(BeamNode node)
 		{
 			int score = node.OpsCount;
-			int totalRemainingDist = 0;
+			int ballTargetCost = 0;
+			int minDistToAnyBall = int.MaxValue;
 			int roboPos = node.Robo.i * N + node.Robo.j;
+			int completedCount = 0;
 
 			for (int k = 0; k < M; k++) {
-				if ((node.CompletedBalls & (1UL << k)) != 0) continue;
+				if ((node.CompletedBalls & (1UL << k)) != 0) {
+					completedCount++;
+					continue;
+				}
 
-				int goalPos = input.Balls[k].d * N + input.Balls[k].e;
 				if (node.TakeBall == k) {
-					totalRemainingDist += dist[roboPos, goalPos] + 1; // 運ぶ距離 + 置くS
+					// 持っているなら現在のかごへの最短距離を直接足す（向き考慮）
+					ballTargetCost += distToGoal[k, node.Robo.i, node.Robo.j, node.Dir.ToIndex4()];
+					minDistToAnyBall = 0; // 手にあるので拾いに行く距離は0
+					score -= 50; // 持っている状態を少しだけ優遇
 				} else {
 					var bPos = node.BallPositions[k];
 					int bp = bPos.i * N + bPos.j;
-					// 手が空いていればこのボールを取りに行って運ぶコスト
-					totalRemainingDist += dist[roboPos, bp] + dist[bp, goalPos] + 2; // 移動 + 拾うS + 運んで置くS
+
+					// 置いてあるボールの場合は、向きが不定なのでとりあえず最小コストを採用するか、適当な方向の平均等を考える
+					// 実際にはロボットが拾い上げる時の向きになるが、ここでは4方向の最小値をベースの持ち運びコストとする
+					int minD = int.MaxValue;
+					for (int d = 0; d < 4; d++) {
+						if (distToGoal[k, bPos.i, bPos.j, d] < minD) {
+							minD = distToGoal[k, bPos.i, bPos.j, d];
+						}
+					}
+					ballTargetCost += minD;
+
+					int dToBall = rawDist[roboPos, bp];
+					if (dToBall < minDistToAnyBall) {
+						minDistToAnyBall = dToBall;
+					}
 				}
 			}
-			// TSP的な厳密なコスト計算は重いため、単純和を使う。係数を調整してもよい。
-			return score + (totalRemainingDist / 2);
+
+			if (minDistToAnyBall == int.MaxValue) minDistToAnyBall = 0;
+			if (node.TakeBall != -1) minDistToAnyBall = 0;
+
+			// すべての各ボールからかごへの距離の和(ballTargetCost) を最優先し、
+			// 補助的に直近の操作対象への距離(minDistToAnyBall) を足す
+			return score - completedCount * 10000 + ballTargetCost * 10 + minDistToAnyBall * 2;
 		}
 
 		initialNode.EvalScore = ComputeEvalScore(initialNode);
 
 		var beam = new List<BeamNode> { initialNode };
-		int beamWidth = 3000;
-		double timeLimit = 1800.0;
+		int beamWidth = 1000;
+		double timeLimit = 1900.0;
 		if (isLocal) {
-			beamWidth = 1000;
-			timeLimit = 2000.0;
+			beamWidth = 500;
+			timeLimit = 1900.0;
 		}
 
 		BeamNode bestGoal = null;
@@ -366,9 +436,11 @@ public class Program
 			var seen = new HashSet<ulong>(); // Zobrist Hashなどを使うのが理想だが、ここでは簡易化
 
 			foreach (var node in beam) {
+				++info.Loop;
 				// すでに全部かごに入っているか判定
 				if (node.CompletedBalls == (1UL << M) - 1) {
 					if (bestGoal == null || node.OpsCount < bestGoal.OpsCount) {
+						++info.Up;
 						bestGoal = node;
 					}
 					continue;
@@ -387,13 +459,13 @@ public class Program
 						Parent = node,
 						LastOp = 'F'
 					};
-					// 持っているボールがあれば座標を現在地に更新（持っている判定はTakeBallでしているため必須ではないが）
+					// 持っているボールがあれば座標を現在地に更新（持っている判定はTakeBallでしているため必須ではない）
 					nextNode.EvalScore = ComputeEvalScore(nextNode);
 					nextBeam.Add(nextNode);
 				}
 
-				// L, R: 回転 (連続無駄回転を防ぐ)
-				if (node.LastOp != 'R' && node.LastOp != 'L') {
+				// L, R: 回転 (直前の逆回転=元に戻るだけの操作を枝刈り)
+				if (node.LastOp != 'R') { // 直前がRならLは逆回転で無駄
 					var nextL = new BeamNode {
 						Robo = node.Robo,
 						Dir = node.Dir.Rotate(Rotation.L),
@@ -406,7 +478,9 @@ public class Program
 					};
 					nextL.EvalScore = ComputeEvalScore(nextL);
 					nextBeam.Add(nextL);
+				}
 
+				if (node.LastOp != 'L') { // 直前がLならRは逆回転で無駄
 					var nextR = new BeamNode {
 						Robo = node.Robo,
 						Dir = node.Dir.Rotate(Rotation.R),
@@ -436,13 +510,23 @@ public class Program
 
 					int take = node.TakeBall;
 					int currentTake = -1;
+					bool hasBallHere = false;
 					for (int k = 0; k < M; k++) {
 						if (nextS.BallPositions[k].i == node.Robo.i && nextS.BallPositions[k].j == node.Robo.j) {
+							hasBallHere = true;
+							// すでに完了しているボールを拾い上げるだけのSは枝刈りしたいが、
+							// 盤面によっては除ける必要があるので緩くする。ただし、かごの位置なら拾わない方がよい。
 							currentTake = k;
 							nextS.BallPositions[k] = (-1, -1);
 							break;
 						}
 					}
+
+					// 枝刈り: 手ぶらで、かつ現在地にボールが無い場合はSの無駄
+					if (take == -1 && !hasBallHere) {
+						goto SkipS;
+					}
+
 					nextS.TakeBall = currentTake;
 
 					if (take >= 0) {
@@ -454,9 +538,15 @@ public class Program
 						}
 					}
 
+					// 枝刈り: 完了したボールを再度拾うようなSはペナルティまたは除外
+					if (currentTake >= 0 && (node.Robo.i == input.Balls[currentTake].d && node.Robo.j == input.Balls[currentTake].e)) {
+						goto SkipS; // 既に完了している場所から拾うのは基本NG
+					}
+
 					nextS.EvalScore = ComputeEvalScore(nextS);
 					nextBeam.Add(nextS);
 				}
+SkipS:;
 			}
 
 			// 枝刈りとソート
@@ -867,16 +957,17 @@ public class State
 	private readonly Input _input;
 	private readonly bool _isDebug;
 
-	public List<char> Ops { get; } = [];
+	public List<char> Ops { get; } = new List<char>();
+	public (int i, int j) Robo { get; set; } = (0, 0);
+	public Direction4 Direction { get; set; } = Direction4.R;
 
-	public (int i, int j) Robo { get; private set; }
-	public Direction4 Direction { get; private set; }
 	public (int i, int j)[] Balls { get; } = [];
-	public int TakeBall { get; private set; } = -1;
 
-	public bool IsMacro { get; private set; } = false;
-	public char[] Macro { get; private set; } = [];
-	public List<char> NextMacro { get; } = [];
+	public int TakeBall { get; set; } = -1;
+
+	public bool IsMacro { get; set; } = false;
+	public List<char> NextMacro { get; } = new List<char>();
+	public char[] Macro { get; set; } = [];
 
 	public State(Input input, bool isDebug)
 	{
