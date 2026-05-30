@@ -1,10 +1,7 @@
 ﻿using System.Data;
 using System.Diagnostics;
-using System.Globalization;
-using System.Numerics;
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
-using System.Text;
 
 namespace AtCoder13.Heuristic;
 
@@ -14,7 +11,7 @@ public class Program
 	static void Main()
 	{
 		HeuristicHelper.RunCases(
-			runCaseCount: 100,
+			runCaseCount: 10,
 			testCaseCount: 50,
 			isParallel: false,
 			i => Run(i),
@@ -58,19 +55,29 @@ public class Program
 		var input = new Input(io, isLocal);
 		var info = new Information();
 
+		var best = Plan1(isLocal, sw, rnd, input, info);
+		info.P = 1;
+
+		/*
 		var state3 = Plan3(isLocal, sw, rnd, input, info);
 		var best = state3;
 		info.P = 3;
-
-		if (info.P != 5) {
+		{
 			best = Plan2(isLocal, sw, rnd, input, info, best);
-		}
+		}*/
 
+		var state6 = Plan6(isLocal, sw, rnd, input, info);
+		//if (state6.Ops.Count < best.Ops.Count) {
+		best = state6;
+		info.P = 6;
+		//}
+
+		/*
 		var state5 = Plan5(isLocal, sw, rnd, input, info);
 		if (state5.Ops.Count < best.Ops.Count) {
 			best = state5;
 			info.P = 5;
-		}
+		}*/
 
 		input.Output(best);
 
@@ -79,6 +86,45 @@ public class Program
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
+	}
+
+	static State Plan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(input, isLocal);
+		for (int k = 0; k < input.M; k++) {
+			var (ci, cj) = state.Robo;
+			var (si, sj, ti, tj) = input.Balls[k];
+
+			var ret = input.Map.Bfs(ci, cj, si, sj);
+			foreach (var dir in ret) {
+				if (state.Direction != dir) {
+					var rot = state.Direction.Rotate(dir);
+					foreach (var rr in rot) {
+						state.Rotate(rr);
+					}
+				}
+
+				state.Foward();
+			}
+
+			state.Exchange();
+
+			ret = input.Map.Bfs(si, sj, ti, tj);
+			foreach (var dir in ret) {
+				if (state.Direction != dir) {
+					var rot = state.Direction.Rotate(dir);
+					foreach (var rr in rot) {
+						state.Rotate(rr);
+					}
+				}
+
+				state.Foward();
+			}
+
+			state.Exchange();
+		}
+
+		return state;
 	}
 
 	static State Plan2(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info, State temp)
@@ -190,6 +236,257 @@ public class Program
 		}
 
 		return state;
+	}
+
+	class BeamNode : IComparable<BeamNode>
+	{
+		public (int i, int j) Robo;
+		public Direction4 Dir;
+		public int TakeBall; // 手に持っているボールのインデックス (-1なら持っていない)
+		public ulong CompletedBalls; // 各ボールがかごに入っているか (ビットフラグ)
+		public (int i, int j)[] BallPositions;
+
+		public int OpsCount;
+		public int EvalScore;
+
+		public BeamNode Parent;
+		public char LastOp;
+
+		public int CompareTo(BeamNode other)
+		{
+			return EvalScore.CompareTo(other.EvalScore);
+		}
+	}
+
+	static State Plan6(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		int N = input.N;
+		int M = input.M;
+
+		// 全ペア最短距離の事前計算
+		// インデックス: 0~(M-1) は各ボールの初期位置、M~(2M-1) は各かごの位置、2M=ロボット初期位置
+		// ※動的な現在地に対しては BFS を毎回回すのは重いため、各マス間の距離を前計算しておく
+		int[,] dist = new int[N * N, N * N];
+		for (int i = 0; i < N * N; i++) {
+			for (int j = 0; j < N * N; j++) {
+				dist[i, j] = 999999;
+			}
+			dist[i, i] = 0;
+		}
+
+		for (int r = 0; r < N; r++) {
+			for (int c = 0; c < N; c++) {
+				int u = r * N + c;
+				var moves = input.Map.Moveables[r, c];
+				foreach (var d in moves) {
+					var (nr, nc) = d.Move(r, c);
+					int v = nr * N + nc;
+					dist[u, v] = 1;
+				}
+			}
+		}
+
+		// ワーシャル–フロイド等でもOKだが、BFSの方が早くて確実
+		for (int r = 0; r < N; r++) {
+			for (int c = 0; c < N; c++) {
+				int start = r * N + c;
+				var q = new Queue<int>();
+				q.Enqueue(start);
+				while (q.Count > 0) {
+					int u = q.Dequeue();
+					int ui = u / N;
+					int uj = u % N;
+					var moves = input.Map.Moveables[ui, uj];
+					foreach (var d in moves) {
+						var (nr, nc) = d.Move(ui, uj);
+						int v = nr * N + nc;
+						if (dist[start, v] > dist[start, u] + 1) {
+							dist[start, v] = dist[start, u] + 1;
+							q.Enqueue(v);
+						}
+					}
+				}
+			}
+		}
+
+		BeamNode initialNode = new BeamNode {
+			Robo = (0, 0),
+			Dir = Direction4.R,
+			TakeBall = -1,
+			CompletedBalls = 0UL,
+			BallPositions = new (int i, int j)[M],
+			OpsCount = 0,
+			Parent = null,
+			LastOp = '\0'
+		};
+
+		for (int k = 0; k < M; k++) {
+			initialNode.BallPositions[k] = (input.Balls[k].b, input.Balls[k].c);
+		}
+
+		int ComputeEvalScore(BeamNode node)
+		{
+			int score = node.OpsCount;
+			int totalRemainingDist = 0;
+			int roboPos = node.Robo.i * N + node.Robo.j;
+
+			for (int k = 0; k < M; k++) {
+				if ((node.CompletedBalls & (1UL << k)) != 0) continue;
+
+				int goalPos = input.Balls[k].d * N + input.Balls[k].e;
+				if (node.TakeBall == k) {
+					totalRemainingDist += dist[roboPos, goalPos] + 1; // 運ぶ距離 + 置くS
+				} else {
+					var bPos = node.BallPositions[k];
+					int bp = bPos.i * N + bPos.j;
+					// 手が空いていればこのボールを取りに行って運ぶコスト
+					totalRemainingDist += dist[roboPos, bp] + dist[bp, goalPos] + 2; // 移動 + 拾うS + 運んで置くS
+				}
+			}
+			// TSP的な厳密なコスト計算は重いため、単純和を使う。係数を調整してもよい。
+			return score + (totalRemainingDist / 2);
+		}
+
+		initialNode.EvalScore = ComputeEvalScore(initialNode);
+
+		var beam = new List<BeamNode> { initialNode };
+		int beamWidth = 3000;
+		double timeLimit = 1800.0;
+		if (isLocal) {
+			beamWidth = 1000;
+			timeLimit = 2000.0;
+		}
+
+		BeamNode bestGoal = null;
+
+		int step = 0;
+		while (beam.Count > 0 && sw.Elapsed.TotalMilliseconds < timeLimit && step < input.T) {
+			step++;
+			var nextBeam = new List<BeamNode>();
+			var seen = new HashSet<ulong>(); // Zobrist Hashなどを使うのが理想だが、ここでは簡易化
+
+			foreach (var node in beam) {
+				// すでに全部かごに入っているか判定
+				if (node.CompletedBalls == (1UL << M) - 1) {
+					if (bestGoal == null || node.OpsCount < bestGoal.OpsCount) {
+						bestGoal = node;
+					}
+					continue;
+				}
+
+				// F: 前進
+				if (input.Map.CanMove(node.Robo.i, node.Robo.j, node.Dir)) {
+					var nextRobo = node.Dir.Move(node.Robo.i, node.Robo.j);
+					var nextNode = new BeamNode {
+						Robo = nextRobo,
+						Dir = node.Dir,
+						TakeBall = node.TakeBall,
+						CompletedBalls = node.CompletedBalls,
+						BallPositions = (ValueTuple<int, int>[])node.BallPositions.Clone(),
+						OpsCount = node.OpsCount + 1,
+						Parent = node,
+						LastOp = 'F'
+					};
+					// 持っているボールがあれば座標を現在地に更新（持っている判定はTakeBallでしているため必須ではないが）
+					nextNode.EvalScore = ComputeEvalScore(nextNode);
+					nextBeam.Add(nextNode);
+				}
+
+				// L, R: 回転 (連続無駄回転を防ぐ)
+				if (node.LastOp != 'R' && node.LastOp != 'L') {
+					var nextL = new BeamNode {
+						Robo = node.Robo,
+						Dir = node.Dir.Rotate(Rotation.L),
+						TakeBall = node.TakeBall,
+						CompletedBalls = node.CompletedBalls,
+						BallPositions = (ValueTuple<int, int>[])node.BallPositions.Clone(),
+						OpsCount = node.OpsCount + 1,
+						Parent = node,
+						LastOp = 'L'
+					};
+					nextL.EvalScore = ComputeEvalScore(nextL);
+					nextBeam.Add(nextL);
+
+					var nextR = new BeamNode {
+						Robo = node.Robo,
+						Dir = node.Dir.Rotate(Rotation.R),
+						TakeBall = node.TakeBall,
+						CompletedBalls = node.CompletedBalls,
+						BallPositions = (ValueTuple<int, int>[])node.BallPositions.Clone(),
+						OpsCount = node.OpsCount + 1,
+						Parent = node,
+						LastOp = 'R'
+					};
+					nextR.EvalScore = ComputeEvalScore(nextR);
+					nextBeam.Add(nextR);
+				}
+
+				// S: 交換
+				if (node.LastOp != 'S') {
+					var nextS = new BeamNode {
+						Robo = node.Robo,
+						Dir = node.Dir,
+						TakeBall = -1,
+						CompletedBalls = node.CompletedBalls,
+						BallPositions = (ValueTuple<int, int>[])node.BallPositions.Clone(),
+						OpsCount = node.OpsCount + 1,
+						Parent = node,
+						LastOp = 'S'
+					};
+
+					int take = node.TakeBall;
+					int currentTake = -1;
+					for (int k = 0; k < M; k++) {
+						if (nextS.BallPositions[k].i == node.Robo.i && nextS.BallPositions[k].j == node.Robo.j) {
+							currentTake = k;
+							nextS.BallPositions[k] = (-1, -1);
+							break;
+						}
+					}
+					nextS.TakeBall = currentTake;
+
+					if (take >= 0) {
+						nextS.BallPositions[take] = (node.Robo.i, node.Robo.j);
+						if (node.Robo.i == input.Balls[take].d && node.Robo.j == input.Balls[take].e) {
+							nextS.CompletedBalls |= (1UL << take);
+						} else {
+							nextS.CompletedBalls &= ~(1UL << take);
+						}
+					}
+
+					nextS.EvalScore = ComputeEvalScore(nextS);
+					nextBeam.Add(nextS);
+				}
+			}
+
+			// 枝刈りとソート
+			nextBeam.Sort();
+			if (nextBeam.Count > beamWidth) {
+				nextBeam.RemoveRange(beamWidth, nextBeam.Count - beamWidth);
+			}
+
+			beam = nextBeam;
+		}
+
+		if (bestGoal == null && beam.Count > 0) {
+			bestGoal = beam[0];
+		}
+
+		var finalState = new State(input, isLocal);
+		if (bestGoal != null) {
+			var opsList = new List<char>();
+			var curr = bestGoal;
+			while (curr.Parent != null) {
+				opsList.Add(curr.LastOp);
+				curr = curr.Parent;
+			}
+			opsList.Reverse();
+			foreach (var c in opsList) {
+				finalState.AddOp(c);
+			}
+		}
+
+		return finalState;
 	}
 
 	static State Plan5(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
@@ -755,1502 +1052,5 @@ public class Input
 				break;
 			}
 		}
-	}
-}
-
-public class Maze
-{
-	/// <summary>BFSなどをする時に使う配列</summary>
-	/// <remarks>
-	/// 領域を使い回すためにフィールドにする。
-	/// </remarks>
-	private int[,] _distances = null;
-
-	/// <summary>迷路の水平方向のマス数</summary>
-	public int Width { get; private set; }
-	/// <summary>迷路の垂直方向のマス数</summary>
-	public int Height { get; private set; }
-	/// <summary>各マスから動ける方向の一覧</summary>
-	public Direction4[,][] Moveables { get; private set; }
-	/// <summary>各マスから指定方向に動けるか</summary>
-	public bool[,][] CanMoves { get; private set; }
-	public bool CanMove(int i, int j, Direction4 dir) => CanMoves[i, j][dir.ToIndex4()];
-	/// <summary>各マスから移動可能な隣接4マスの座標情報</summary>
-	public (int i, int j)[,][] Adjacence4 { get; private set; }
-
-	/// <summary>
-	/// 指定した壁の情報で迷路を作成
-	/// </summary>
-	/// <param name="width">迷路の水平方向のマス数</param>
-	/// <param name="height">迷路の垂直方向のマス数</param>
-	/// <param name="verticalWalls">
-	/// 垂直な壁情報。
-	/// つまり、水平方向に移動可能かどうかを表す[height, width-1]個の情報。
-	/// 対応するサイズの文字列配列として与えられ、
-	/// 0の場合に壁が無いことを、1の場合に壁があることを表す。
-	/// </param>
-	/// <param name="horizontalWalls">
-	/// 水平な壁情報。
-	/// つまり、垂直方向に移動可能かどうかを表す[height-1, width]個の情報。
-	/// あとは垂直と同じ。
-	/// </param>
-	/// <param name="canStay">
-	/// true: 動かないということが可能。CanMoveに Dir.N が追加される。
-	/// </param>
-	public Maze(int width, int height, string[] verticalWalls, string[] horizontalWalls, bool canStay = false)
-	{
-		var tempVerticals = new bool[height, width - 1];
-		for (int i = 0; i < height; i++) {
-			for (int j = 0; j < width - 1; j++) {
-				tempVerticals[i, j] = verticalWalls[i][j] == '1';
-			}
-		}
-
-		var tempHorizontals = new bool[height - 1, width];
-		for (int i = 0; i < height - 1; i++) {
-			for (int j = 0; j < width; j++) {
-				tempHorizontals[i, j] = horizontalWalls[i][j] == '1';
-			}
-		}
-
-		InitializeCore(width, height, tempVerticals, tempHorizontals, canStay);
-	}
-
-	/// <summary>
-	/// 指定した壁の情報で迷路を作成
-	/// </summary>
-	/// <param name="width">迷路の水平方向のマス数</param>
-	/// <param name="height">迷路の垂直方向のマス数</param>
-	/// <param name="verticalWalls">
-	/// 垂直な壁情報。
-	/// つまり、水平方向に移動可能かどうかを表す[height, width-1]個の情報。
-	/// trueの場合に壁がある。
-	/// </param>
-	/// <param name="horizontalWalls">
-	/// 水平な壁情報。
-	/// つまり、垂直方向に移動可能かどうかを表す[height-1, width]個の情報。
-	/// trueの場合に壁がある。
-	/// </param>
-	/// <param name="canStay">
-	/// true: 動かないということが可能。CanMoveに Dir.N が追加される。
-	/// </param>
-	public Maze(int width, int height, bool[,] verticalWalls, bool[,] horizontalWalls, bool canStay = false)
-		=> InitializeCore(width, height, verticalWalls, horizontalWalls, canStay);
-
-	private void InitializeCore(int width, int height, bool[,] verticalWalls, bool[,] horizontalWalls, bool canStay = false)
-	{
-		Width = width;
-		Height = height;
-		_distances = new int[Height, Width];
-
-		Moveables = new Direction4[Height, Width][];
-		CanMoves = new bool[Height, Width][];
-		for (int i = 0; i < Height; i++) {
-			for (int j = 0; j < Width; j++) {
-				var moves = new List<Direction4>();
-				if (canStay) {
-					moves.Add(Direction4.N);
-				}
-
-				if (i > 0 && horizontalWalls[i - 1, j] == false) {
-					moves.Add(Direction4.U);
-				}
-
-				if (i < Height - 1 && horizontalWalls[i, j] == false) {
-					moves.Add(Direction4.D);
-				}
-
-				if (j > 0 && verticalWalls[i, j - 1] == false) {
-					moves.Add(Direction4.L);
-				}
-
-				if (j < Width - 1 && verticalWalls[i, j] == false) {
-					moves.Add(Direction4.R);
-				}
-
-				Moveables[i, j] = moves.ToArray();
-
-				CanMoves[i, j] = new bool[5];
-				foreach (var d in moves) {
-					CanMoves[i, j][d.ToIndex4()] = true;
-				}
-			}
-		}
-
-		Adjacence4 = new (int i, int j)[Height, Width][];
-		for (int i = 0; i < Height; i++) {
-			for (int j = 0; j < Width; j++) {
-				var temp = new List<(int i, int j)>();
-				foreach (var dir in Moveables[i, j]) {
-					if (dir == Direction4.N) {
-						continue;
-					}
-
-					temp.Add(dir.Move(i, j));
-				}
-
-				Adjacence4[i, j] = temp.ToArray();
-			}
-		}
-	}
-
-	/// <summary>
-	/// 指定した位置から距離length以内のマスをBFSで列挙
-	/// </summary>
-	/// <param name="si">探索開始位置Y座標</param>
-	/// <param name="sj">探索開始位置X座標</param>
-	/// <param name="length">探索距離</param>
-	/// <returns>
-	/// positions -> 距離length以内のマスの集合
-	/// trace -> 経路復元のためのオブジェクト
-	/// </returns>
-	public ((int i, int j, int d, int id)[] positions, Trace<Direction4> trace) Bfs(int si, int sj, int length)
-	{
-		MemoryMarshal.CreateSpan(ref _distances[0, 0], _distances.Length).Fill(int.MaxValue);
-
-		var que = new Queue<(int i, int j, int id)>();
-		var ret = new List<(int i, int j, int d, int id)>();
-		var trace = new Trace<Direction4>();
-		que.Enqueue((si, sj, 0));
-		_distances[si, sj] = 0;
-
-		while (que.Count > 0) {
-			var (i, j, id) = que.Dequeue();
-			int nd = _distances[i, j] + 1;
-			if (nd > length) {
-				continue;
-			}
-
-			ret.Add((i, j, _distances[i, j], id));
-
-			foreach (var dir in Moveables[i, j]) {
-				var (ni, nj) = dir.Move(i, j);
-				if (_distances[ni, nj] != int.MaxValue) {
-					continue;
-				}
-
-				_distances[ni, nj] = nd;
-				int nextID = trace.Add(dir, id);
-				que.Enqueue((ni, nj, nextID));
-			}
-		}
-
-		return (ret.ToArray(), trace);
-	}
-
-	/// <summary>
-	/// 指定した位置から条件に合うマスを1つ見つけるまでBFS
-	/// </summary>
-	/// <param name="si">探索開始位置Y座標</param>
-	/// <param name="sj">探索開始位置X座標</param>
-	/// <param name="moveables">移動可能な方向</param>
-	/// <param name="needs">条件に合うマスのときにtrueを返すデリゲート</param>
-	/// <returns>
-	/// positions -> 探索したマスの集合
-	/// trace -> 経路復元のためのオブジェクト
-	/// found -> true:条件に合うマスを見つけた
-	/// </returns>
-	public ((int i, int j, int d, int id)[] positions, Trace<Direction4> trace, bool found)
-		Bfs(
-		int si, int sj, Direction4[] moveables, Predicate<(int i, int j)> needs)
-	{
-		MemoryMarshal.CreateSpan(ref _distances[0, 0], _distances.Length).Fill(int.MaxValue);
-
-		var que = new Queue<(int i, int j, int id)>();
-		var ret = new List<(int i, int j, int d, int id)>();
-		var trace = new Trace<Direction4>();
-		que.Enqueue((si, sj, 0));
-		_distances[si, sj] = 0;
-
-		while (que.Count > 0) {
-			var (i, j, id) = que.Dequeue();
-			int nd = _distances[i, j] + 1;
-
-			if (needs.Invoke((i, j))) {
-				ret.Add((i, j, _distances[i, j], id));
-				return (ret.ToArray(), trace, true);
-			}
-
-			foreach (var dir in moveables) {
-				if (CanMove(i, j, dir) == false) {
-					continue;
-				}
-
-				var (ni, nj) = dir.Move(i, j);
-				if (_distances[ni, nj] != int.MaxValue) {
-					continue;
-				}
-
-				_distances[ni, nj] = nd;
-				int nextID = trace.Add(dir, id);
-				que.Enqueue((ni, nj, nextID));
-			}
-		}
-
-		return (ret.ToArray(), trace, false);
-	}
-
-	/// <summary>
-	/// 指定したスタート位置から目標位置までの最短経路をBFSで探索し、移動方向を返す
-	/// </summary>
-	/// <param name="si">探索開始位置Y座標</param>
-	/// <param name="sj">探索開始位置X座標</param>
-	/// <param name="ti">目標位置Y座標</param>
-	/// <param name="tj">目標位置X座標</param>
-	/// <returns>最短経路の移動方向の配列。到達不可能な場合は空配列を返す。</returns>
-	public Direction4[] Bfs(int si, int sj, int ti, int tj)
-	{
-		if (si == ti && sj == tj) {
-			return [];
-		}
-
-		MemoryMarshal.CreateSpan(ref _distances[0, 0], _distances.Length).Fill(int.MaxValue);
-
-		var que = new Queue<(int i, int j, int id)>();
-		var trace = new Trace<Direction4>();
-		que.Enqueue((si, sj, 0));
-		_distances[si, sj] = 0;
-
-		int goalId = -1;
-
-		while (que.Count > 0) {
-			var (i, j, id) = que.Dequeue();
-			int nd = _distances[i, j] + 1;
-
-			foreach (var dir in Moveables[i, j]) {
-				var (ni, nj) = dir.Move(i, j);
-				if (_distances[ni, nj] != int.MaxValue) {
-					continue;
-				}
-
-				_distances[ni, nj] = nd;
-				int nextID = trace.Add(dir, id);
-
-				if (ni == ti && nj == tj) {
-					goalId = nextID;
-					break;
-				}
-
-				que.Enqueue((ni, nj, nextID));
-			}
-
-			if (goalId != -1) {
-				break;
-			}
-		}
-
-		if (goalId == -1) {
-			return [];
-		}
-
-		return trace.GetRouteTo(goalId).ToArray();
-	}
-
-	/// <summary>
-	/// 指定したスタート位置から目標位置までの最短経路を、向きの変更を考慮してBFSで探索し、移動方向を返す
-	/// </summary>
-	/// <param name="si">探索開始位置Y座標</param>
-	/// <param name="sj">探索開始位置X座標</param>
-	/// <param name="ti">目標位置Y座標</param>
-	/// <param name="tj">目標位置X座標</param>
-	/// <param name="startDir">開始時の向き</param>
-	/// <returns>最短経路の移動方向の配列。到達不可能な場合は空配列を返す。</returns>
-	public Direction4[] Bfs(int si, int sj, int ti, int tj, Direction4 startDir)
-	{
-		if (si == ti && sj == tj) {
-			return [];
-		}
-
-		var distances = new int[Height, Width, 5];
-		if (distances.Length > 0) {
-			MemoryMarshal.CreateSpan(ref distances[0, 0, 0], distances.Length).Fill(int.MaxValue);
-		}
-
-		var que = new Queue<(int i, int j, Direction4 dir, int id)>();
-		var trace = new Trace<Direction4>();
-
-		int sIdx = startDir.ToIndex4();
-		que.Enqueue((si, sj, startDir, 0));
-		distances[si, sj, sIdx] = 0;
-
-		int goalId = -1;
-
-		while (que.Count > 0) {
-			var (i, j, dir, id) = que.Dequeue();
-			int nd = distances[i, j, dir.ToIndex4()] + 1;
-
-			if (CanMove(i, j, dir)) {
-				var (ni, nj) = dir.Move(i, j);
-				if (distances[ni, nj, dir.ToIndex4()] == int.MaxValue) {
-					distances[ni, nj, dir.ToIndex4()] = nd;
-					int nextID = trace.Add(dir, id);
-					if (ni == ti && nj == tj) {
-						goalId = nextID;
-						break;
-					}
-					que.Enqueue((ni, nj, dir, nextID));
-				}
-			}
-
-			var rotL = dir.Rotate(Rotation.L);
-			if (distances[i, j, rotL.ToIndex4()] == int.MaxValue) {
-				distances[i, j, rotL.ToIndex4()] = nd;
-				int nextID = trace.Add(Direction4.N, id);
-				que.Enqueue((i, j, rotL, nextID));
-			}
-
-			var rotR = dir.Rotate(Rotation.R);
-			if (distances[i, j, rotR.ToIndex4()] == int.MaxValue) {
-				distances[i, j, rotR.ToIndex4()] = nd;
-				int nextID = trace.Add(Direction4.N, id);
-				que.Enqueue((i, j, rotR, nextID));
-			}
-		}
-
-		if (goalId == -1) {
-			return [];
-		}
-
-		var route = trace.GetRouteTo(goalId);
-		var result = new List<Direction4>();
-		while (route.Count > 0) {
-			var r = route.Pop();
-			if (r != Direction4.N) {
-				result.Add(r);
-			}
-		}
-
-		return [.. result];
-	}
-}
-
-[Flags]
-public enum Direction4
-{
-	N = 0,
-	D = 0x01,
-	L = 0x02,
-	U = 0x04,
-	R = 0x08,
-}
-
-public static class Direction4Extensions
-{
-	private static readonly int[] _delta4 = [1, 0, -1, 0, 1];
-	public static readonly Direction4[] _delta4Dir = [Direction4.D, Direction4.L, Direction4.U, Direction4.R];
-
-	public static char ToSymbol(this Direction4 dir)
-	{
-		return dir switch {
-			Direction4.N => 'S',
-			Direction4.D => 'D',
-			Direction4.L => 'L',
-			Direction4.U => 'U',
-			Direction4.R => 'R',
-			_ => '.',
-		};
-	}
-
-	public static int ToIndex4(this Direction4 dir)
-	{
-		return dir switch {
-			Direction4.N => 4,
-			Direction4.D => 0,
-			Direction4.L => 1,
-			Direction4.U => 2,
-			Direction4.R => 3,
-			_ => 0,
-		};
-	}
-
-	public static Direction4 FromIndex4(this int index)
-	{
-		return index switch {
-			0 => Direction4.D,
-			1 => Direction4.L,
-			2 => Direction4.U,
-			3 => Direction4.R,
-			_ => Direction4.N,
-		};
-	}
-
-	public static (int i, int j) Move(this Direction4 dir, int i, int j)
-	{
-		return dir switch {
-			Direction4.N => (i, j),
-			Direction4.D => (i + 1, j),
-			Direction4.L => (i, j - 1),
-			Direction4.U => (i - 1, j),
-			Direction4.R => (i, j + 1),
-			_ => (i, j),
-		};
-	}
-
-	public static (int i, int j) Move(this Direction4 dir, int i, int j, int d)
-	{
-		return dir switch {
-			Direction4.N => (i, j),
-			Direction4.D => (i + d, j),
-			Direction4.L => (i, j - d),
-			Direction4.U => (i - d, j),
-			Direction4.R => (i, j + d),
-			_ => (i, j),
-		};
-	}
-
-	public static Direction4 Reverse(this Direction4 dir)
-	{
-		return dir switch {
-			Direction4.N => Direction4.N,
-			Direction4.D => Direction4.U,
-			Direction4.L => Direction4.R,
-			Direction4.U => Direction4.D,
-			Direction4.R => Direction4.L,
-			_ => Direction4.N,
-		};
-	}
-
-	public static Direction4 Rotate(this Direction4 dir, Rotation rot)
-	{
-		if (rot == Rotation.N) {
-			return dir;
-		}
-
-		return dir switch {
-			Direction4.N => Direction4.N,
-			Direction4.D => rot == Rotation.L ? Direction4.R : Direction4.L,
-			Direction4.L => rot == Rotation.L ? Direction4.D : Direction4.U,
-			Direction4.U => rot == Rotation.L ? Direction4.L : Direction4.R,
-			Direction4.R => rot == Rotation.L ? Direction4.U : Direction4.D,
-			_ => Direction4.N,
-		};
-	}
-
-	public static Rotation[] Rotate(this Direction4 src, Direction4 dst)
-	{
-		if (src == dst) {
-			return [];
-		}
-
-		if (src.Reverse() == dst) {
-			return [Rotation.R, Rotation.R];
-		}
-
-		if (src.Rotate(Rotation.R) == dst) {
-			return [Rotation.R];
-		} else {
-			return [Rotation.L];
-		}
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static IEnumerable<Direction4> ForEach()
-	{
-		yield return Direction4.N;
-		yield return Direction4.U;
-		yield return Direction4.R;
-		yield return Direction4.D;
-		yield return Direction4.L;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static IEnumerable<Direction4> ForEach4()
-	{
-		for (int dn = 0; dn < 4; ++dn) {
-			yield return _delta4Dir[dn];
-		}
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static IEnumerable<(int i, int j, Direction4 dir)> Adjacence4(int i, int j, int imax, int jmax)
-	{
-		for (int dn = 0; dn < 4; ++dn) {
-			int d4i = i + _delta4[dn];
-			int d4j = j + _delta4[dn + 1];
-			var dir = _delta4Dir[dn];
-			if ((uint)d4i < (uint)imax && (uint)d4j < (uint)jmax) {
-				yield return (d4i, d4j, dir);
-			}
-		}
-	}
-}
-
-[Flags]
-public enum Rotation
-{
-	N = 0,
-	L = 0x01,
-	R = 0x02,
-}
-
-public static class RotationExtensions
-{
-	public static char ToSymbol(this Rotation rot)
-	{
-		return rot switch {
-			Rotation.N => '.',
-			Rotation.L => 'L',
-			Rotation.R => 'R',
-			_ => '.',
-		};
-	}
-
-	public static (int i, int j) Rotate(this Rotation rot, int i, int j)
-	{
-		return rot switch {
-			Rotation.N => (i, j),
-			Rotation.L => (-j, i),
-			Rotation.R => (j, -i),
-			_ => (i, j),
-		};
-	}
-
-	public static (int i, int j) Rotate(this Rotation rot, int i, int j, int cy, int cx)
-	{
-		int dx = j - cx;
-		int dy = i - cy;
-		switch (rot) {
-			case Rotation.N:
-				return (i, j);
-
-			case Rotation.L: {
-					int jj = dy;
-					int ii = -1 * dx;
-					return (ii + cy, jj + cx);
-				}
-
-			case Rotation.R: {
-					int jj = -1 * dy;
-					int ii = dx;
-					return (ii + cy, jj + cx);
-				}
-
-			default:
-				return (i, j);
-		}
-	}
-
-	public static Rotation GetRotation(Direction4 cur, Direction4 tag)
-	{
-		if (cur == tag || cur == Direction4.N || tag == Direction4.N) {
-			return Rotation.N;
-		}
-
-		int ci = cur.ToIndex4();
-		int ti = tag.ToIndex4();
-		// 真反対の場合はとりあえずどっちでもいい
-		if (Math.Abs(ci - ti) == 2) {
-			return Rotation.L;
-		}
-
-		int cci = ci - 1;
-		if (cci < 0) {
-			cci += 4;
-		}
-
-		return cci == ti ? Rotation.L : Rotation.R;
-	}
-}
-
-/// <summary>
-/// 移動経路復元用のクラス
-/// </summary>
-/// <typeparam name="T">移動情報の型</typeparam>
-public class Trace<T>
-{
-	/// <summary>移動情報ログ</summary>
-	/// <remarks>
-	/// IDはこのフィールドのインデックスに対応している。
-	/// 移動元のIDを保持することによって、任意の位置から開始位置に辿ることが可能。
-	/// </remarks>
-	private readonly List<(T move, int prevID)> _log = [(default, -1)];
-
-	/// <summary>
-	/// 移動情報の追加
-	/// </summary>
-	/// <param name="move">どういう移動を行ったかの情報</param>
-	/// <param name="prevID">移動元のID</param>
-	/// <returns>移動先のID</returns>
-	public int Add(T move, int prevID)
-	{
-		_log.Add((move, prevID));
-		return _log.Count - 1;
-	}
-
-	/// <summary>
-	/// 移動開始位置から指定したIDに対応する位置までの移動情報を復元する
-	/// </summary>
-	/// <param name="id">移動先の位置に対応するID</param>
-	/// <returns>
-	/// 復元した移動情報。
-	/// stackの上から順番に使用する事でidで指定した位置に辿り着ける。</returns>
-	public Stack<T> GetRouteTo(int id)
-	{
-		var route = new Stack<T>();
-		while (id != 0) {
-			route.Push(_log[id].move);
-			id = _log[id].prevID;
-		}
-
-		return route;
-	}
-}
-
-public class HeuristicHelper
-{
-	public static void RunCases<T>(
-		int runCaseCount,
-		double testCaseCount,
-		bool isParallel,
-		Func<int, T> run,
-		Func<object, int, T, (long score, int loop, int up)> outputCaseInformation,
-		Action<double, int> addOutput = null)
-	{
-#if DEBUG
-		object locker = new();
-		long scoreSum = 0;
-		double scoreLogSum = 0;
-		long loopSum = 0;
-		long upSum = 0;
-		long scoreMin = long.MaxValue;
-		long scoreMax = long.MinValue;
-		int errorCount = 0;
-		if (isParallel) {
-			Parallel.For(0, runCaseCount, i => {
-				RunCases(i);
-			});
-		} else {
-			for (int i = 0; i < runCaseCount; i++) {
-				RunCases(i);
-			}
-		}
-
-		void RunCases(int i)
-		{
-			try {
-				var ret = run(i);
-				var (score, loop, up) = outputCaseInformation(locker, i, ret);
-				Console.Out.Flush();
-				lock (locker) {
-					scoreSum += score;
-					scoreLogSum += Math.Log10(score);
-					loopSum += loop;
-					upSum += up;
-					scoreMin = Math.Min(score, scoreMin);
-					scoreMax = Math.Max(score, scoreMax);
-				}
-			} catch (Exception ex) {
-				lock (locker) {
-					++errorCount;
-					Console.WriteLine($"{i:d4}: {ex.Message}");
-					Console.Out.Flush();
-				}
-			}
-		}
-
-		scoreSum = (long)(scoreSum / (runCaseCount / testCaseCount));
-		scoreLogSum /= runCaseCount / testCaseCount;
-		Console.WriteLine("");
-
-		Console.WriteLine("");
-		Console.WriteLine($"sum: {scoreSum}");
-		Console.WriteLine($"ave: {scoreSum / testCaseCount}");
-		Console.WriteLine($"min: {scoreMin}");
-		Console.WriteLine($"max: {scoreMax}");
-		Console.WriteLine($"log: {scoreLogSum / testCaseCount}");
-		Console.WriteLine($"loop ave.: {loopSum / (double)runCaseCount:f3}");
-		Console.WriteLine($"up ave.: {upSum / (double)runCaseCount:f3}");
-
-		addOutput?.Invoke(testCaseCount, runCaseCount);
-
-		Console.WriteLine($"error : {errorCount}");
-
-		Console.Out.Flush();
-#else
-		run(-1);
-#endif
-	}
-
-	public static (bool isDebug, Stopwatch sw, Random rnd) Initialize()
-	{
-		var sw = new Stopwatch();
-		sw.Start();
-
-		bool isDebug = false;
-#if DEBUG
-		isDebug = true;
-#endif
-		var rnd = new Random();
-
-		return (isDebug, sw, rnd);
-	}
-
-	public static IOManager CreateIO(
-		string caseDirectory, int caseNumber)
-	{
-#if DEBUG
-		var cin = caseNumber >= 0
-			? new IOManager($"{caseDirectory}{caseNumber:d4}.txt")
-			: new IOManager();
-#else
-		var cin = new IOManager();
-#endif
-		return cin;
-	}
-}
-
-public static class Helper
-{
-	public static long INF => 1L << 50;
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static T Clamp<T>(this T value, T min, T max) where T : struct, IComparable<T>
-	{
-		if (value.CompareTo(min) <= 0) {
-			return min;
-		}
-
-		if (value.CompareTo(max) >= 0) {
-			return max;
-		}
-
-		return value;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static void UpdateMin<T>(this ref T target, T value) where T : struct, IComparable<T>
-		=> target = target.CompareTo(value) > 0 ? value : target;
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static void UpdateMin<T>(this ref T target, T value, Action<T> onUpdated)
-		where T : struct, IComparable<T>
-	{
-		if (target.CompareTo(value) > 0) {
-			target = value;
-			onUpdated(value);
-		}
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static void UpdateMax<T>(this ref T target, T value) where T : struct, IComparable<T>
-		=> target = target.CompareTo(value) < 0 ? value : target;
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static void UpdateMax<T>(this ref T target, T value, Action<T> onUpdated)
-		where T : struct, IComparable<T>
-	{
-		if (target.CompareTo(value) < 0) {
-			target = value;
-			onUpdated(value);
-		}
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static long BinarySearchOKNG(long ok, long ng, Func<long, bool> satisfies)
-	{
-		while (ng - ok > 1) {
-			long mid = (ok + ng) / 2;
-			if (satisfies(mid)) {
-				ok = mid;
-			} else {
-				ng = mid;
-			}
-		}
-
-		return ok;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static long BinarySearchNGOK(long ng, long ok, Func<long, bool> satisfies)
-	{
-		while (ok - ng > 1) {
-			long mid = (ok + ng) / 2;
-			if (satisfies(mid)) {
-				ok = mid;
-			} else {
-				ng = mid;
-			}
-		}
-
-		return ok;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static int LowerBound<T>(Span<T> array, T value) where T : IComparable<T>
-	=> LowerBound(array, -1, array.Length, value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static int LowerBound<T>(Span<T> array, int ng, int ok, T value)
-		where T : IComparable<T>
-	{
-		while (ok - ng > 1) {
-			int mid = (ok + ng) / 2;
-			if (array[mid].CompareTo(value) >= 0) {
-				ok = mid;
-			} else {
-				ng = mid;
-			}
-		}
-
-		return ok;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static int UpperBound<T>(Span<T> array, T value) where T : IComparable<T>
-		=> UpperBound(array, -1, array.Length, value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static int UpperBound<T>(Span<T> array, int ng, int ok, T value)
-		where T : IComparable<T>
-	{
-		while (ok - ng > 1) {
-			int mid = (ok + ng) / 2;
-			if (array[mid].CompareTo(value) > 0) {
-				ok = mid;
-			} else {
-				ng = mid;
-			}
-		}
-
-		return ok;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static T[] Array1<T>(int n, T initialValue) where T : struct
-		=> new T[n].Fill(initialValue);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static T[] Array1<T>(int n, Func<int, T> initializer)
-		=> [.. Enumerable.Range(0, n).Select(x => initializer(x))];
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static T[] Fill<T>(this T[] array, T value)
-		where T : struct
-	{
-		array.AsSpan().Fill(value);
-		return array;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static T[,] Array2<T>(int n, int m, T initialValule) where T : struct
-		=> new T[n, m].Fill(initialValule);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static T[,] Array2<T>(int n, int m, Func<int, int, T> initializer)
-	{
-		var array = new T[n, m];
-		for (int i = 0; i < n; ++i) {
-			for (int j = 0; j < m; ++j) {
-				array[i, j] = initializer(i, j);
-			}
-		}
-
-		return array;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static T[,] Fill<T>(this T[,] array, T initialValue)
-		where T : struct
-	{
-		MemoryMarshal.CreateSpan<T>(ref array[0, 0], array.Length).Fill(initialValue);
-		return array;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static Span<T> AsSpan<T>(this T[,] array, int i)
-		=> MemoryMarshal.CreateSpan<T>(ref array[i, 0], array.GetLength(1));
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static T[,,] Array3<T>(int n1, int n2, int n3, T initialValue)
-		where T : struct
-		=> new T[n1, n2, n3].Fill(initialValue);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static T[,,] Fill<T>(this T[,,] array, T initialValue)
-		where T : struct
-	{
-		MemoryMarshal.CreateSpan<T>(ref array[0, 0, 0], array.Length).Fill(initialValue);
-		return array;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static Span<T> AsSpan<T>(this T[,,] array, int i, int j)
-		=> MemoryMarshal.CreateSpan<T>(ref array[i, j, 0], array.GetLength(2));
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static T[,,,] Array4<T>(int n1, int n2, int n3, int n4, T initialValue)
-		where T : struct
-		=> new T[n1, n2, n3, n4].Fill(initialValue);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static T[,,,] Fill<T>(this T[,,,] array, T initialValue)
-		where T : struct
-	{
-		MemoryMarshal.CreateSpan<T>(ref array[0, 0, 0, 0], array.Length).Fill(initialValue);
-		return array;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static Span<T> AsSpan<T>(this T[,,,] array, int i, int j, int k)
-		=> MemoryMarshal.CreateSpan<T>(ref array[i, j, k, 0], array.GetLength(3));
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static T[] Merge<T>(ReadOnlySpan<T> first, ReadOnlySpan<T> second) where T : IComparable<T>
-	{
-		var ret = new T[first.Length + second.Length];
-		int p = 0;
-		int q = 0;
-		while (p < first.Length || q < second.Length) {
-			if (p == first.Length) {
-				ret[p + q] = second[q];
-				q++;
-				continue;
-			}
-
-			if (q == second.Length) {
-				ret[p + q] = first[p];
-				p++;
-				continue;
-			}
-
-			if (first[p].CompareTo(second[q]) < 0) {
-				ret[p + q] = first[p];
-				p++;
-			} else {
-				ret[p + q] = second[q];
-				q++;
-			}
-		}
-
-		return ret;
-	}
-
-	private static readonly int[] delta4_ = [1, 0, -1, 0, 1];
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static ReadOnlySpan<(int i, int j)> Adjacence4(int i, int j, int imax, int jmax)
-	{
-		int p = 0;
-		Span<(int i, int j)> adjacences = new (int i, int j)[4];
-		for (int dn = 0; dn < 4; ++dn) {
-			int d4i = i + delta4_[dn];
-			int d4j = j + delta4_[dn + 1];
-			if ((uint)d4i < (uint)imax && (uint)d4j < (uint)jmax) {
-				adjacences[p] = (d4i, d4j);
-				++p;
-			}
-		}
-
-		return adjacences[..p];
-	}
-
-	private static readonly int[] delta8_ = [1, 0, -1, 0, 1, 1, -1, -1, 1];
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static ReadOnlySpan<(int i, int j)> Adjacence8(int i, int j, int imax, int jmax)
-	{
-		int p = 0;
-		Span<(int i, int j)> adjacences = new (int i, int j)[8];
-		for (int dn = 0; dn < 8; ++dn) {
-			int d8i = i + delta8_[dn];
-			int d8j = j + delta8_[dn + 1];
-			if ((uint)d8i < (uint)imax && (uint)d8j < (uint)jmax) {
-				adjacences[p] = (d8i, d8j);
-				++p;
-			}
-		}
-
-		return adjacences[..p];
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static IEnumerable<int> SubBitsOf(int bit)
-	{
-		for (int sub = bit; sub > 0; sub = --sub & bit) {
-			yield return sub;
-		}
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static string Reverse(string src)
-	{
-		var chars = src.ToCharArray();
-		for (int i = 0, j = chars.Length - 1; i < j; ++i, --j) {
-			(chars[j], chars[i]) = (chars[i], chars[j]);
-		}
-
-		return new string(chars);
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static string Exchange(string src, char a, char b)
-	{
-		var chars = src.ToCharArray();
-		for (int i = 0; i < chars.Length; i++) {
-			if (chars[i] == a) {
-				chars[i] = b;
-			} else if (chars[i] == b) {
-				chars[i] = a;
-			}
-		}
-
-		return new string(chars);
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static void Swap(this string str, int i, int j)
-	{
-		var span = str.AsWriteableSpan();
-		(span[i], span[j]) = (span[j], span[i]);
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static char Replace(this string str, int index, char c)
-	{
-		var span = str.AsWriteableSpan();
-		char old = span[index];
-		span[index] = c;
-		return old;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static Span<char> ReverseInPlace(this string str)
-		=> str.ReverseInPlace(0, str.Length);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static Span<char> ReverseInPlace(this string str, int l, int r)
-	{
-		var span = str.AsWriteableSpan(l, r);
-		for (int i = 0, j = span.Length - 1; i < j; ++i, --j) {
-			(span[j], span[i]) = (span[i], span[j]);
-		}
-
-		return MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(span), span.Length);
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static Span<char> AsWriteableSpan(this string str)
-		=> str.AsWriteableSpan(0, str.Length);
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static Span<char> AsWriteableSpan(this string str, int l, int r)
-	{
-		var span = str.AsSpan(l, r - l);
-		return MemoryMarshal.CreateSpan(ref MemoryMarshal.GetReference(span), span.Length);
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static string Join<T>(this IEnumerable<T> values, string separator = "")
-		=> string.Join(separator, values);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static string JoinNL<T>(this IEnumerable<T> values)
-		=> string.Join(Environment.NewLine, values);
-}
-
-public class IOManager : IDisposable
-{
-	private const int BUFFER_SIZE = 1024;
-	private const int ASCII_SPACE = 32;
-	private const int ASCII_CHAR_BEGIN = 33;
-	private const int ASCII_CHAR_END = 126;
-	private readonly byte[] _buf = new byte[BUFFER_SIZE];
-	private readonly bool _isStdIn;
-	private readonly Stream _reader;
-	private readonly bool _isStdOut;
-	private readonly TextWriter _writer;
-	private int _length = 0;
-	private int _index = 0;
-	private bool _isEof = false;
-
-	public IOManager(string inFilePath = "", string outFilePath = "")
-	{
-		// Console.Readline をすると UTF-16 の string 型で読み込まれるが、
-		// 競プロの入力は基本的に ASCII の範囲なので、メモリも時間も倍食ってしまう。
-		// byte[] で入力して手動で変換出来るように、TextReader ではなく Stream を使う。
-		if (string.IsNullOrWhiteSpace(inFilePath)) {
-			_isStdIn = true;
-			_reader = Console.OpenStandardInput();
-		} else {
-			_reader = new FileStream(inFilePath, FileMode.Open);
-		}
-
-		// Console.WriteLine も同様であるのだが、今のところ出力速度が問題になったことがなく、
-		// ファイル出力時のエンコード処理の方が面倒そうなので TextWriter を使う。
-		string outPath = GetOutFilePath(inFilePath, outFilePath);
-		if (string.IsNullOrWhiteSpace(outPath)) {
-			// 毎回 flush すると、10^6 回出力したときに TLE してしまう。
-			// 自動 flush は無効にしておき、Dispose 時に flush するようにする。
-			Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) {
-				AutoFlush = false
-			});
-
-			_isStdOut = true;
-			_writer = Console.Out;
-		} else {
-			_writer = new StreamWriter(outPath);
-		}
-	}
-
-	public void Dispose()
-	{
-		_writer.Flush();
-		// Console.In や Console.Out は Dispose してはいけない。
-		if (_isStdIn == false) {
-			_reader.Dispose();
-		}
-
-		if (_isStdOut == false) {
-			_writer.Dispose();
-		}
-
-		// Dispose パターンは面倒なのでサボり。
-		GC.SuppressFinalize(this);
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public string NextLine()
-	{
-		var sb = new StringBuilder();
-		for (var b = Char(); b >= ASCII_SPACE && b <= ASCII_CHAR_END; b = (char)Read()) {
-			sb.Append(b);
-		}
-
-		return sb.ToString();
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public T[] Repeat<T>(int count, Func<IOManager, T> read)
-	{
-		var array = new T[count];
-		for (int i = 0; i < count; ++i) {
-			// キャプチャーを避けるために自身を引数として渡す。
-			array[i] = read(this);
-		}
-
-		return array;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public T[,] Repeat<T>(int height, int width, Func<IOManager, T> read)
-	{
-		var array = new T[height, width];
-		for (int i = 0; i < height; ++i) {
-			for (int j = 0; j < width; ++j) {
-				// キャプチャーを避けるために自身を引数として渡す。
-				array[i, j] = read(this);
-			}
-		}
-
-		return array;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public char Char()
-	{
-		byte b;
-		do {
-			b = Read();
-		} while (b < ASCII_CHAR_BEGIN || ASCII_CHAR_END < b);
-
-		return (char)b;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public string String()
-	{
-		var sb = new StringBuilder();
-		for (var b = Char(); b >= ASCII_CHAR_BEGIN && b <= ASCII_CHAR_END; b = (char)Read()) {
-			sb.Append(b);
-		}
-
-		return sb.ToString();
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public string[] ArrayString(int length)
-	{
-		var array = new string[length];
-		for (int i = 0; i < length; ++i) {
-			array[i] = String();
-		}
-
-		return array;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public int Int() => (int)Long();
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public int Int(int offset) => Int() + offset;
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (int, int) Int2(int offset = 0)
-		=> (Int(offset), Int(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (int, int, int) Int3(int offset = 0)
-		=> (Int(offset), Int(offset), Int(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (int, int, int, int) Int4(int offset = 0)
-		=> (Int(offset), Int(offset), Int(offset), Int(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (int, int, int, int, int) Int5(int offset = 0)
-		=> (Int(offset), Int(offset), Int(offset), Int(offset), Int(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public int[] ArrayInt(int length, int offset = 0)
-	{
-		var array = new int[length];
-		for (int i = 0; i < length; ++i) {
-			array[i] = Int(offset);
-		}
-
-		return array;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public long Long()
-	{
-		long ret = 0;
-		byte b;
-		bool negative = false;
-		// 空白その他の読み飛ばし。+も読み飛ばしてしまって問題無い。
-		do {
-			b = Read();
-		} while (b != '-' && (b < '0' || '9' < b));
-
-		if (b == '-') {
-			negative = true;
-			b = Read();
-		}
-
-		// 下に一桁ずつ加えていく。
-		for (; true; b = Read()) {
-			if (b < '0' || '9' < b) {
-				return negative ? -ret : ret;
-			} else {
-				ret = ret * 10 + (b - '0');
-			}
-		}
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public long Long(long offset) => Long() + offset;
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (long, long) Long2(long offset = 0)
-		=> (Long(offset), Long(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (long, long, long) Long3(long offset = 0)
-		=> (Long(offset), Long(offset), Long(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (long, long, long, long) Long4(long offset = 0)
-		=> (Long(offset), Long(offset), Long(offset), Long(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (long, long, long, long, long) Long5(long offset = 0)
-		=> (Long(offset), Long(offset), Long(offset), Long(offset), Long(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public long[] ArrayLong(int length, long offset = 0)
-	{
-		var array = new long[length];
-		for (int i = 0; i < length; ++i) {
-			array[i] = Long(offset);
-		}
-
-		return array;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public BigInteger Big() => BigInteger.Parse(String());
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public BigInteger Big(long offset) => Big() + offset;
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (BigInteger, BigInteger) Big2(long offset = 0)
-		=> (Big(offset), Big(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (BigInteger, BigInteger, BigInteger) Big3(long offset = 0)
-		=> (Big(offset), Big(offset), Big(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (BigInteger, BigInteger, BigInteger, BigInteger) Big4(long offset = 0)
-		=> (Big(offset), Big(offset), Big(offset), Big(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (BigInteger, BigInteger, BigInteger, BigInteger, BigInteger) Big5(long offset = 0)
-		=> (Big(offset), Big(offset), Big(offset), Big(offset), Big(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public BigInteger[] ArrayBig(int length, long offset = 0)
-	{
-		var array = new BigInteger[length];
-		for (int i = 0; i < length; ++i) {
-			array[i] = Big(offset);
-		}
-
-		return array;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public double Double() => double.Parse(String(), CultureInfo.InvariantCulture);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public double Double(double offset) => Double() + offset;
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (double, double) Double2(double offset = 0)
-		=> (Double(offset), Double(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (double, double, double) Double3(double offset = 0)
-		=> (Double(offset), Double(offset), Double(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (double, double, double, double) Double4(double offset = 0)
-		=> (Double(offset), Double(offset), Double(offset), Double(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (double, double, double, double, double) Double5(double offset = 0)
-		=> (Double(offset), Double(offset), Double(offset), Double(offset), Double(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public double[] ArrayDouble(int length, double offset = 0)
-	{
-		var array = new double[length];
-		for (int i = 0; i < length; ++i) {
-			array[i] = Double(offset);
-		}
-
-		return array;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public decimal Decimal() => decimal.Parse(String(), CultureInfo.InvariantCulture);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public decimal Decimal(decimal offset) => Decimal() + offset;
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (decimal, decimal) Decimal2(decimal offset = 0)
-		=> (Decimal(offset), Decimal(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (decimal, decimal, decimal) Decimal3(decimal offset = 0)
-		=> (Decimal(offset), Decimal(offset), Decimal(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (decimal, decimal, decimal, decimal) Decimal4(decimal offset = 0)
-		=> (Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (decimal, decimal, decimal, decimal, decimal) Decimal5(decimal offset = 0)
-		=> (Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset), Decimal(offset));
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public decimal[] ArrayDecimal(int length, decimal offset = 0)
-	{
-		var array = new decimal[length];
-		for (int i = 0; i < length; ++i) {
-			array[i] = Decimal(offset);
-		}
-
-		return array;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void WriteLine() => _writer.WriteLine();
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void WriteLine(bool value) => _writer.WriteLine(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void WriteLine(char value) => _writer.WriteLine(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void WriteLine(decimal value) => _writer.WriteLine(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void WriteLine(double value) => _writer.WriteLine(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void WriteLine(float value) => _writer.WriteLine(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void WriteLine(int value) => _writer.WriteLine(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void WriteLine(uint value) => _writer.WriteLine(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void WriteLine(long value) => _writer.WriteLine(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void WriteLine(ulong value) => _writer.WriteLine(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void WriteLine(BigInteger value) => _writer.WriteLine(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void WriteLine(string value) => _writer.WriteLine(value);
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Write(bool value) => _writer.Write(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Write(char value) => _writer.Write(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Write(decimal value) => _writer.Write(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Write(double value) => _writer.Write(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Write(float value) => _writer.Write(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Write(int value) => _writer.Write(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Write(uint value) => _writer.Write(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Write(long value) => _writer.Write(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Write(ulong value) => _writer.Write(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Write(BigInteger value) => _writer.Write(value);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Write(string value) => _writer.Write(value);
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void YesNo(bool ok, bool isUpper = false)
-	{
-		_writer.WriteLine(
-			isUpper == false
-				? ok ? "Yes" : "No"
-				: ok ? "YES" : "NO");
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void JoinNL<T>(IEnumerable<T> values) => Join(values, Environment.NewLine);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Join<T>(IEnumerable<T> values, string separator = " ")
-		=> _writer.WriteLine(string.Join(separator, values));
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void JoinNL<T>(T[,] valuess) => Join(valuess, Environment.NewLine);
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Join<T>(T[,] valuess, string separator = " ")
-	{
-		int height = valuess.GetLength(0);
-		int width = valuess.GetLength(1);
-		for (int i = 0; i < height; i++) {
-			_writer.WriteLine(
-				string.Join(separator, MemoryMarshal.CreateSpan<T>(ref valuess[i, 0], width).ToArray()));
-		}
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Flush() => _writer.Flush();
-
-	private byte Read()
-	{
-		if (_isEof) {
-			throw new EndOfStreamException();
-		}
-
-		if (_index >= _length) {
-			_index = 0;
-			if ((_length = _reader.Read(_buf, 0, BUFFER_SIZE)) <= 0) {
-				_isEof = true;
-				return 0;
-			}
-		}
-
-		return _buf[_index++];
-	}
-
-	private static string GetOutFilePath(string inFilePath, string outFilePath)
-	{
-		if (string.IsNullOrWhiteSpace(outFilePath) == false) {
-			return outFilePath;
-		}
-
-		if (string.IsNullOrWhiteSpace(inFilePath)) {
-			return inFilePath;
-		}
-
-
-		string directory = Path.GetDirectoryName(inFilePath);
-		string title = Path.GetFileNameWithoutExtension(inFilePath);
-		string ext = Path.GetExtension(inFilePath);
-		string directoryName = Path.GetFileName(directory);
-		string parentDirectory = Path.GetDirectoryName(directory);
-		if (directoryName.Contains(@"in")) {
-			// AHCで配布される tools の in フォルダーの横に out フォルダーを作る。
-			// mastersのinAにも対応出来るようにReplaceする。
-			directoryName = directoryName.Replace("in", "out");
-			directory = Path.Combine(parentDirectory, directoryName);
-		} else {
-			// ビジュアライザーの一括読み込みは、1234.txt 又は xxx_1234.txt のような形式に対応している。
-			// 入力と同じフォルダーの場合は、出力ファイルであることが分かるようにしておく。
-			title = "out_" + title;
-		}
-
-		if (Directory.Exists(directory) == false) {
-			Directory.CreateDirectory(directory);
-		}
-
-		return Path.Combine(directory, title + ext);
 	}
 }
