@@ -1,5 +1,4 @@
-﻿using System.Collections;
-using System.Data;
+﻿using System.Data;
 using System.Diagnostics;
 using System.Globalization;
 using System.Numerics;
@@ -29,10 +28,13 @@ public class Program
 						$"T={input.T:d5}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
+						$"P={info.P:d2}",
 						$"ML={info.ML:d3}",
+						$"RA={info.RA:d5}",
 						$"A={info.A:d5}",
 						$"score={info.Score:d5}",
 						$"elapsed={info.Elapsed:d4}",
+						$"M={info.Macro}",
 					};
 
 					Console.WriteLine(status.Join(" "));
@@ -56,10 +58,18 @@ public class Program
 		var input = new Input(io, isLocal);
 		var info = new Information();
 
-		var best = Plan3(isLocal, sw, rnd, input, info);
+		var state3 = Plan3(isLocal, sw, rnd, input, info);
+		var best = state3;
+		info.P = 3;
 
-		{
+		if (info.P != 5) {
 			best = Plan2(isLocal, sw, rnd, input, info, best);
+		}
+
+		var state5 = Plan5(isLocal, sw, rnd, input, info);
+		if (state5.Ops.Count < best.Ops.Count) {
+			best = state5;
+			info.P = 5;
 		}
 
 		input.Output(best);
@@ -71,50 +81,12 @@ public class Program
 		return (input, info);
 	}
 
-	static State Plan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(input, isLocal);
-		for (int k = 0; k < input.M; k++) {
-			var (ci, cj) = state.Robo;
-			var (si, sj, ti, tj) = input.Balls[k];
-
-			var ret = input.Map.Bfs(ci, cj, si, sj);
-			foreach (var dir in ret) {
-				if (state.Direction != dir) {
-					var rot = state.Direction.Rotate(dir);
-					foreach (var rr in rot) {
-						state.Rotate(rr);
-					}
-				}
-
-				state.Foward();
-			}
-
-			state.Exchange();
-
-			ret = input.Map.Bfs(si, sj, ti, tj);
-			foreach (var dir in ret) {
-				if (state.Direction != dir) {
-					var rot = state.Direction.Rotate(dir);
-					foreach (var rr in rot) {
-						state.Rotate(rr);
-					}
-				}
-
-				state.Foward();
-			}
-
-			state.Exchange();
-		}
-
-		return state;
-	}
-
 	static State Plan2(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info, State temp)
 	{
 		var ops = temp.Ops.ToArray();
 		var bestOp = ops.ToArray();
 
+		info.RA = ops.Length;
 		int maxLen = Math.Min(10, ops.Length);
 		for (int l = 2; l <= maxLen; l++) {
 			for (int i = 0; i < ops.Length - l; i++) {
@@ -183,7 +155,8 @@ public class Program
 	static State Plan3(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(input, isLocal);
-		for (int k = 0; k < input.M; k++) {
+		var order = OptimizeBallOrder(input, sw, rnd);
+		foreach (int k in order) {
 			var (ci, cj) = state.Robo;
 			var (si, sj, ti, tj) = input.Balls[k];
 
@@ -217,6 +190,378 @@ public class Program
 		}
 
 		return state;
+	}
+
+	static State Plan5(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var order = OptimizeBallOrder(input, sw, rnd);
+		// bestScore は純粋な経路ステップ数の和（overhead 除く）
+		int bestScore = int.MaxValue;
+
+		var macros = GenerateMacros();
+		// 短いマクロ優先でソート
+		macros = macros.OrderBy(x => x.Length).ThenBy(x => rnd.Next()).ToList();
+
+		double timeLimit = 1900;
+
+		// macroDest を遅延計算でキャッシュ
+		var macroDestCache = new Dictionary<string, (int i, int j, Direction4 dir, bool ok)[,,]>();
+		var dirs = new[] { Direction4.D, Direction4.L, Direction4.U, Direction4.R };
+
+		var dist = new int[input.N, input.N, 4];
+		var prev = new (int i, int j, Direction4 dir, char op)[input.N, input.N, 4];
+		var que = new Queue<int>();
+		// stamp 方式で visited クリアを O(1) に
+		var stamp = new int[input.N, input.N, 4];
+		int currentStamp = 0;
+		// routeBuffer: 最大経路長として盤面サイズ×4方向×7(マクロ長)で十分な大きさ
+		var routeBuffer = new char[input.N * input.N * 4 * 8];
+		// dist を初期化
+		MemoryMarshal.CreateSpan(ref dist[0, 0, 0], dist.Length).Fill(int.MaxValue);
+
+		// 経路バッファ: ボールごとに pick/drop の経路を保存
+		var pickPaths = new char[input.M][];
+		var dropPaths = new char[input.M][];
+		// 確定した最良経路を保存
+		var bestPickPaths = new char[input.M][];
+		var bestDropPaths = new char[input.M][];
+		string bestMacro = null;
+
+		// 全マクロを1周だけ試す
+		var allMacros = macros.ToList();
+
+		foreach (var macro in allMacros) {
+			if (sw.Elapsed.TotalMilliseconds > timeLimit) break;
+			++info.Loop;
+
+			// macroDest を遅延計算
+			if (!macroDestCache.TryGetValue(macro, out var macroDest)) {
+				macroDest = new (int i, int j, Direction4 dir, bool ok)[input.N, input.N, 4];
+				for (int i = 0; i < input.N; i++) {
+					for (int j = 0; j < input.N; j++) {
+						foreach (var dir in dirs) {
+							int nr = i, nc = j;
+							Direction4 nd = dir;
+							bool mOk = true;
+							foreach (var op in macro) {
+								if (op == 'F') {
+									if (!input.Map.CanMove(nr, nc, nd)) { mOk = false; break; }
+									var moved = nd.Move(nr, nc);
+									nr = moved.i; nc = moved.j;
+								} else if (op == 'L') {
+									nd = nd.Rotate(Rotation.L);
+								} else if (op == 'R') {
+									nd = nd.Rotate(Rotation.R);
+								}
+							}
+							macroDest[i, j, dir.ToIndex4()] = (nr, nc, nd, mOk);
+						}
+					}
+				}
+				macroDestCache[macro] = macroDest;
+			}
+
+			// State を使って正確に評価
+			var state = new State(input, isLocal);
+			state.AddOp('M');
+			foreach (var c in macro) state.AddOp(c);
+			state.AddOp('M');
+
+			int currentScore = 0;
+			bool ok = true;
+
+			foreach (int k in order) {
+				var (si, sj, ti, tj) = input.Balls[k];
+
+				var pPick = MacroBfs(input, input.Map, state.Robo.i, state.Robo.j, state.Direction, si, sj, macroDest, dist, prev, que, stamp, ref currentStamp, bestScore - currentScore, routeBuffer);
+				if (pPick == null) { ok = false; break; }
+				currentScore += pPick.Length;
+				if (currentScore >= bestScore) { ok = false; break; }
+				foreach (var op in pPick) state.AddOp(op);
+				pickPaths[k] = pPick;
+				state.Exchange();
+
+				var pDrop = MacroBfs(input, input.Map, state.Robo.i, state.Robo.j, state.Direction, ti, tj, macroDest, dist, prev, que, stamp, ref currentStamp, bestScore - currentScore, routeBuffer);
+				if (pDrop == null) { ok = false; break; }
+				currentScore += pDrop.Length;
+				if (currentScore >= bestScore) { ok = false; break; }
+				foreach (var op in pDrop) state.AddOp(op);
+				dropPaths[k] = pDrop;
+				state.Exchange();
+			}
+
+			if (ok && currentScore < bestScore) {
+				bestScore = currentScore;
+				for (int k = 0; k < input.M; k++) {
+					bestPickPaths[k] = (char[])pickPaths[k].Clone();
+					bestDropPaths[k] = (char[])dropPaths[k].Clone();
+				}
+				bestMacro = macro;
+				++info.Up;
+			}
+		}
+
+		// 最良マクロで State を1回だけ構築
+		if (bestMacro != null) {
+			var state = new State(input, isLocal);
+			state.AddOp('M');
+			foreach (var c in bestMacro) state.AddOp(c);
+			state.AddOp('M');
+			foreach (int k in order) {
+				ApplyPath(state, bestPickPaths[k]);
+				state.Exchange();
+				ApplyPath(state, bestDropPaths[k]);
+				state.Exchange();
+			}
+			info.ML = bestMacro.Length;
+			info.Macro = bestMacro;
+			return state;
+		}
+
+		return Plan3(isLocal, sw, rnd, input, info);
+	}
+
+	// 軽量シミュレート
+	// 位置・向きを軽量シミュレート（State を作らない版）
+	static void SimulateDir(char op, ref Direction4 roboDir, (int i, int j, Direction4 dir, bool ok)[,,] macroDest, ref int roboI, ref int roboJ, Input input)
+	{
+		switch (op) {
+			case 'F':
+				if (input.Map.CanMove(roboI, roboJ, roboDir)) {
+					var moved = roboDir.Move(roboI, roboJ);
+					roboI = moved.i; roboJ = moved.j;
+				}
+				break;
+			case 'L':
+				roboDir = roboDir.Rotate(Rotation.L);
+				break;
+			case 'R':
+				roboDir = roboDir.Rotate(Rotation.R);
+				break;
+			case 'P':
+				var dest = macroDest[roboI, roboJ, roboDir.ToIndex4()];
+				if (dest.ok) { roboI = dest.i; roboJ = dest.j; roboDir = dest.dir; }
+				break;
+		}
+	}
+
+	static void ApplyPath(State state, char[] path)
+	{
+		foreach (var op in path) {
+			state.AddOp(op);
+		}
+	}
+
+	static List<string> GenerateMacros()
+	{
+		var list = new List<string>();
+		var ops = new[] { 'F', 'L', 'R' };
+		for (int len = 2; len <= 7; len++) {
+			GenerateMacrosDfs(list, "", len, ops);
+		}
+		return list;
+	}
+
+	static void GenerateMacrosDfs(List<string> list, string current, int targetLen, char[] ops)
+	{
+		if (current.Length == targetLen) {
+			// 一切進まないマクロ(Fが含まれない)は採用しない
+			if (current.Contains('F')) {
+				list.Add(current);
+			}
+			return;
+		}
+		foreach (var op in ops) {
+			GenerateMacrosDfs(list, current + op, targetLen, ops);
+		}
+	}
+
+	static char[] MacroBfs(Input input, Maze map, int si, int sj, Direction4 sdir, int ti, int tj, (int i, int j, Direction4 dir, bool ok)[,,] macroDest, int[,,] dist, (int i, int j, Direction4 dir, char op)[,,] prev, Queue<int> que, int[,,] stamp, ref int currentStamp, int bestScoreSoFar, char[] routeBuffer)
+	{
+		if (si == ti && sj == tj) return [];
+
+		int N = input.N;
+		// stamp をインクリメントすることで O(1) で dist をリセット
+		++currentStamp;
+		int cs = currentStamp;
+
+		que.Clear();
+
+		int sIdx = sdir.ToIndex4();
+		if (sIdx >= 4) {
+			sIdx = 0;
+			sdir = sIdx.FromIndex4();
+		}
+		dist[si, sj, sIdx] = 0;
+		stamp[si, sj, sIdx] = cs;
+		que.Enqueue((si << 8) | (sj << 2) | sIdx);
+
+		int goalDist = int.MaxValue;
+		Direction4 goalDir = Direction4.N;
+
+		// P(マクロ実行) および F, L, R のコストは全て 1 とみなして BFS を行う
+		while (que.Count > 0) {
+			int cVal = que.Dequeue();
+			int ci = cVal >> 8;
+			int cj = (cVal >> 2) & 0x3F;
+			int cIdx = cVal & 3;
+			Direction4 cdir = cIdx.FromIndex4();
+			int d = dist[ci, cj, cIdx];
+
+			// 枝刈り: すでに現在のベストを超えている場合は中断
+			if (d > bestScoreSoFar) break;
+
+			if (ci == ti && cj == tj) {
+				goalDist = d;
+				goalDir = cdir;
+				break;
+			}
+
+			void Push(int ni, int nj, Direction4 ndir, char op)
+			{
+				int nIdx = ndir.ToIndex4();
+				if (nIdx >= 4) return;
+				if (stamp[ni, nj, nIdx] != cs || dist[ni, nj, nIdx] > d + 1) {
+					dist[ni, nj, nIdx] = d + 1;
+					stamp[ni, nj, nIdx] = cs;
+					prev[ni, nj, nIdx] = (ci, cj, cdir, op);
+					que.Enqueue((ni << 8) | (nj << 2) | nIdx);
+				}
+			}
+
+			// F (前進)
+			if (map.CanMove(ci, cj, cdir)) {
+				var nPos = cdir.Move(ci, cj);
+				Push(nPos.i, nPos.j, cdir, 'F');
+			}
+			// L (左回転)
+			Push(ci, cj, cdir.Rotate(Rotation.L), 'L');
+			// R (右回転)
+			Push(ci, cj, cdir.Rotate(Rotation.R), 'R');
+
+			// P (マクロ実行)
+			var dest = macroDest[ci, cj, cIdx];
+			if (dest.ok) {
+				Push(dest.i, dest.j, dest.dir, 'P');
+			}
+		}
+
+		if (goalDist == int.MaxValue) return null;
+
+		int routeLen = 0;
+		int currI = ti, currJ = tj;
+		Direction4 currDir = goalDir;
+		while (currI != si || currJ != sj || currDir != sdir) {
+			int cIdx = currDir.ToIndex4();
+			if (cIdx >= 4) break;
+			var p = prev[currI, currJ, cIdx];
+			routeBuffer[routeLen++] = p.op;
+			currI = p.i;
+			currJ = p.j;
+			currDir = p.dir;
+		}
+		Array.Reverse(routeBuffer, 0, routeLen);
+		return routeBuffer[..routeLen];
+	}
+
+	static int[] OptimizeBallOrder(Input input, Stopwatch sw, Random rnd)
+	{
+		int N = input.N;
+		int M = input.M;
+		int[,] dist = new int[N * N, N * N];
+
+		// 距離行列の初期化
+		for (int i = 0; i < N * N; i++) {
+			for (int j = 0; j < N * N; j++) {
+				dist[i, j] = 999999;
+			}
+		}
+
+		// 事前にすべてのマス間の最短距離を BFS で計算しておく (最大で 400 マスなので一瞬で終わる)
+		for (int i = 0; i < N; i++) {
+			for (int j = 0; j < N; j++) {
+				int u = i * N + j;
+				dist[u, u] = 0;
+				var (pos, _) = input.Map.Bfs(i, j, int.MaxValue);
+				foreach (var p in pos) {
+					dist[u, p.i * N + p.j] = p.d;
+				}
+			}
+		}
+
+		// 貪欲法（一番近いボールを取りに行く）による初期順列の作成
+		int[] bestOrder = new int[M];
+		bool[] used = new bool[M];
+		int currLoc = 0; // 開始位置 (0, 0) は 0
+		for (int i = 0; i < M; i++) {
+			int bestK = -1;
+			int minD = int.MaxValue;
+			for (int k = 0; k < M; k++) {
+				if (!used[k]) {
+					int start = input.Balls[k].b * N + input.Balls[k].c;
+					int d = dist[currLoc, start];
+					if (d < minD) {
+						minD = d;
+						bestK = k;
+					}
+				}
+			}
+			bestOrder[i] = bestK;
+			used[bestK] = true;
+			currLoc = input.Balls[bestK].d * N + input.Balls[bestK].e; // 次の現在地は今拾う操作のゴール
+		}
+
+		// コスト計算用関数（TSP的な距離）
+		long CalcCost(int[] order)
+		{
+			long cost = 0;
+			int loc = 0;
+			for (int i = 0; i < M; i++) {
+				int k = order[i];
+				int start = input.Balls[k].b * N + input.Balls[k].c;
+				int goal = input.Balls[k].d * N + input.Balls[k].e;
+				cost += dist[loc, start] + dist[start, goal];
+				loc = goal;
+			}
+			return cost;
+		}
+
+		int[] currentOrder = (int[])bestOrder.Clone();
+		long bestScore = CalcCost(bestOrder);
+		long currentScore = bestScore;
+
+		// 2-opt近傍を用いた山登り法
+		double startMs = sw.Elapsed.TotalMilliseconds;
+		double timeLimit = 200.0;
+		int iter = 0;
+
+		while (true) {
+			if ((iter & 0xFF) == 0 && sw.Elapsed.TotalMilliseconds - startMs > timeLimit) break;
+			iter++;
+
+			int p1 = rnd.Next(M);
+			int p2 = rnd.Next(M);
+			if (p1 == p2) continue;
+			if (p1 > p2) (p1, p2) = (p2, p1);
+
+			// 区間を反転させる (2-opt)
+			Array.Reverse(currentOrder, p1, p2 - p1 + 1);
+			long newScore = CalcCost(currentOrder);
+
+			// 改善した、または同じスコアなら採用
+			if (newScore <= currentScore) {
+				currentScore = newScore;
+				if (newScore < bestScore) {
+					bestScore = newScore;
+					Array.Copy(currentOrder, bestOrder, M);
+				}
+			} else {
+				// 改悪した場合は区間を反転して元に戻す
+				Array.Reverse(currentOrder, p1, p2 - p1 + 1);
+			}
+		}
+
+		return bestOrder;
 	}
 }
 
@@ -365,7 +710,11 @@ public class Information
 	public int Up { get; set; } = 0;
 	public long Elapsed { get; set; } = 0;
 
+	public int P { get; set; } = 0;
+
+	public string Macro { get; set; } = "";
 	public int ML { get; set; } = 0;
+	public int RA { get; set; } = 0;
 	public int A { get; set; } = 0;
 }
 
@@ -814,6 +1163,17 @@ public static class Direction4Extensions
 		};
 	}
 
+	public static Direction4 FromIndex4(this int index)
+	{
+		return index switch {
+			0 => Direction4.D,
+			1 => Direction4.L,
+			2 => Direction4.U,
+			3 => Direction4.R,
+			_ => Direction4.N,
+		};
+	}
+
 	public static (int i, int j) Move(this Direction4 dir, int i, int j)
 	{
 		return dir switch {
@@ -1036,142 +1396,6 @@ public class Trace<T>
 	}
 }
 
-public readonly struct BitFlag(int flags)
-{
-	public static BitFlag Begin() => 0;
-	public static BitFlag End(int bitCount) => 1 << bitCount;
-	public static BitFlag FromBit(int bitNumber) => 1 << bitNumber;
-	public static BitFlag Fill(int count) => (1 << count) - 1;
-
-	public static IEnumerable<BitFlag> All(int n)
-	{
-		for (var f = Begin(); f < End(n); ++f) {
-			yield return f;
-		}
-	}
-
-	private readonly int flags_ = flags;
-	public int Flag => flags_;
-	public bool this[int bitNumber] => (flags_ & (1 << bitNumber)) != 0;
-
-	public bool Has(BitFlag target) => (flags_ & target.flags_) == target.flags_;
-	public bool Has(int target) => (flags_ & target) == target;
-	public bool HasBit(int bitNumber) => (flags_ & (1 << bitNumber)) != 0;
-	public BitFlag OrBit(int bitNumber) => flags_ | (1 << bitNumber);
-	public BitFlag AndBit(int bitNumber) => flags_ & (1 << bitNumber);
-	public BitFlag XorBit(int bitNumber) => flags_ ^ (1 << bitNumber);
-	public BitFlag ComplementOf(BitFlag sub) => flags_ ^ sub.flags_;
-	public int PopCount() => BitOperations.PopCount((uint)flags_);
-
-	public static BitFlag operator ++(BitFlag src) => new(src.flags_ + 1);
-	public static BitFlag operator --(BitFlag src) => new(src.flags_ - 1);
-	public static BitFlag operator |(BitFlag lhs, BitFlag rhs)
-		=> new(lhs.flags_ | rhs.flags_);
-	public static BitFlag operator |(BitFlag lhs, int rhs)
-		=> new(lhs.flags_ | rhs);
-	public static BitFlag operator |(int lhs, BitFlag rhs)
-		=> new(lhs | rhs.flags_);
-	public static BitFlag operator &(BitFlag lhs, BitFlag rhs)
-		=> new(lhs.flags_ & rhs.flags_);
-	public static BitFlag operator &(BitFlag lhs, int rhs)
-		=> new(lhs.flags_ & rhs);
-	public static BitFlag operator &(int lhs, BitFlag rhs)
-		=> new(lhs & rhs.flags_);
-	public static BitFlag operator ^(BitFlag lhs, BitFlag rhs)
-		=> new(lhs.flags_ ^ rhs.flags_);
-	public static BitFlag operator ^(BitFlag lhs, int rhs)
-		=> new(lhs.flags_ ^ rhs);
-	public static BitFlag operator ^(int lhs, BitFlag rhs)
-		=> new(lhs ^ rhs.flags_);
-	public static BitFlag operator <<(BitFlag bit, int shift) => bit.flags_ << shift;
-	public static BitFlag operator >>(BitFlag bit, int shift) => bit.flags_ >> shift;
-
-	public static bool operator <(BitFlag lhs, BitFlag rhs) => lhs.flags_ < rhs.flags_;
-	public static bool operator <(BitFlag lhs, int rhs) => lhs.flags_ < rhs;
-	public static bool operator <(int lhs, BitFlag rhs) => lhs < rhs.flags_;
-	public static bool operator >(BitFlag lhs, BitFlag rhs) => lhs.flags_ > rhs.flags_;
-	public static bool operator >(BitFlag lhs, int rhs) => lhs.flags_ > rhs;
-	public static bool operator >(int lhs, BitFlag rhs) => lhs > rhs.flags_;
-	public static bool operator <=(BitFlag lhs, BitFlag rhs) => lhs.flags_ <= rhs.flags_;
-	public static bool operator <=(BitFlag lhs, int rhs) => lhs.flags_ <= rhs;
-	public static bool operator <=(int lhs, BitFlag rhs) => lhs <= rhs.flags_;
-	public static bool operator >=(BitFlag lhs, BitFlag rhs) => lhs.flags_ >= rhs.flags_;
-	public static bool operator >=(BitFlag lhs, int rhs) => lhs.flags_ >= rhs;
-	public static bool operator >=(int lhs, BitFlag rhs) => lhs >= rhs.flags_;
-
-	public static implicit operator BitFlag(int t) => new(t);
-	public static implicit operator int(BitFlag t) => t.flags_;
-
-	public override string ToString() => $"{Convert.ToString(flags_, 2).PadLeft(32, '0')} ({flags_})";
-
-	public SubBitsEnumerator SubBits => new(flags_);
-	public readonly struct SubBitsEnumerator(int flags) : IEnumerable<BitFlag>
-	{
-		private readonly int flags_ = flags;
-
-		IEnumerator<BitFlag> IEnumerable<BitFlag>.GetEnumerator() => new Enumerator(flags_);
-		IEnumerator IEnumerable.GetEnumerator() => new Enumerator(flags_);
-		public Enumerator GetEnumerator() => new(flags_);
-		public struct Enumerator(int flags) : IEnumerator<BitFlag>
-		{
-			private readonly int src_ = flags;
-			public BitFlag Current { get; private set; } = flags + 1;
-			readonly object IEnumerator.Current => Current;
-
-			public readonly void Dispose() { }
-			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			public bool MoveNext() => (Current = --Current & src_) > 0;
-			[MethodImpl(MethodImplOptions.AggressiveInlining)]
-			public void Reset() => Current = src_;
-		}
-	}
-}
-
-public class Array2D<T>(int h, int w)
-{
-	private readonly T[] _arr = new T[h * w];
-	public int H { get; } = h;
-	public int W { get; } = w;
-
-	public T this[int i]
-	{
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		get => _arr[i];
-		//get => Unsafe.Add(ref _arr[0], i * W + j);
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		set => _arr[i] = value;
-	}
-
-	public T this[int i, int j]
-	{
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		get => _arr[i * W + j];
-		//get => Unsafe.Add(ref _arr[0], i * W + j);
-		[MethodImpl(MethodImplOptions.AggressiveInlining)]
-		set => _arr[i * W + j] = value;
-	}
-
-	public Array2D<T> Fill(T value)
-	{
-		_arr.AsSpan().Fill(value);
-		return this;
-	}
-
-	public Span<T> Row(int i)
-	{
-		return _arr.AsSpan().Slice(i * W, W);
-	}
-
-	public Array2D<T> Clone()
-	{
-		var newArr = new Array2D<T>(H, W);
-		Array.Copy(_arr, newArr._arr, _arr.Length);
-		// Unsafe.CopyBlock(ref newArr._arr[0], ref _arr[0], (uint)_arr.Length);
-
-		return newArr;
-	}
-}
-
 public class HeuristicHelper
 {
 	public static void RunCases<T>(
@@ -1272,139 +1496,6 @@ public class HeuristicHelper
 		var cin = new IOManager();
 #endif
 		return cin;
-	}
-}
-
-public class DijkstraQ
-{
-	private int count_ = 0;
-	private long[] distanceHeap_;
-	private int[] vertexHeap_;
-
-	public int Count => count_;
-	public DijkstraQ()
-	{
-		distanceHeap_ = new long[8];
-		vertexHeap_ = new int[8];
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public void Enqueue(long distance, int v)
-	{
-		if (distanceHeap_.Length == count_) {
-			var newDistanceHeap = new long[distanceHeap_.Length << 1];
-			var newVertexHeap = new int[vertexHeap_.Length << 1];
-			Unsafe.CopyBlock(
-				ref Unsafe.As<long, byte>(ref newDistanceHeap[0]),
-				ref Unsafe.As<long, byte>(ref distanceHeap_[0]),
-				(uint)(8 * count_));
-			Unsafe.CopyBlock(
-				ref Unsafe.As<int, byte>(ref newVertexHeap[0]),
-				ref Unsafe.As<int, byte>(ref vertexHeap_[0]),
-				(uint)(4 * count_));
-			distanceHeap_ = newDistanceHeap;
-			vertexHeap_ = newVertexHeap;
-		}
-
-		ref var dRef = ref distanceHeap_[0];
-		ref var vRef = ref vertexHeap_[0];
-		Unsafe.Add(ref dRef, count_) = distance;
-		Unsafe.Add(ref vRef, count_) = v;
-		++count_;
-
-		int c = count_ - 1;
-		while (c > 0) {
-			int p = (c - 1) >> 1;
-			var tempD = Unsafe.Add(ref dRef, p);
-			if (tempD <= distance) {
-				break;
-			} else {
-				Unsafe.Add(ref dRef, c) = tempD;
-				Unsafe.Add(ref vRef, c) = Unsafe.Add(ref vRef, p);
-				c = p;
-			}
-		}
-
-		Unsafe.Add(ref dRef, c) = distance;
-		Unsafe.Add(ref vRef, c) = v;
-	}
-
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public (long distance, int v) Dequeue()
-	{
-		ref var dRef = ref distanceHeap_[0];
-		ref var vRef = ref vertexHeap_[0];
-		(long distance, int v) ret = (dRef, vRef);
-		int n = count_ - 1;
-
-		var distance = Unsafe.Add(ref dRef, n);
-		var vertex = Unsafe.Add(ref vRef, n);
-		int p = 0;
-		int c = (p << 1) + 1;
-		while (c < n) {
-			if (c != n - 1 && Unsafe.Add(ref dRef, c + 1) < Unsafe.Add(ref dRef, c)) {
-				++c;
-			}
-
-			var tempD = Unsafe.Add(ref dRef, c);
-			if (distance > tempD) {
-				Unsafe.Add(ref dRef, p) = tempD;
-				Unsafe.Add(ref vRef, p) = Unsafe.Add(ref vRef, c);
-				p = c;
-				c = (p << 1) + 1;
-			} else {
-				break;
-			}
-		}
-
-		Unsafe.Add(ref dRef, p) = distance;
-		Unsafe.Add(ref vRef, p) = vertex;
-		--count_;
-
-		return ret;
-	}
-}
-
-public class HashMap<TKey, TValue> : Dictionary<TKey, TValue>
-{
-	private readonly Func<TKey, TValue> initialzier_;
-	public HashMap(Func<TKey, TValue> initialzier)
-		: base()
-	{
-		initialzier_ = initialzier;
-	}
-
-	public HashMap(Func<TKey, TValue> initialzier, int capacity)
-		: base(capacity)
-	{
-		initialzier_ = initialzier;
-	}
-
-	new public TValue this[TKey key]
-	{
-		get
-		{
-			if (TryGetValue(key, out TValue value)) {
-				return value;
-			} else {
-				var init = initialzier_(key);
-				base[key] = init;
-				return init;
-			}
-		}
-
-		set { base[key] = value; }
-	}
-
-	public HashMap<TKey, TValue> Merge(
-		HashMap<TKey, TValue> src,
-		Func<TValue, TValue, TValue> mergeValues)
-	{
-		foreach (var key in src.Keys) {
-			this[key] = mergeValues(this[key], src[key]);
-		}
-
-		return this;
 	}
 }
 
@@ -1742,20 +1833,6 @@ public static class Helper
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	public static string JoinNL<T>(this IEnumerable<T> values)
 		=> string.Join(Environment.NewLine, values);
-}
-
-public static class Extensions
-{
-	[MethodImpl(MethodImplOptions.AggressiveInlining)]
-	public static Span<T> AsSpan<T>(this List<T> list)
-	{
-		return Unsafe.As<FakeList<T>>(list).Array.AsSpan(0, list.Count);
-	}
-
-	private class FakeList<T>
-	{
-		public T[] Array = null;
-	}
 }
 
 public class IOManager : IDisposable
