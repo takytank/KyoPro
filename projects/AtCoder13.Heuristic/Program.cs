@@ -11,7 +11,7 @@ public class Program
 	static void Main()
 	{
 		HeuristicHelper.RunCases(
-			runCaseCount: 10,
+			runCaseCount: 100,
 			testCaseCount: 50,
 			isParallel: false,
 			i => Run(i),
@@ -27,7 +27,7 @@ public class Program
 						$"up={info.Up:d4}",
 						$"P={info.P:d2}",
 						$"W={info.Width:d4}",
-						$"D={info.Depth:d4}",
+						$"D={info.Depth:d7}",
 						//$"ML={info.ML:d3}",
 						//$"RA={info.RA:d5}",
 						$"A={info.A:d4}",
@@ -74,10 +74,17 @@ public class Program
 		//info.P = 6;
 		//}
 
+		/*
 		var state8 = Plan8(isLocal, sw, rnd, input, info);
 		if (state8.Ops.Count < best.Ops.Count) {
 			best = state8;
 			info.P = 8;
+		}*/
+
+		var state9 = Plan9(isLocal, sw, rnd, input, info);
+		if (state9.Ops.Count < best.Ops.Count) {
+			best = state9;
+			info.P = 9;
 		}
 
 		/*
@@ -1234,7 +1241,7 @@ SkipS7:;
 		var macroList = new[] {
 			// 純直進
 			"FF", "FFF", "FFFF", "FFFFF", "FFFFFF", "FFFFFFF",
-			// 両端ターン（最多パターン）
+			// 両端ターン（最多パターン）長さ5〜7
 			"LFFFR", "RFFFL",
 			"LFFFFR", "RFFFFL",
 			"LLFFFR", "RRFFFL",
@@ -1250,6 +1257,26 @@ SkipS7:;
 			"FFLFFF", "FFRFFF",
 			"FFFLFF", "FFFRFF",
 			"FFL", "FFR", "FFFL", "FFFR",
+			// 長さ8: 両端ターン
+			"LFFFFFR", "RFFFFFL",
+			"LLFFFFR", "RRFFFFL",
+			"LFFFFRR", "RFFFFLL",
+			// 長さ8: 先頭/末尾ターン
+			"LFFFFFF", "RFFFFFF",
+			"FFFFFFFL", "FFFFFFFR",
+			// 長さ8: 中間ターン
+			"FFFLFFF", "FFFRFFF",
+			// 長さ9: 両端ターン
+			"LFFFFFFR", "RFFFFFFL",
+			"LLFFFFR", "RRFFFFL",
+			"LFFFFFR", "RFFFFFLL",
+			// 長さ9: 先頭/末尾ターン
+			"LFFFFFFF", "RFFFFFFF",
+			"FFFFFFFFL", "FFFFFFFFR",
+			// 長さ10: 両端ターン
+			"LFFFFFFFR", "RFFFFFFFL",
+			// 長さ10: 先頭/末尾ターン
+			"LFFFFFFFF", "RFFFFFFFF",
 		};
 		var dirs = new[] { Direction4.D, Direction4.L, Direction4.U, Direction4.R };
 
@@ -1446,7 +1473,7 @@ SkipS7:;
 		for (int i = 0; i < macroList.Length; i++)
 			if (macroEnabled[i]) info.Width++;
 
-		// 焼き鈍し: 初期温度は有効マクロの初期コスト平均の 5%、終了温度 0.1
+		// 焼き鈍し: 初期温度は有効マクロの初期コスト平均の 10%、上限 30、終了温度 0.01
 		double saStartMs = sw.Elapsed.TotalMilliseconds;
 		const double saEndMs = 1700.0;
 		double initTemp;
@@ -1454,7 +1481,8 @@ SkipS7:;
 			double sum = 0; int cnt = 0;
 			for (int i = 0; i < macroList.Length; i++)
 				if (macroEnabled[i]) { sum += bestCosts[i]; cnt++; }
-			initTemp = cnt > 0 ? sum / cnt * 0.20 : 50.0;
+			double cap = 30.0 * M / 15.0;
+			initTemp = cnt > 0 ? Math.Min(sum / cnt * 0.10, cap) : cap;
 		}
 		const double endTemp = 0.01;
 		// W=初期温度(整数), D=SA悪化受理回数
@@ -1599,7 +1627,417 @@ SkipS7:;
 		return Plan3(isLocal, sw, rnd, input, info);
 	}
 
-	// 軽量シミュレート
+	static State Plan9(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		int N = input.N;
+		int M = input.M;
+
+		var macroList = new[] {
+			// 純直進
+			"FF", "FFF", "FFFF", "FFFFF", "FFFFFF", "FFFFFFF",
+			// 両端ターン 長さ5〜7
+			"LFFFR", "RFFFL",
+			"LFFFFR", "RFFFFL",
+			"LLFFFR", "RRFFFL",
+			"LFFFRR", "RFFFLL",
+			"LLFFFFL", "RRFFFFR",
+			"LFFFFFL", "RFFFFFL",
+			// 先頭/末尾のみターン
+			"LFFFFF", "RFFFFF",
+			"FFFFFL", "FFFFFR",
+			"FFFFFFL", "FFFFFFR",
+			"LLFFFFF", "RRFFFFF",
+			// 中間ターン
+			"FFLFFF", "FFRFFF",
+			"FFFLFF", "FFFRFF",
+			"FFL", "FFR", "FFFL", "FFFR",
+			// 長さ8
+			"LFFFFFR", "RFFFFFL",
+			"LLFFFFR", "RRFFFFL",
+			"LFFFFRR", "RFFFFLL",
+			"LFFFFFF", "RFFFFFF",
+			"FFFFFFFL", "FFFFFFFR",
+			"FFFLFFF", "FFFRFFF",
+			// 長さ9
+			"LFFFFFFR", "RFFFFFFL",
+			"LLFFFFR", "RRFFFFL",
+			"LFFFFFR", "RFFFFFLL",
+			"LFFFFFFF", "RFFFFFFF",
+			"FFFFFFFFL", "FFFFFFFFR",
+			// 長さ10
+			"LFFFFFFFR", "RFFFFFFFL",
+			"LFFFFFFFF", "RFFFFFFFF",
+		};
+		var dirs = new[] { Direction4.D, Direction4.L, Direction4.U, Direction4.R };
+
+		var macroDestAll = new (int i, int j, Direction4 dir, bool ok)[macroList.Length][,,];
+		for (int mi = 0; mi < macroList.Length; mi++) {
+			var mac = macroList[mi];
+			var dest = new (int i, int j, Direction4 dir, bool ok)[N, N, 4];
+			for (int i = 0; i < N; i++) {
+				for (int j = 0; j < N; j++) {
+					foreach (var dir in dirs) {
+						int nr = i, nc = j;
+						Direction4 nd = dir;
+						bool mOk = true;
+						foreach (var op in mac) {
+							switch (op) {
+								case 'F':
+									if (!input.Map.CanMove(nr, nc, nd)) { mOk = false; } else { var mv = nd.Move(nr, nc); nr = mv.i; nc = mv.j; }
+									break;
+								case 'L': nd = nd.Rotate(Rotation.L); break;
+								case 'R': nd = nd.Rotate(Rotation.R); break;
+							}
+							if (!mOk) break;
+						}
+						dest[i, j, dir.ToIndex4()] = (nr, nc, nd, mOk);
+					}
+				}
+			}
+			macroDestAll[mi] = dest;
+		}
+
+		var macrodist = new int[N, N, 4];
+		var macroprev = new (int i, int j, Direction4 dir, char op)[N, N, 4];
+		var macroQue = new Queue<int>();
+		var macroStamp = new int[N, N, 4];
+		int macroCurrentStamp = 0;
+		var routeBuf = new char[N * N * 4 * 8];
+
+		int K = 1 + M * 2;
+		(int i, int j)[] keyPos = new (int, int)[K];
+		keyPos[0] = (0, 0);
+		for (int k = 0; k < M; k++) {
+			keyPos[1 + k] = (input.Balls[k].b, input.Balls[k].c);
+			keyPos[1 + M + k] = (input.Balls[k].d, input.Balls[k].e);
+		}
+
+		double precompDeadline = Math.Min(sw.Elapsed.TotalMilliseconds + 800.0, 1200.0);
+		var nodeDistAll = new int[macroList.Length][,,];
+		var nodeArrDirAll = new int[macroList.Length][,,];
+		var macroEnabled = new bool[macroList.Length];
+
+		var fullDist = new int[N, N, 4];
+		var fullStamp = new int[N, N, 4];
+		int fullStampVal = 0;
+
+		for (int mi = 0; mi < macroList.Length; mi++) {
+			if (mi > 0 && sw.Elapsed.TotalMilliseconds > precompDeadline) break;
+			var macroDest = macroDestAll[mi];
+			var nodeDist = new int[K, 4, K];
+			var nodeArrDir = new int[K, 4, K];
+			for (int a = 0; a < K; a++)
+				for (int d = 0; d < 4; d++)
+					for (int b = 0; b < K; b++)
+						nodeDist[a, d, b] = (a == b) ? 0 : int.MaxValue / 2;
+
+			for (int from = 0; from < K; from++) {
+				var (fi, fj) = keyPos[from];
+				for (int startDirIdx = 0; startDirIdx < 4; startDirIdx++) {
+					++fullStampVal;
+					int fcs = fullStampVal;
+					macroQue.Clear();
+					fullDist[fi, fj, startDirIdx] = 0;
+					fullStamp[fi, fj, startDirIdx] = fcs;
+					macroQue.Enqueue((fi << 8) | (fj << 2) | startDirIdx);
+
+					while (macroQue.Count > 0) {
+						int cVal = macroQue.Dequeue();
+						int ci = cVal >> 8;
+						int cj = (cVal >> 2) & 0x3F;
+						int cIdx = cVal & 3;
+						Direction4 cdir = cIdx.FromIndex4();
+						int d2 = fullDist[ci, cj, cIdx];
+
+						void Push2(int ni, int nj, Direction4 ndir)
+						{
+							int nIdx = ndir.ToIndex4();
+							if (fullStamp[ni, nj, nIdx] != fcs || fullDist[ni, nj, nIdx] > d2 + 1) {
+								fullDist[ni, nj, nIdx] = d2 + 1;
+								fullStamp[ni, nj, nIdx] = fcs;
+								macroQue.Enqueue((ni << 8) | (nj << 2) | nIdx);
+							}
+						}
+
+						if (input.Map.CanMove(ci, cj, cdir)) {
+							var nPos = cdir.Move(ci, cj);
+							Push2(nPos.i, nPos.j, cdir);
+						}
+						Push2(ci, cj, cdir.Rotate(Rotation.L));
+						Push2(ci, cj, cdir.Rotate(Rotation.R));
+						var dest = macroDest[ci, cj, cIdx];
+						if (dest.ok) Push2(dest.i, dest.j, dest.dir);
+					}
+
+					for (int to = 0; to < K; to++) {
+						if (from == to) continue;
+						var (ti2, tj2) = keyPos[to];
+						int best = int.MaxValue / 2;
+						int bestArrDir = 0;
+						for (int d = 0; d < 4; d++) {
+							if (fullStamp[ti2, tj2, d] == fcs && fullDist[ti2, tj2, d] < best) {
+								best = fullDist[ti2, tj2, d];
+								bestArrDir = d;
+							}
+						}
+						nodeDist[from, startDirIdx, to] = best;
+						nodeArrDir[from, startDirIdx, to] = bestArrDir;
+					}
+				}
+			}
+			nodeDistAll[mi] = nodeDist;
+			nodeArrDirAll[mi] = nodeArrDir;
+			macroEnabled[mi] = true;
+		}
+
+		int CalcOrderCost(int[] order, int[,,] nd, int[,,] nad)
+		{
+			int cost = 0;
+			int curNode = 0;
+			int curDir = Direction4.D.ToIndex4();
+			for (int i = 0; i < M; i++) {
+				int kk = order[i];
+				int pickNode = 1 + kk;
+				int dropNode = 1 + M + kk;
+				cost += nd[curNode, curDir, pickNode];
+				curDir = nad[curNode, curDir, pickNode];
+				cost += nd[pickNode, curDir, dropNode];
+				curDir = nad[pickNode, curDir, dropNode];
+				curNode = dropNode;
+			}
+			return cost;
+		}
+
+		int[] MakeGreedyOrder(int[,,] nd, int[,,] nad)
+		{
+			var order = new int[M];
+			var used = new bool[M];
+			int curNode = 0;
+			int curDir = Direction4.D.ToIndex4();
+			for (int i = 0; i < M; i++) {
+				int best = -1; int bestD = int.MaxValue;
+				for (int kk = 0; kk < M; kk++) {
+					if (used[kk]) continue;
+					int d2 = nd[curNode, curDir, 1 + kk];
+					if (d2 < bestD) { bestD = d2; best = kk; }
+				}
+				order[i] = best;
+				used[best] = true;
+				int pickDir = nad[curNode, curDir, 1 + best];
+				curDir = nad[1 + best, pickDir, 1 + M + best];
+				curNode = 1 + M + best;
+			}
+			return order;
+		}
+
+		var bestOrders = new int[macroList.Length][];
+		var bestCosts = new int[macroList.Length];
+		var currentOrders = new int[macroList.Length][];
+		var currentCosts = new int[macroList.Length];
+
+		for (int mi = 0; mi < macroList.Length; mi++) {
+			if (!macroEnabled[mi]) continue;
+			var ord = MakeGreedyOrder(nodeDistAll[mi], nodeArrDirAll[mi]);
+			int c = CalcOrderCost(ord, nodeDistAll[mi], nodeArrDirAll[mi]);
+			bestOrders[mi] = (int[])ord.Clone();
+			bestCosts[mi] = c;
+			currentOrders[mi] = (int[])ord.Clone();
+			currentCosts[mi] = c;
+		}
+
+		// SA: 2-opt と or-opt を交互に試みる
+		double saStartMs = sw.Elapsed.TotalMilliseconds;
+		const double saEndMs = 1700.0;
+		double initTemp;
+		{
+			double sum = 0; int cnt = 0;
+			for (int i = 0; i < macroList.Length; i++)
+				if (macroEnabled[i]) { sum += bestCosts[i]; cnt++; }
+			double cap = 30.0 * M / 15.0;
+			initTemp = cnt > 0 ? Math.Min(sum / cnt * 0.10, cap) : cap;
+		}
+		const double endTemp = 0.01;
+		info.Width = (int)initTemp;
+		int saAccept = 0;
+
+		// or-opt 用の作業バッファ
+		var orOptBuf = new int[M];
+
+		int pruneIter = 0;
+		int iter = 0;
+		while (true) {
+			double elapsed = sw.Elapsed.TotalMilliseconds;
+			if (elapsed >= saEndMs) break;
+			double progress = (elapsed - saStartMs) / (saEndMs - saStartMs);
+			double temp = initTemp * Math.Pow(endTemp / initTemp, progress);
+
+			int mi = iter % macroList.Length;
+			iter++;
+			if (!macroEnabled[mi] || currentOrders[mi] == null) continue;
+
+			if (iter - pruneIter >= 500) {
+				pruneIter = iter;
+				if (elapsed > 900.0) {
+					int globalMin = int.MaxValue;
+					for (int i = 0; i < macroList.Length; i++)
+						if (macroEnabled[i] && bestCosts[i] < globalMin)
+							globalMin = bestCosts[i];
+					double threshold = elapsed < 1300.0 ? 1.1 : 1.03;
+					for (int i = 0; i < macroList.Length; i++)
+						if (macroEnabled[i] && bestCosts[i] > globalMin * threshold)
+							macroEnabled[i] = false;
+				}
+			}
+
+			var order = currentOrders[mi];
+			var nd = nodeDistAll[mi];
+			var nad = nodeArrDirAll[mi];
+
+			int newCost;
+			// 偶数イテレーション: 2-opt、奇数イテレーション: or-opt
+			if ((iter & 1) == 0) {
+				// 2-opt
+				int p1 = rnd.Next(M);
+				int p2 = rnd.Next(M);
+				if (p1 == p2) continue;
+				if (p1 > p2) (p1, p2) = (p2, p1);
+
+				Array.Reverse(order, p1, p2 - p1 + 1);
+				newCost = CalcOrderCost(order, nd, nad);
+				int delta = newCost - currentCosts[mi];
+				if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
+					if (delta > 0) saAccept++;
+					currentCosts[mi] = newCost;
+					if (newCost < bestCosts[mi]) {
+						bestCosts[mi] = newCost;
+						bestOrders[mi] = (int[])order.Clone();
+						info.Up++;
+					}
+				} else {
+					Array.Reverse(order, p1, p2 - p1 + 1);
+				}
+			} else {
+				// or-opt: 位置 src の要素を位置 dst の後ろに挿入
+				int src = rnd.Next(M);
+				int dst = rnd.Next(M - 1);
+				if (dst >= src) dst++;
+				if (src == dst) continue;
+
+				// orOptBuf に挿入後の順列を構築
+				int elem = order[src];
+				int idx = 0;
+				for (int i = 0; i < M; i++) {
+					if (i == src) continue;
+					orOptBuf[idx++] = order[i];
+				}
+				// dst は src を除いた配列上の位置
+				int insertPos = dst < src ? dst + 1 : dst;
+				// insertPos に elem を挿入（後ろにシフト）
+				for (int i = M - 1; i > insertPos; i--)
+					orOptBuf[i] = orOptBuf[i - 1];
+				orOptBuf[insertPos] = elem;
+
+				newCost = CalcOrderCost(orOptBuf, nd, nad);
+				int delta = newCost - currentCosts[mi];
+				if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
+					if (delta > 0) saAccept++;
+					Array.Copy(orOptBuf, order, M);
+					currentCosts[mi] = newCost;
+					if (newCost < bestCosts[mi]) {
+						bestCosts[mi] = newCost;
+						bestOrders[mi] = (int[])order.Clone();
+						info.Up++;
+					}
+				}
+			}
+		}
+		info.Loop += iter;
+		info.Depth = saAccept;
+
+		// ---- Step 3: 各マクロのベスト訪問順で State 構築用パスを計算 ----
+		int globalBestScore = int.MaxValue;
+		string globalBestMacro = null;
+		int[] globalBestOrder = null;
+		char[][] globalBestPickPaths = null;
+		char[][] globalBestDropPaths = null;
+
+		var pickPaths = new char[M][];
+		var dropPaths = new char[M][];
+
+		for (int mi = 0; mi < macroList.Length; mi++) {
+			if (!macroEnabled[mi] || bestOrders[mi] == null) continue;
+			if (sw.Elapsed.TotalMilliseconds > 1880.0) break;
+			var mac = macroList[mi];
+			var macroDest = macroDestAll[mi];
+			var order = bestOrders[mi];
+
+			var state = new State(input, isLocal);
+			state.AddOp('M');
+			foreach (var c in mac) state.AddOp(c);
+			state.AddOp('M');
+
+			int currentScore = 0;
+			bool ok = true;
+
+			for (int oi = 0; oi < M; oi++) {
+				int k = order[oi];
+				var (si, sj, ti, tj) = input.Balls[k];
+
+				var pPick = MacroBfs(input, input.Map, state.Robo.i, state.Robo.j, state.Direction,
+					si, sj, macroDest, macrodist, macroprev, macroQue, macroStamp,
+					ref macroCurrentStamp, globalBestScore - currentScore, routeBuf);
+				if (pPick == null) { ok = false; break; }
+				currentScore += pPick.Length;
+				if (currentScore >= globalBestScore) { ok = false; break; }
+				foreach (var op in pPick) state.AddOp(op);
+				pickPaths[k] = pPick;
+				state.Exchange();
+
+				var pDrop = MacroBfs(input, input.Map, state.Robo.i, state.Robo.j, state.Direction,
+					ti, tj, macroDest, macrodist, macroprev, macroQue, macroStamp,
+					ref macroCurrentStamp, globalBestScore - currentScore, routeBuf);
+				if (pDrop == null) { ok = false; break; }
+				currentScore += pDrop.Length;
+				if (currentScore >= globalBestScore) { ok = false; break; }
+				foreach (var op in pDrop) state.AddOp(op);
+				dropPaths[k] = pDrop;
+				state.Exchange();
+			}
+
+			if (ok && currentScore < globalBestScore) {
+				globalBestScore = currentScore;
+				globalBestMacro = mac;
+				globalBestOrder = (int[])order.Clone();
+				globalBestPickPaths = new char[M][];
+				globalBestDropPaths = new char[M][];
+				for (int k = 0; k < M; k++) {
+					globalBestPickPaths[k] = (char[])pickPaths[k].Clone();
+					globalBestDropPaths[k] = (char[])dropPaths[k].Clone();
+				}
+			}
+		}
+
+		// ---- Step 4: 最良の (マクロ, 訪問順) で State 構築 ----
+		if (globalBestMacro != null) {
+			var state = new State(input, isLocal);
+			state.AddOp('M');
+			foreach (var c in globalBestMacro) state.AddOp(c);
+			state.AddOp('M');
+			foreach (int k in globalBestOrder) {
+				ApplyPath(state, globalBestPickPaths[k]);
+				state.Exchange();
+				ApplyPath(state, globalBestDropPaths[k]);
+				state.Exchange();
+			}
+			info.Macro = globalBestMacro;
+			info.ML = globalBestMacro.Length;
+			return state;
+		}
+
+		return Plan3(isLocal, sw, rnd, input, info);
+	}
+
+
 	// 位置・向きを軽量シミュレート（State を作らない版）
 	static void SimulateDir(char op, ref Direction4 roboDir, (int i, int j, Direction4 dir, bool ok)[,,] macroDest, ref int roboI, ref int roboJ, Input input)
 	{
