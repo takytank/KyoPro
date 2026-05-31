@@ -29,7 +29,7 @@ public class Program
 						$"W={info.Width:d4}",
 						$"D={info.Depth:d7}",
 						//$"ML={info.ML:d3}",
-						//$"RA={info.RA:d5}",
+						$"RA={info.RA:d5}",
 						$"A={info.A:d4}",
 						$"score={info.Score:d5}",
 						$"elapsed={info.Elapsed:d4}",
@@ -85,6 +85,12 @@ public class Program
 		if (state9.Ops.Count < best.Ops.Count) {
 			best = state9;
 			info.P = 9;
+		}
+
+		var state11 = Plan11(isLocal, sw, rnd, input, info, state9);
+		if (state11.Ops.Count < best.Ops.Count) {
+			best = state11;
+			info.P = 11;
 		}
 
 		/*
@@ -1619,6 +1625,7 @@ SkipS7:;
 				ApplyPath(state, globalBestDropPaths[k]);
 				state.Exchange();
 			}
+			info.RA = state.Ops.Count - (globalBestMacro.Length + 2 + globalBestScore);
 			info.Macro = globalBestMacro;
 			info.ML = globalBestMacro.Length;
 			return state;
@@ -1894,62 +1901,113 @@ SkipS7:;
 			var nad = nodeArrDirAll[mi];
 
 			int newCost;
-			// 偶数イテレーション: 2-opt、奇数イテレーション: or-opt
-			if ((iter & 1) == 0) {
-				// 2-opt
-				int p1 = rnd.Next(M);
-				int p2 = rnd.Next(M);
-				if (p1 == p2) continue;
-				if (p1 > p2) (p1, p2) = (p2, p1);
+				// iter % 3 == 0: 2-opt、1: or-opt-1（1要素移動）、2: or-opt-2（2要素セグメント移動）
+				int moveType = iter % 3;
+				if (moveType == 0) {
+					// 2-opt
+					int p1 = rnd.Next(M);
+					int p2 = rnd.Next(M);
+					if (p1 == p2) continue;
+					if (p1 > p2) (p1, p2) = (p2, p1);
 
-				Array.Reverse(order, p1, p2 - p1 + 1);
-				newCost = CalcOrderCost(order, nd, nad);
-				int delta = newCost - currentCosts[mi];
-				if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
-					if (delta > 0) saAccept++;
-					currentCosts[mi] = newCost;
-					if (newCost < bestCosts[mi]) {
-						bestCosts[mi] = newCost;
-						bestOrders[mi] = (int[])order.Clone();
-						info.Up++;
+					Array.Reverse(order, p1, p2 - p1 + 1);
+					newCost = CalcOrderCost(order, nd, nad);
+					int delta = newCost - currentCosts[mi];
+					if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
+						if (delta > 0) saAccept++;
+						currentCosts[mi] = newCost;
+						if (newCost < bestCosts[mi]) {
+							bestCosts[mi] = newCost;
+							bestOrders[mi] = (int[])order.Clone();
+							info.Up++;
+						}
+					} else {
+						Array.Reverse(order, p1, p2 - p1 + 1);
+					}
+				} else if (moveType == 1) {
+					// or-opt-1: 位置 src の1要素を別位置に挿入
+					if (M < 2) continue;
+					int src = rnd.Next(M);
+					int dst = rnd.Next(M - 1);
+					if (dst >= src) dst++;
+					if (src == dst) continue;
+
+					int elem = order[src];
+					int idx = 0;
+					for (int i = 0; i < M; i++) {
+						if (i == src) continue;
+						orOptBuf[idx++] = order[i];
+					}
+					int insertPos = dst < src ? dst + 1 : dst;
+					for (int i = M - 1; i > insertPos; i--)
+						orOptBuf[i] = orOptBuf[i - 1];
+					orOptBuf[insertPos] = elem;
+
+					newCost = CalcOrderCost(orOptBuf, nd, nad);
+					int delta = newCost - currentCosts[mi];
+					if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
+						if (delta > 0) saAccept++;
+						Array.Copy(orOptBuf, order, M);
+						currentCosts[mi] = newCost;
+						if (newCost < bestCosts[mi]) {
+							bestCosts[mi] = newCost;
+							bestOrders[mi] = (int[])order.Clone();
+							info.Up++;
+						}
 					}
 				} else {
-					Array.Reverse(order, p1, p2 - p1 + 1);
-				}
-			} else {
-				// or-opt: 位置 src の要素を位置 dst の後ろに挿入
-				int src = rnd.Next(M);
-				int dst = rnd.Next(M - 1);
-				if (dst >= src) dst++;
-				if (src == dst) continue;
+					// or-opt-2: 連続2要素セグメント [src, src+1] を別位置に挿入（正順・逆順の両方を試す）
+						if (M < 3) continue;
+						int src = rnd.Next(M - 1); // セグメント先頭インデックス
+						// 挿入先: セグメントを除いた M-2 要素の配列上の挿入インデックス (0 ~ M-3)
+						int insertPos = rnd.Next(M - 2);
 
-				// orOptBuf に挿入後の順列を構築
-				int elem = order[src];
-				int idx = 0;
-				for (int i = 0; i < M; i++) {
-					if (i == src) continue;
-					orOptBuf[idx++] = order[i];
-				}
-				// dst は src を除いた配列上の位置
-				int insertPos = dst < src ? dst + 1 : dst;
-				// insertPos に elem を挿入（後ろにシフト）
-				for (int i = M - 1; i > insertPos; i--)
-					orOptBuf[i] = orOptBuf[i - 1];
-				orOptBuf[insertPos] = elem;
+						int e0 = order[src];
+						int e1 = order[src + 1];
+						// セグメントを除いた残りを orOptBuf に詰める
+						int idx = 0;
+						for (int i = 0; i < M; i++) {
+							if (i == src || i == src + 1) continue;
+							orOptBuf[idx++] = order[i];
+						}
+						// insertPos+1 以降を後ろにシフト (2つ分)
+						for (int i = M - 1; i >= insertPos + 3; i--)
+							orOptBuf[i] = orOptBuf[i - 2];
 
-				newCost = CalcOrderCost(orOptBuf, nd, nad);
-				int delta = newCost - currentCosts[mi];
-				if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
-					if (delta > 0) saAccept++;
-					Array.Copy(orOptBuf, order, M);
-					currentCosts[mi] = newCost;
-					if (newCost < bestCosts[mi]) {
-						bestCosts[mi] = newCost;
-						bestOrders[mi] = (int[])order.Clone();
-						info.Up++;
+						// 正順: [e0, e1]
+						orOptBuf[insertPos + 1] = e0;
+						orOptBuf[insertPos + 2] = e1;
+						int costFwd = CalcOrderCost(orOptBuf, nd, nad);
+
+						// 50% の確率で逆順 [e1, e0] も試して良い方を採用
+						if ((rnd.Next(2) == 0)) {
+							orOptBuf[insertPos + 1] = e1;
+							orOptBuf[insertPos + 2] = e0;
+							int costRev = CalcOrderCost(orOptBuf, nd, nad);
+							if (costFwd < costRev) {
+								orOptBuf[insertPos + 1] = e0;
+								orOptBuf[insertPos + 2] = e1;
+							} else {
+								costFwd = costRev;
+							}
+						}
+
+						newCost = costFwd;
+						int delta = newCost - currentCosts[mi];
+						if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
+							if (delta > 0) saAccept++;
+							Array.Copy(orOptBuf, order, M);
+							currentCosts[mi] = newCost;
+							if (newCost < bestCosts[mi]) {
+								bestCosts[mi] = newCost;
+								bestOrders[mi] = (int[])order.Clone();
+								info.Up++;
+							}
+						} else {
+							// 元に戻す
+							Array.Copy(order, orOptBuf, M);
+						}
 					}
-				}
-			}
 		}
 		info.Loop += iter;
 		info.Depth = saAccept;
@@ -2035,6 +2093,292 @@ SkipS7:;
 		}
 
 		return Plan3(isLocal, sw, rnd, input, info);
+	}
+
+	static State Plan11(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info, State best)
+	{
+		if (best.Macro == null || best.Macro.Length == 0) {
+			return best;
+		}
+
+		if (!TryAnalyzePlan11Baseline(isLocal, input, best, out var order, out var snapshots)) {
+			return best;
+		}
+
+		double deadline = Math.Min(1985.0, input.T - 1);
+		if (sw.Elapsed.TotalMilliseconds >= deadline) {
+			return best;
+		}
+
+		var macroDest = BuildMacroDest(input, best.Macro);
+		var bestState = best;
+		long bestScore = best.Calculate();
+
+		for (int startIndex = order.Length - 1; startIndex >= 0; startIndex--) {
+			if (sw.Elapsed.TotalMilliseconds >= deadline) break;
+
+			for (int qi = order.Length - 1; qi >= startIndex; qi--) {
+				if (sw.Elapsed.TotalMilliseconds >= deadline) break;
+
+				int k = order[qi];
+				var baseSnapshot = snapshots[startIndex];
+				var (si, sj) = baseSnapshot.Balls[k];
+				var (ti, tj) = (input.Balls[k].d, input.Balls[k].e);
+				if (si < 0 || (si == ti && sj == tj)) continue;
+
+				if (!IsOccupiedByOtherBall(baseSnapshot, input, k, ti, tj)) {
+					var snapshot = CloneState(baseSnapshot, input, isLocal);
+					if (TryInsertBallMoveToCell(input, snapshot, k, ti, tj, macroDest)) {
+						var skipBalls = new bool[input.M];
+						skipBalls[k] = true;
+						var candidate = BuildPlan11Tail(isLocal, input, snapshot, order, startIndex, skipBalls, macroDest, sw, deadline);
+						if (candidate != null) {
+							long score = candidate.Calculate();
+							if (score < bestScore) {
+								bestScore = score;
+								bestState = candidate;
+							}
+						}
+					}
+				}
+
+				foreach (var relay in EnumeratePlan11RelayTargets(input, baseSnapshot, k, ti, tj, macroDest, 8)) {
+					if (sw.Elapsed.TotalMilliseconds >= deadline) break;
+
+					var snapshot = CloneState(baseSnapshot, input, isLocal);
+					if (!TryInsertBallMoveToCell(input, snapshot, k, relay.i, relay.j, macroDest)) continue;
+
+					var candidate = BuildPlan11Tail(isLocal, input, snapshot, order, startIndex, new bool[input.M], macroDest, sw, deadline);
+					if (candidate == null) continue;
+
+					long score = candidate.Calculate();
+					if (score < bestScore) {
+						bestScore = score;
+						bestState = candidate;
+					}
+				}
+			}
+		}
+
+		if (!ReferenceEquals(bestState, best)) {
+			info.Up++;
+		}
+
+		return bestState;
+	}
+
+	static State CloneState(State source, Input input, bool isLocal)
+	{
+		var clone = new State(input, isLocal) {
+			Robo = source.Robo,
+			Direction = source.Direction,
+			TakeBall = source.TakeBall,
+			IsMacro = source.IsMacro,
+			Macro = (char[])source.Macro.Clone(),
+		};
+		for (int k = 0; k < input.M; k++) {
+			clone.Balls[k] = source.Balls[k];
+		}
+		clone.Ops.AddRange(source.Ops);
+		clone.NextMacro.AddRange(source.NextMacro);
+		return clone;
+	}
+
+	static bool TryAnalyzePlan11Baseline(bool isLocal, Input input, State best, out int[] order, out State[] snapshots)
+	{
+		var replay = new State(input, isLocal);
+		var orderList = new List<int>();
+		var snapshotList = new List<State>();
+		int macroToggle = 0;
+
+		foreach (var op in best.Ops) {
+			int prevTake = replay.TakeBall;
+			replay.AddOp(op);
+
+			if (op == 'M') {
+				macroToggle++;
+				if (macroToggle == 2) {
+					snapshotList.Add(CloneState(replay, input, isLocal));
+				}
+				continue;
+			}
+
+			if (macroToggle < 2 || op != 'S') continue;
+
+			if (prevTake == -1 && replay.TakeBall >= 0) {
+				orderList.Add(replay.TakeBall);
+			} else if (prevTake >= 0 && replay.TakeBall == -1) {
+				snapshotList.Add(CloneState(replay, input, isLocal));
+			} else {
+				order = [];
+				snapshots = [];
+				return false;
+			}
+		}
+
+		if (orderList.Count == 0 || snapshotList.Count < orderList.Count) {
+			order = [];
+			snapshots = [];
+			return false;
+		}
+
+		order = orderList.ToArray();
+		if (snapshotList.Count > order.Length) {
+			snapshotList.RemoveRange(order.Length, snapshotList.Count - order.Length);
+		}
+		snapshots = snapshotList.ToArray();
+		return snapshots.Length == order.Length;
+	}
+
+	static (int i, int j, Direction4 dir, bool ok)[,,] BuildMacroDest(Input input, char[] macro)
+	{
+		int N = input.N;
+		var dirs = new[] { Direction4.D, Direction4.L, Direction4.U, Direction4.R };
+		var dest = new (int i, int j, Direction4 dir, bool ok)[N, N, 4];
+		for (int i = 0; i < N; i++) {
+			for (int j = 0; j < N; j++) {
+				foreach (var dir in dirs) {
+					int nr = i, nc = j;
+					Direction4 nd = dir;
+					bool ok = true;
+					foreach (var op in macro) {
+						switch (op) {
+							case 'F':
+								if (!input.Map.CanMove(nr, nc, nd)) {
+									ok = false;
+								} else {
+									var mv = nd.Move(nr, nc);
+									nr = mv.i;
+									nc = mv.j;
+								}
+								break;
+							case 'L':
+								nd = nd.Rotate(Rotation.L);
+								break;
+							case 'R':
+								nd = nd.Rotate(Rotation.R);
+								break;
+						}
+						if (!ok) break;
+					}
+					dest[i, j, dir.ToIndex4()] = (nr, nc, nd, ok);
+				}
+			}
+		}
+		return dest;
+	}
+
+	static bool IsOccupiedByOtherBall(State state, Input input, int exceptBall, int ti, int tj)
+	{
+		for (int t = 0; t < input.M; t++) {
+			if (t == exceptBall) continue;
+			if (state.Balls[t].i == ti && state.Balls[t].j == tj) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	static List<(int i, int j)> EnumeratePlan11RelayTargets(Input input, State state, int k, int ti, int tj,
+		(int i, int j, Direction4 dir, bool ok)[,,] macroDest, int limit)
+	{
+		int N = input.N;
+		var (si, sj) = state.Balls[k];
+		var scores = new Dictionary<int, (int dirCount, int heuristic)>();
+		for (int i = 0; i < N; i++) {
+			for (int j = 0; j < N; j++) {
+				int dirCount = 0;
+				for (int d = 0; d < 4; d++) {
+					var dest = macroDest[i, j, d];
+					if (dest.ok && dest.i == ti && dest.j == tj) {
+						dirCount++;
+					}
+				}
+				if (dirCount == 0) continue;
+				if (i == ti && j == tj) continue;
+				if (i == si && j == sj) continue;
+				if (IsOccupiedByOtherBall(state, input, k, i, j)) continue;
+
+				int key = i * N + j;
+				int heuristic = Math.Abs(i - si) + Math.Abs(j - sj) + Math.Abs(i - ti) + Math.Abs(j - tj);
+				scores[key] = (dirCount, heuristic);
+			}
+		}
+
+		return scores
+			.OrderByDescending(x => x.Value.dirCount)
+			.ThenBy(x => x.Value.heuristic)
+			.Take(limit)
+			.Select(x => (x.Key / N, x.Key % N))
+			.ToList();
+	}
+
+	static bool TryInsertBallMoveToCell(Input input, State state, int k, int ti, int tj, (int i, int j, Direction4 dir, bool ok)[,,] macroDest)
+	{
+		int N = input.N;
+		var macrodist = new int[N, N, 4];
+		var macroprev = new (int i, int j, Direction4 dir, char op)[N, N, 4];
+		var macroQue = new Queue<int>();
+		var macroStamp = new int[N, N, 4];
+		int macroCurrentStamp = 0;
+		var routeBuf = new char[N * N * 4 * 8];
+
+		var (si, sj) = state.Balls[k];
+		var pPick = MacroBfs(input, input.Map, state.Robo.i, state.Robo.j, state.Direction,
+			si, sj, macroDest, macrodist, macroprev, macroQue, macroStamp,
+			ref macroCurrentStamp, int.MaxValue / 4, routeBuf);
+		if (pPick == null) return false;
+		ApplyPath(state, pPick);
+		state.Exchange();
+		if (state.TakeBall != k) return false;
+
+		var pDrop = MacroBfs(input, input.Map, state.Robo.i, state.Robo.j, state.Direction,
+			ti, tj, macroDest, macrodist, macroprev, macroQue, macroStamp,
+			ref macroCurrentStamp, int.MaxValue / 4, routeBuf);
+		if (pDrop == null) return false;
+		ApplyPath(state, pDrop);
+		state.Exchange();
+		return state.Balls[k].i == ti && state.Balls[k].j == tj && state.TakeBall == -1;
+	}
+
+	static State BuildPlan11Tail(bool isLocal, Input input, State prefixState, int[] order, int startIndex, bool[] skipBalls,
+		(int i, int j, Direction4 dir, bool ok)[,,] macroDest, Stopwatch sw, double deadline)
+	{
+		int N = input.N;
+		var state = CloneState(prefixState, input, isLocal);
+		var macrodist = new int[N, N, 4];
+		var macroprev = new (int i, int j, Direction4 dir, char op)[N, N, 4];
+		var macroQue = new Queue<int>();
+		var macroStamp = new int[N, N, 4];
+		int macroCurrentStamp = 0;
+		var routeBuf = new char[N * N * 4 * 8];
+
+		for (int oi = startIndex; oi < order.Length; oi++) {
+			if (sw.Elapsed.TotalMilliseconds >= deadline) return null;
+
+			int k = order[oi];
+			if (skipBalls[k]) continue;
+
+			var (si, sj) = state.Balls[k];
+			var (ti, tj) = (input.Balls[k].d, input.Balls[k].e);
+			if (si == ti && sj == tj) continue;
+
+			var pPick = MacroBfs(input, input.Map, state.Robo.i, state.Robo.j, state.Direction,
+				si, sj, macroDest, macrodist, macroprev, macroQue, macroStamp,
+				ref macroCurrentStamp, int.MaxValue / 4, routeBuf);
+			if (pPick == null) return null;
+			ApplyPath(state, pPick);
+			state.Exchange();
+
+			var pDrop = MacroBfs(input, input.Map, state.Robo.i, state.Robo.j, state.Direction,
+				ti, tj, macroDest, macrodist, macroprev, macroQue, macroStamp,
+				ref macroCurrentStamp, int.MaxValue / 4, routeBuf);
+			if (pDrop == null) return null;
+			ApplyPath(state, pDrop);
+			state.Exchange();
+		}
+
+		return state;
 	}
 
 
@@ -2476,3 +2820,4 @@ public class Input
 		}
 	}
 }
+
