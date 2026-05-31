@@ -11,7 +11,7 @@ public class Program
 	static void Main()
 	{
 		HeuristicHelper.RunCases(
-			runCaseCount: 100,
+			runCaseCount: 10,
 			testCaseCount: 50,
 			isParallel: false,
 			i => Run(i),
@@ -30,7 +30,7 @@ public class Program
 						$"D={info.Depth:d4}",
 						//$"ML={info.ML:d3}",
 						//$"RA={info.RA:d5}",
-						$"A={info.A:d5}",
+						$"A={info.A:d4}",
 						$"score={info.Score:d5}",
 						$"elapsed={info.Elapsed:d4}",
 						$"M={info.Macro}",
@@ -68,15 +68,17 @@ public class Program
 			best = Plan2(isLocal, sw, rnd, input, info, best);
 		}*/
 
-		var state6 = Plan6(isLocal, sw, rnd, input, info);
+		//var state6 = Plan6(isLocal, sw, rnd, input, info);
 		//if (state6.Ops.Count < best.Ops.Count) {
 		//best = state6;
 		//info.P = 6;
 		//}
 
-		var state7 = Plan7(isLocal, sw, rnd, input, info);
-		best = state7;
-		info.P = 7;
+		var state8 = Plan8(isLocal, sw, rnd, input, info);
+		if (state8.Ops.Count < best.Ops.Count) {
+			best = state8;
+			info.P = 8;
+		}
 
 		/*
 		var state5 = Plan5(isLocal, sw, rnd, input, info);
@@ -792,6 +794,17 @@ SkipS:;
 		const int MACRO_MIN = 3;
 		const int MACRO_MAX = 10;
 
+		// 事前計算: 各セルへの「任意の籠から来られる最短距離」(= 籠→ボールコスト下限)
+		int[] minDistFromAnyGoal = new int[N * N];
+		for (int pos = 0; pos < N * N; pos++) minDistFromAnyGoal[pos] = 999999;
+		for (int k = 0; k < M; k++) {
+			int gp = input.Balls[k].d * N + input.Balls[k].e;
+			for (int pos = 0; pos < N * N; pos++) {
+				if (rawDist[gp, pos] < minDistFromAnyGoal[pos])
+					minDistFromAnyGoal[pos] = rawDist[gp, pos];
+			}
+		}
+
 		BeamNode7 initialNode = new BeamNode7 {
 			Robo = (0, 0),
 			Dir = Direction4.R,
@@ -839,22 +852,15 @@ SkipS:;
 			if (minDistToAnyBall == int.MaxValue) minDistToAnyBall = 0;
 			if (node.TakeBall != -1) minDistToAnyBall = 0;
 
-			// マクロ作成コスト相殺: 記録中/完成時はM2回分+マクロ長をopsCountから引いて評価を公平にする
 			int effectiveOps = node.OpsCount;
-			if (node.MacroState == 1) {
-				// 記録中: まだ完成していないが将来Pで回収できる見込みとして軽く優遇
-				effectiveOps -= (2 + node.MacroContent.Length);
-			} else if (node.MacroState == 2) {
-				// 完成: 2M+マクロ長分は投資と見なして相殺
+			if (node.MacroState == 1 || node.MacroState == 2) {
 				effectiveOps -= (2 + node.MacroContent.Length);
 			}
 
-			int score = effectiveOps
+			return effectiveOps
 				- completedCount * 10000
-				+ ballTargetCost * 10
-				+ minDistToAnyBall * 2;
-			if (node.TakeBall != -1) score -= 50;
-			return score;
+				+ ballTargetCost * 8
+				+ minDistToAnyBall * 5;
 		}
 
 		initialNode.EvalScore = ComputeEvalScore7(initialNode);
@@ -1213,6 +1219,380 @@ SkipS7:;
 			}
 			info.ML = bestMacro.Length;
 			info.Macro = bestMacro;
+			return state;
+		}
+
+		return Plan3(isLocal, sw, rnd, input, info);
+	}
+
+	static State Plan8(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		int N = input.N;
+		int M = input.M;
+
+		// マクロ候補：直進 + 両端ターン + 先頭/末尾ターン + 中間ターン
+		var macroList = new[] {
+			// 純直進
+			"FF", "FFF", "FFFF", "FFFFF", "FFFFFF", "FFFFFFF",
+			// 両端ターン（最多パターン）
+			"LFFFR", "RFFFL",
+			"LFFFFR", "RFFFFL",
+			"LLFFFR", "RRFFFL",
+			"LFFFRR", "RFFFLL",
+			"LLFFFFL", "RRFFFFR",
+			"LFFFFFL", "RFFFFFL",
+			// 先頭/末尾のみターン
+			"LFFFFF", "RFFFFF",
+			"FFFFFL", "FFFFFR",
+			"FFFFFFL", "FFFFFFR",
+			"LLFFFFF", "RRFFFFF",
+			// 中間ターン
+			"FFLFFF", "FFRFFF",
+			"FFFLFF", "FFFRFF",
+			"FFL", "FFR", "FFFL", "FFFR",
+		};
+		var dirs = new[] { Direction4.D, Direction4.L, Direction4.U, Direction4.R };
+
+		// 各マクロの macroDest を事前計算（F/L/R すべて対応）
+		var macroDestAll = new (int i, int j, Direction4 dir, bool ok)[macroList.Length][,,];
+		for (int mi = 0; mi < macroList.Length; mi++) {
+			var mac = macroList[mi];
+			var dest = new (int i, int j, Direction4 dir, bool ok)[N, N, 4];
+			for (int i = 0; i < N; i++) {
+				for (int j = 0; j < N; j++) {
+					foreach (var dir in dirs) {
+						int nr = i, nc = j;
+						Direction4 nd = dir;
+						bool mOk = true;
+						foreach (var op in mac) {
+							switch (op) {
+								case 'F':
+									if (!input.Map.CanMove(nr, nc, nd)) { mOk = false; } else { var mv = nd.Move(nr, nc); nr = mv.i; nc = mv.j; }
+									break;
+								case 'L': nd = nd.Rotate(Rotation.L); break;
+								case 'R': nd = nd.Rotate(Rotation.R); break;
+							}
+							if (!mOk) break;
+						}
+						dest[i, j, dir.ToIndex4()] = (nr, nc, nd, mOk);
+					}
+				}
+			}
+			macroDestAll[mi] = dest;
+		}
+
+		// BFS スクラッチバッファ（前計算・2-opt・最終パス構築 共用）
+		var macrodist = new int[N, N, 4];
+		var macroprev = new (int i, int j, Direction4 dir, char op)[N, N, 4];
+		var macroQue = new Queue<int>();
+		var macroStamp = new int[N, N, 4];
+		int macroCurrentStamp = 0;
+		var routeBuf = new char[N * N * 4 * 8];
+
+		// キーノード: origin(0), pick(1..M), drop(M+1..2M)
+		int K = 1 + M * 2;
+		(int i, int j)[] keyPos = new (int, int)[K];
+		keyPos[0] = (0, 0);
+		for (int k = 0; k < M; k++) {
+			keyPos[1 + k] = (input.Balls[k].b, input.Balls[k].c);
+			keyPos[1 + M + k] = (input.Balls[k].d, input.Balls[k].e);
+		}
+
+		// マクロ毎にキーノード間の最短距離行列を前計算
+		// nodeDist[from, fromDirIdx, to] = 最小コスト
+		// nodeArrDir[from, fromDirIdx, to] = to 到着時の方向index
+		double precompDeadline = Math.Min(sw.Elapsed.TotalMilliseconds + 800.0, 1200.0);
+		var nodeDistAll = new int[macroList.Length][,,];
+		var nodeArrDirAll = new int[macroList.Length][,,];
+		var macroEnabled = new bool[macroList.Length];
+
+		var fullDist = new int[N, N, 4];
+		var fullStamp = new int[N, N, 4];
+		int fullStampVal = 0;
+
+		for (int mi = 0; mi < macroList.Length; mi++) {
+			if (mi > 0 && sw.Elapsed.TotalMilliseconds > precompDeadline) break;
+			var macroDest = macroDestAll[mi];
+			var nodeDist = new int[K, 4, K];
+			var nodeArrDir = new int[K, 4, K];
+			for (int a = 0; a < K; a++)
+				for (int d = 0; d < 4; d++)
+					for (int b = 0; b < K; b++)
+						nodeDist[a, d, b] = (a == b) ? 0 : int.MaxValue / 2;
+
+			// from キーノード × 4方向 の個別単一始点 BFS
+			for (int from = 0; from < K; from++) {
+				var (fi, fj) = keyPos[from];
+				for (int startDirIdx = 0; startDirIdx < 4; startDirIdx++) {
+					++fullStampVal;
+					int fcs = fullStampVal;
+					macroQue.Clear();
+					fullDist[fi, fj, startDirIdx] = 0;
+					fullStamp[fi, fj, startDirIdx] = fcs;
+					macroQue.Enqueue((fi << 8) | (fj << 2) | startDirIdx);
+
+					while (macroQue.Count > 0) {
+						int cVal = macroQue.Dequeue();
+						int ci = cVal >> 8;
+						int cj = (cVal >> 2) & 0x3F;
+						int cIdx = cVal & 3;
+						Direction4 cdir = cIdx.FromIndex4();
+						int d2 = fullDist[ci, cj, cIdx];
+
+						void Push2(int ni, int nj, Direction4 ndir)
+						{
+							int nIdx = ndir.ToIndex4();
+							if (fullStamp[ni, nj, nIdx] != fcs || fullDist[ni, nj, nIdx] > d2 + 1) {
+								fullDist[ni, nj, nIdx] = d2 + 1;
+								fullStamp[ni, nj, nIdx] = fcs;
+								macroQue.Enqueue((ni << 8) | (nj << 2) | nIdx);
+							}
+						}
+
+						if (input.Map.CanMove(ci, cj, cdir)) {
+							var nPos = cdir.Move(ci, cj);
+							Push2(nPos.i, nPos.j, cdir);
+						}
+						Push2(ci, cj, cdir.Rotate(Rotation.L));
+						Push2(ci, cj, cdir.Rotate(Rotation.R));
+						var dest = macroDest[ci, cj, cIdx];
+						if (dest.ok) Push2(dest.i, dest.j, dest.dir);
+					}
+
+					// 各 to キーノードへの最小コストと到着方向を取り出す
+					for (int to = 0; to < K; to++) {
+						if (from == to) continue;
+						var (ti2, tj2) = keyPos[to];
+						int best = int.MaxValue / 2;
+						int bestArrDir = 0;
+						for (int d = 0; d < 4; d++) {
+							if (fullStamp[ti2, tj2, d] == fcs && fullDist[ti2, tj2, d] < best) {
+								best = fullDist[ti2, tj2, d];
+								bestArrDir = d;
+							}
+						}
+						nodeDist[from, startDirIdx, to] = best;
+						nodeArrDir[from, startDirIdx, to] = bestArrDir;
+					}
+				}
+			}
+			nodeDistAll[mi] = nodeDist;
+			nodeArrDirAll[mi] = nodeArrDir;
+			macroEnabled[mi] = true;
+		}
+
+		// 前計算テーブルで order の巡回コストを方向追跡しながら O(M) で計算
+		int CalcOrderCost(int[] order, int[,,] nd, int[,,] nad)
+		{
+			int cost = 0;
+			int curNode = 0;
+			int curDir = Direction4.D.ToIndex4(); // 初期方向はD
+			for (int i = 0; i < M; i++) {
+				int kk = order[i];
+				int pickNode = 1 + kk;
+				int dropNode = 1 + M + kk;
+				cost += nd[curNode, curDir, pickNode];
+				curDir = nad[curNode, curDir, pickNode];
+				cost += nd[pickNode, curDir, dropNode];
+				curDir = nad[pickNode, curDir, dropNode];
+				curNode = dropNode;
+			}
+			return cost;
+		}
+
+		// 貪欲初期順列（方向追跡あり）
+		int[] MakeGreedyOrder(int[,,] nd, int[,,] nad)
+		{
+			var order = new int[M];
+			var used = new bool[M];
+			int curNode = 0;
+			int curDir = Direction4.D.ToIndex4();
+			for (int i = 0; i < M; i++) {
+				int best = -1; int bestD = int.MaxValue;
+				for (int kk = 0; kk < M; kk++) {
+					if (used[kk]) continue;
+					int d2 = nd[curNode, curDir, 1 + kk];
+					if (d2 < bestD) { bestD = d2; best = kk; }
+				}
+				order[i] = best;
+				used[best] = true;
+				int pickDir = nad[curNode, curDir, 1 + best];
+				curDir = nad[1 + best, pickDir, 1 + M + best];
+				curNode = 1 + M + best;
+			}
+			return order;
+		}
+
+		// 各マクロのベスト訪問順とコストを保持
+		var bestOrders = new int[macroList.Length][];
+		var bestCosts = new int[macroList.Length];
+		var currentOrders = new int[macroList.Length][];
+		var currentCosts = new int[macroList.Length];
+
+		for (int mi = 0; mi < macroList.Length; mi++) {
+			if (!macroEnabled[mi]) continue;
+			var ord = MakeGreedyOrder(nodeDistAll[mi], nodeArrDirAll[mi]);
+			int c = CalcOrderCost(ord, nodeDistAll[mi], nodeArrDirAll[mi]);
+			bestOrders[mi] = (int[])ord.Clone();
+			bestCosts[mi] = c;
+			currentOrders[mi] = (int[])ord.Clone();
+			currentCosts[mi] = c;
+		}
+
+		// ---- 2-opt（前計算テーブルで方向追跡 O(M) 評価、絶対時刻 1700ms まで）----
+		// 時間経過とともに有望なマクロに絞り込む
+		// 前計算完了時点の有効マクロ数を記録（W=絞り込み前）
+		info.Width = 0;
+		for (int i = 0; i < macroList.Length; i++)
+			if (macroEnabled[i]) info.Width++;
+
+		// 焼き鈍し: 初期温度は有効マクロの初期コスト平均の 5%、終了温度 0.1
+		double saStartMs = sw.Elapsed.TotalMilliseconds;
+		const double saEndMs = 1700.0;
+		double initTemp;
+		{
+			double sum = 0; int cnt = 0;
+			for (int i = 0; i < macroList.Length; i++)
+				if (macroEnabled[i]) { sum += bestCosts[i]; cnt++; }
+			initTemp = cnt > 0 ? sum / cnt * 0.20 : 50.0;
+		}
+		const double endTemp = 0.01;
+		// W=初期温度(整数), D=SA悪化受理回数
+		info.Width = (int)initTemp;
+		int saAccept = 0;
+
+		int pruneIter = 0;
+		int iter = 0;
+		while (true) {
+			double elapsed = sw.Elapsed.TotalMilliseconds;
+			if (elapsed >= saEndMs) break;
+			double progress = (elapsed - saStartMs) / (saEndMs - saStartMs);
+			double temp = initTemp * Math.Pow(endTemp / initTemp, progress);
+
+			int mi = iter % macroList.Length;
+			iter++;
+			if (!macroEnabled[mi] || currentOrders[mi] == null) continue;
+
+			// 一定間隔で絞り込み判定
+			if (iter - pruneIter >= 500) {
+				pruneIter = iter;
+				if (elapsed > 900.0) {
+					int globalMin = int.MaxValue;
+					for (int i = 0; i < macroList.Length; i++)
+						if (macroEnabled[i] && bestCosts[i] < globalMin)
+							globalMin = bestCosts[i];
+					double threshold = elapsed < 1300.0 ? 1.1 : 1.03;
+					for (int i = 0; i < macroList.Length; i++)
+						if (macroEnabled[i] && bestCosts[i] > globalMin * threshold)
+							macroEnabled[i] = false;
+				}
+			}
+
+			var order = currentOrders[mi];
+			var nd = nodeDistAll[mi];
+			var nad = nodeArrDirAll[mi];
+
+			int p1 = rnd.Next(M);
+			int p2 = rnd.Next(M);
+			if (p1 == p2) continue;
+			if (p1 > p2) (p1, p2) = (p2, p1);
+
+			Array.Reverse(order, p1, p2 - p1 + 1);
+			int newCost = CalcOrderCost(order, nd, nad);
+			int delta = newCost - currentCosts[mi];
+			if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
+				if (delta > 0) saAccept++;
+				currentCosts[mi] = newCost;
+				if (newCost < bestCosts[mi]) {
+					bestCosts[mi] = newCost;
+					bestOrders[mi] = (int[])order.Clone();
+					info.Up++;
+				}
+			} else {
+				Array.Reverse(order, p1, p2 - p1 + 1);
+			}
+		}
+		info.Loop += iter;
+		info.Depth = saAccept;
+
+		// ---- Step 3: 各マクロのベスト訪問順で State 構築用パスを計算 ----
+		int globalBestScore = int.MaxValue;
+		string globalBestMacro = null;
+		int[] globalBestOrder = null;
+		char[][] globalBestPickPaths = null;
+		char[][] globalBestDropPaths = null;
+
+		var pickPaths = new char[M][];
+		var dropPaths = new char[M][];
+
+		for (int mi = 0; mi < macroList.Length; mi++) {
+			if (!macroEnabled[mi] || bestOrders[mi] == null) continue;
+			if (sw.Elapsed.TotalMilliseconds > 1880.0) break;
+			var mac = macroList[mi];
+			var macroDest = macroDestAll[mi];
+			var order = bestOrders[mi];
+
+			var state = new State(input, isLocal);
+			state.AddOp('M');
+			foreach (var c in mac) state.AddOp(c);
+			state.AddOp('M');
+
+			int currentScore = 0;
+			bool ok = true;
+
+			for (int oi = 0; oi < M; oi++) {
+				int k = order[oi];
+				var (si, sj, ti, tj) = input.Balls[k];
+
+				var pPick = MacroBfs(input, input.Map, state.Robo.i, state.Robo.j, state.Direction,
+					si, sj, macroDest, macrodist, macroprev, macroQue, macroStamp,
+					ref macroCurrentStamp, globalBestScore - currentScore, routeBuf);
+				if (pPick == null) { ok = false; break; }
+				currentScore += pPick.Length;
+				if (currentScore >= globalBestScore) { ok = false; break; }
+				foreach (var op in pPick) state.AddOp(op);
+				pickPaths[k] = pPick;
+				state.Exchange();
+
+				var pDrop = MacroBfs(input, input.Map, state.Robo.i, state.Robo.j, state.Direction,
+					ti, tj, macroDest, macrodist, macroprev, macroQue, macroStamp,
+					ref macroCurrentStamp, globalBestScore - currentScore, routeBuf);
+				if (pDrop == null) { ok = false; break; }
+				currentScore += pDrop.Length;
+				if (currentScore >= globalBestScore) { ok = false; break; }
+				foreach (var op in pDrop) state.AddOp(op);
+				dropPaths[k] = pDrop;
+				state.Exchange();
+			}
+
+			if (ok && currentScore < globalBestScore) {
+				globalBestScore = currentScore;
+				globalBestMacro = mac;
+				globalBestOrder = (int[])order.Clone();
+				globalBestPickPaths = new char[M][];
+				globalBestDropPaths = new char[M][];
+				for (int k = 0; k < M; k++) {
+					globalBestPickPaths[k] = (char[])pickPaths[k].Clone();
+					globalBestDropPaths[k] = (char[])dropPaths[k].Clone();
+				}
+				//++info.Up;
+			}
+		}
+
+		// ---- Step 4: 最良の (マクロ, 訪問順) で State 構築 ----
+		if (globalBestMacro != null) {
+			var state = new State(input, isLocal);
+			state.AddOp('M');
+			foreach (var c in globalBestMacro) state.AddOp(c);
+			state.AddOp('M');
+			foreach (int k in globalBestOrder) {
+				ApplyPath(state, globalBestPickPaths[k]);
+				state.Exchange();
+				ApplyPath(state, globalBestDropPaths[k]);
+				state.Exchange();
+			}
+			info.Macro = globalBestMacro;
+			info.ML = globalBestMacro.Length;
 			return state;
 		}
 
