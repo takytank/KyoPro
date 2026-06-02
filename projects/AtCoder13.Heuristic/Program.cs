@@ -87,11 +87,18 @@ public class Program
 			info.P = 9;
 		}
 
+		/*
 		var state11 = Plan11(isLocal, sw, rnd, input, info, state9);
 		if (state11.Ops.Count < best.Ops.Count) {
 			best = state11;
 			info.P = 11;
 		}
+		*/
+		var state12 = Plan12(isLocal, sw, rnd, input, info, state9);
+		//if (state12.Ops.Count < best.Ops.Count) {
+		best = state12;
+		info.P = 12;
+		//}
 
 		/*
 		var state5 = Plan5(isLocal, sw, rnd, input, info);
@@ -102,6 +109,8 @@ public class Program
 
 		input.Output(best);
 
+		info.Macro = best.Macro == null ? "" : new string(best.Macro);
+		info.ML = best.Macro == null ? 0 : best.Macro.Length;
 		info.A = best.Ops.Count;
 		info.Score = best.Calculate();
 		info.Elapsed = sw.ElapsedMilliseconds;
@@ -146,6 +155,61 @@ public class Program
 		}
 
 		return state;
+	}
+
+	static State Plan12(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info, State state9)
+	{
+		double deadline = 1980.0;
+		if (sw.Elapsed.TotalMilliseconds >= deadline) return state9;
+
+		var graph = BuildPlan12Graph(input);
+		int[] order;
+		if (!TryAnalyzePlan11Baseline(isLocal, input, state9, out order, out _)) {
+			order = Enumerable.Range(0, input.M).ToArray();
+		}
+
+		var preferredMacro = state9.Macro == null ? "" : new string(state9.Macro);
+		var macroCandidates = ExtractPlan12MacroCandidates(input, graph, preferredMacro);
+		var bestState = state9;
+		long bestScore = state9.Calculate();
+		string bestMacro = preferredMacro;
+		int bestRelayCount = 0;
+
+		foreach (var macro in macroCandidates) {
+			if (sw.Elapsed.TotalMilliseconds >= deadline) break;
+			if (string.IsNullOrEmpty(macro)) continue;
+
+			var macroDest = BuildMacroDest(input, macro.ToCharArray());
+			var relayCandidates = EnumeratePlan12RelayCandidates(input, graph, macroDest, 6);
+			var rollingOrder = RefinePlan12OrderRollingHorizon(isLocal, input, order, macroDest, relayCandidates, sw, deadline);
+			var candidate = BuildPlan12InitialState(isLocal, input, rollingOrder, macro, macroDest, relayCandidates, sw, deadline, out int relayCount);
+			if (candidate == null) continue;
+
+			var improvedOrder = ImprovePlan12OrderLns(isLocal, rnd, input, rollingOrder, macro, macroDest, relayCandidates, candidate.Calculate(), sw, deadline);
+			if (improvedOrder != null) {
+				var improved = BuildPlan12InitialState(isLocal, input, improvedOrder, macro, macroDest, relayCandidates, sw, deadline, out int improvedRelayCount);
+				if (improved != null && improved.Calculate() < candidate.Calculate()) {
+					candidate = improved;
+					relayCount = improvedRelayCount;
+				}
+			}
+
+			long score = candidate.Calculate();
+			if (score < bestScore) {
+				bestScore = score;
+				bestState = candidate;
+				bestMacro = macro;
+				bestRelayCount = relayCount;
+			}
+		}
+
+		if (!ReferenceEquals(bestState, state9)) {
+			info.RA = bestRelayCount;
+			info.Macro = bestMacro;
+			info.ML = bestMacro.Length;
+		}
+
+		return bestState;
 	}
 
 	static State Plan2(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info, State temp)
@@ -1901,113 +1965,113 @@ SkipS7:;
 			var nad = nodeArrDirAll[mi];
 
 			int newCost;
-				// iter % 3 == 0: 2-opt、1: or-opt-1（1要素移動）、2: or-opt-2（2要素セグメント移動）
-				int moveType = iter % 3;
-				if (moveType == 0) {
-					// 2-opt
-					int p1 = rnd.Next(M);
-					int p2 = rnd.Next(M);
-					if (p1 == p2) continue;
-					if (p1 > p2) (p1, p2) = (p2, p1);
+			// iter % 3 == 0: 2-opt、1: or-opt-1（1要素移動）、2: or-opt-2（2要素セグメント移動）
+			int moveType = iter % 3;
+			if (moveType == 0) {
+				// 2-opt
+				int p1 = rnd.Next(M);
+				int p2 = rnd.Next(M);
+				if (p1 == p2) continue;
+				if (p1 > p2) (p1, p2) = (p2, p1);
 
-					Array.Reverse(order, p1, p2 - p1 + 1);
-					newCost = CalcOrderCost(order, nd, nad);
-					int delta = newCost - currentCosts[mi];
-					if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
-						if (delta > 0) saAccept++;
-						currentCosts[mi] = newCost;
-						if (newCost < bestCosts[mi]) {
-							bestCosts[mi] = newCost;
-							bestOrders[mi] = (int[])order.Clone();
-							info.Up++;
-						}
-					} else {
-						Array.Reverse(order, p1, p2 - p1 + 1);
-					}
-				} else if (moveType == 1) {
-					// or-opt-1: 位置 src の1要素を別位置に挿入
-					if (M < 2) continue;
-					int src = rnd.Next(M);
-					int dst = rnd.Next(M - 1);
-					if (dst >= src) dst++;
-					if (src == dst) continue;
-
-					int elem = order[src];
-					int idx = 0;
-					for (int i = 0; i < M; i++) {
-						if (i == src) continue;
-						orOptBuf[idx++] = order[i];
-					}
-					int insertPos = dst < src ? dst + 1 : dst;
-					for (int i = M - 1; i > insertPos; i--)
-						orOptBuf[i] = orOptBuf[i - 1];
-					orOptBuf[insertPos] = elem;
-
-					newCost = CalcOrderCost(orOptBuf, nd, nad);
-					int delta = newCost - currentCosts[mi];
-					if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
-						if (delta > 0) saAccept++;
-						Array.Copy(orOptBuf, order, M);
-						currentCosts[mi] = newCost;
-						if (newCost < bestCosts[mi]) {
-							bestCosts[mi] = newCost;
-							bestOrders[mi] = (int[])order.Clone();
-							info.Up++;
-						}
+				Array.Reverse(order, p1, p2 - p1 + 1);
+				newCost = CalcOrderCost(order, nd, nad);
+				int delta = newCost - currentCosts[mi];
+				if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
+					if (delta > 0) saAccept++;
+					currentCosts[mi] = newCost;
+					if (newCost < bestCosts[mi]) {
+						bestCosts[mi] = newCost;
+						bestOrders[mi] = (int[])order.Clone();
+						info.Up++;
 					}
 				} else {
-					// or-opt-2: 連続2要素セグメント [src, src+1] を別位置に挿入（正順・逆順の両方を試す）
-						if (M < 3) continue;
-						int src = rnd.Next(M - 1); // セグメント先頭インデックス
-						// 挿入先: セグメントを除いた M-2 要素の配列上の挿入インデックス (0 ~ M-3)
-						int insertPos = rnd.Next(M - 2);
+					Array.Reverse(order, p1, p2 - p1 + 1);
+				}
+			} else if (moveType == 1) {
+				// or-opt-1: 位置 src の1要素を別位置に挿入
+				if (M < 2) continue;
+				int src = rnd.Next(M);
+				int dst = rnd.Next(M - 1);
+				if (dst >= src) dst++;
+				if (src == dst) continue;
 
-						int e0 = order[src];
-						int e1 = order[src + 1];
-						// セグメントを除いた残りを orOptBuf に詰める
-						int idx = 0;
-						for (int i = 0; i < M; i++) {
-							if (i == src || i == src + 1) continue;
-							orOptBuf[idx++] = order[i];
-						}
-						// insertPos+1 以降を後ろにシフト (2つ分)
-						for (int i = M - 1; i >= insertPos + 3; i--)
-							orOptBuf[i] = orOptBuf[i - 2];
+				int elem = order[src];
+				int idx = 0;
+				for (int i = 0; i < M; i++) {
+					if (i == src) continue;
+					orOptBuf[idx++] = order[i];
+				}
+				int insertPos = dst < src ? dst + 1 : dst;
+				for (int i = M - 1; i > insertPos; i--)
+					orOptBuf[i] = orOptBuf[i - 1];
+				orOptBuf[insertPos] = elem;
 
-						// 正順: [e0, e1]
+				newCost = CalcOrderCost(orOptBuf, nd, nad);
+				int delta = newCost - currentCosts[mi];
+				if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
+					if (delta > 0) saAccept++;
+					Array.Copy(orOptBuf, order, M);
+					currentCosts[mi] = newCost;
+					if (newCost < bestCosts[mi]) {
+						bestCosts[mi] = newCost;
+						bestOrders[mi] = (int[])order.Clone();
+						info.Up++;
+					}
+				}
+			} else {
+				// or-opt-2: 連続2要素セグメント [src, src+1] を別位置に挿入（正順・逆順の両方を試す）
+				if (M < 3) continue;
+				int src = rnd.Next(M - 1); // セグメント先頭インデックス
+										   // 挿入先: セグメントを除いた M-2 要素の配列上の挿入インデックス (0 ~ M-3)
+				int insertPos = rnd.Next(M - 2);
+
+				int e0 = order[src];
+				int e1 = order[src + 1];
+				// セグメントを除いた残りを orOptBuf に詰める
+				int idx = 0;
+				for (int i = 0; i < M; i++) {
+					if (i == src || i == src + 1) continue;
+					orOptBuf[idx++] = order[i];
+				}
+				// insertPos+1 以降を後ろにシフト (2つ分)
+				for (int i = M - 1; i >= insertPos + 3; i--)
+					orOptBuf[i] = orOptBuf[i - 2];
+
+				// 正順: [e0, e1]
+				orOptBuf[insertPos + 1] = e0;
+				orOptBuf[insertPos + 2] = e1;
+				int costFwd = CalcOrderCost(orOptBuf, nd, nad);
+
+				// 50% の確率で逆順 [e1, e0] も試して良い方を採用
+				if ((rnd.Next(2) == 0)) {
+					orOptBuf[insertPos + 1] = e1;
+					orOptBuf[insertPos + 2] = e0;
+					int costRev = CalcOrderCost(orOptBuf, nd, nad);
+					if (costFwd < costRev) {
 						orOptBuf[insertPos + 1] = e0;
 						orOptBuf[insertPos + 2] = e1;
-						int costFwd = CalcOrderCost(orOptBuf, nd, nad);
-
-						// 50% の確率で逆順 [e1, e0] も試して良い方を採用
-						if ((rnd.Next(2) == 0)) {
-							orOptBuf[insertPos + 1] = e1;
-							orOptBuf[insertPos + 2] = e0;
-							int costRev = CalcOrderCost(orOptBuf, nd, nad);
-							if (costFwd < costRev) {
-								orOptBuf[insertPos + 1] = e0;
-								orOptBuf[insertPos + 2] = e1;
-							} else {
-								costFwd = costRev;
-							}
-						}
-
-						newCost = costFwd;
-						int delta = newCost - currentCosts[mi];
-						if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
-							if (delta > 0) saAccept++;
-							Array.Copy(orOptBuf, order, M);
-							currentCosts[mi] = newCost;
-							if (newCost < bestCosts[mi]) {
-								bestCosts[mi] = newCost;
-								bestOrders[mi] = (int[])order.Clone();
-								info.Up++;
-							}
-						} else {
-							// 元に戻す
-							Array.Copy(order, orOptBuf, M);
-						}
+					} else {
+						costFwd = costRev;
 					}
+				}
+
+				newCost = costFwd;
+				int delta = newCost - currentCosts[mi];
+				if (delta <= 0 || rnd.NextDouble() < Math.Exp(-delta / temp)) {
+					if (delta > 0) saAccept++;
+					Array.Copy(orOptBuf, order, M);
+					currentCosts[mi] = newCost;
+					if (newCost < bestCosts[mi]) {
+						bestCosts[mi] = newCost;
+						bestOrders[mi] = (int[])order.Clone();
+						info.Up++;
+					}
+				} else {
+					// 元に戻す
+					Array.Copy(order, orOptBuf, M);
+				}
+			}
 		}
 		info.Loop += iter;
 		info.Depth = saAccept;
@@ -2379,6 +2443,621 @@ SkipS7:;
 		}
 
 		return state;
+	}
+
+	sealed class Plan12Graph
+	{
+		public List<(int i, int j)> Nodes { get; } = new();
+		public int[,] NodeId { get; set; }
+		public int[] Degree { get; set; } = [];
+	}
+
+	sealed class Plan12RelayCandidate
+	{
+		public int I { get; set; }
+		public int J { get; set; }
+		public int Score { get; set; }
+		public int GoalHits { get; set; }
+		public int NodeHits { get; set; }
+	}
+
+	static Direction4[] GetPlan12Dirs() => [Direction4.R, Direction4.D, Direction4.L, Direction4.U];
+
+	static bool IsPlan12SpecialCell(Input input, int i, int j)
+	{
+		if (i == 0 && j == 0) return true;
+		for (int k = 0; k < input.M; k++) {
+			var (bi, bj, ti, tj) = input.Balls[k];
+			if ((bi == i && bj == j) || (ti == i && tj == j)) return true;
+		}
+		return false;
+	}
+
+	static string ExtractPlan12CorridorMacro(Input input, Plan12Graph graph, int si, int sj, Direction4 startDir, int maxLen)
+	{
+		if (!input.Map.CanMove(si, sj, startDir)) return null;
+
+		var ops = new List<char>();
+		int ci = si, cj = sj;
+		var cdir = startDir;
+		while (ops.Count < maxLen) {
+			if (!input.Map.CanMove(ci, cj, cdir)) break;
+			var moved = cdir.Move(ci, cj);
+			ci = moved.i;
+			cj = moved.j;
+			ops.Add('F');
+
+			if (graph.NodeId[ci, cj] >= 0 && !(ci == si && cj == sj)) break;
+
+			if (GetPlan12CellDegree(input, ci, cj) != 2) break;
+
+			var backDir = cdir.Rotate(Rotation.L).Rotate(Rotation.L);
+			Direction4 nextDir = Direction4.N;
+			bool found = false;
+			foreach (var nd in GetPlan12Dirs()) {
+				if (nd == backDir) continue;
+				if (!input.Map.CanMove(ci, cj, nd)) continue;
+				nextDir = nd;
+				found = true;
+				break;
+			}
+			if (!found) break;
+
+			foreach (var rot in cdir.Rotate(nextDir)) {
+				switch (rot) {
+					case Rotation.L:
+						ops.Add('L');
+						break;
+					case Rotation.R:
+						ops.Add('R');
+						break;
+				}
+				if (ops.Count >= maxLen) break;
+			}
+			if (ops.Count >= maxLen) break;
+			cdir = nextDir;
+		}
+
+		if (ops.Count < 2 || ops.Count > maxLen) return null;
+		if (!ops.Contains('F')) return null;
+		return new string(ops.ToArray());
+	}
+
+	static List<string> ExtractPlan12MacroCandidates(Input input, Plan12Graph graph, string preferredMacro)
+	{
+		var score = new Dictionary<string, int>();
+		foreach (var (i, j) in graph.Nodes) {
+			foreach (var dir in GetPlan12Dirs()) {
+				var mac = ExtractPlan12CorridorMacro(input, graph, i, j, dir, 10);
+				if (string.IsNullOrEmpty(mac)) continue;
+				score.TryAdd(mac, 0);
+				score[mac]++;
+			}
+		}
+
+		var list = new List<string>();
+		void AddMacro(string mac)
+		{
+			if (string.IsNullOrEmpty(mac)) return;
+			if (!list.Contains(mac)) list.Add(mac);
+		}
+
+		AddMacro(preferredMacro);
+		foreach (var mac in score.OrderByDescending(x => x.Value).ThenByDescending(x => x.Key.Length).Take(8)) {
+			AddMacro(mac.Key);
+		}
+		AddMacro("FFFF");
+		AddMacro("FFFFF");
+		AddMacro("LFFFR");
+		AddMacro("RFFFL");
+		AddMacro("FFLFFF");
+		AddMacro("FFRFFF");
+		return list;
+	}
+
+	static List<Plan12RelayCandidate> EnumeratePlan12RelayCandidates(Input input, Plan12Graph graph,
+		(int i, int j, Direction4 dir, bool ok)[,,] macroDest, int limit)
+	{
+		var goalSet = new HashSet<int>();
+		var ballPos = new List<(int i, int j)>();
+		var goalPos = new List<(int i, int j)>();
+		for (int k = 0; k < input.M; k++) {
+			goalSet.Add(input.Balls[k].d * input.N + input.Balls[k].e);
+			ballPos.Add((input.Balls[k].b, input.Balls[k].c));
+			goalPos.Add((input.Balls[k].d, input.Balls[k].e));
+		}
+
+		var list = new List<Plan12RelayCandidate>();
+		foreach (var (i, j) in graph.Nodes) {
+			if (IsPlan12SpecialCell(input, i, j)) continue;
+
+			int goalHits = 0;
+			int nodeHits = 0;
+			foreach (var dir in GetPlan12Dirs()) {
+				var dest = macroDest[i, j, dir.ToIndex4()];
+				if (!dest.ok) continue;
+				if (goalSet.Contains(dest.i * input.N + dest.j)) goalHits++;
+				if (graph.NodeId[dest.i, dest.j] >= 0) nodeHits++;
+			}
+			int nearestBall = int.MaxValue;
+			foreach (var (bi, bj) in ballPos) {
+				nearestBall = Math.Min(nearestBall, Math.Abs(i - bi) + Math.Abs(j - bj));
+			}
+			int nearestGoal = int.MaxValue;
+			foreach (var (gi, gj) in goalPos) {
+				nearestGoal = Math.Min(nearestGoal, Math.Abs(i - gi) + Math.Abs(j - gj));
+			}
+			int degree = GetPlan12CellDegree(input, i, j);
+			int proximity = Math.Max(0, 10 - nearestBall) + Math.Max(0, 10 - nearestGoal);
+			int score = goalHits * 20 + nodeHits * 6 + proximity + degree;
+			if (score <= 0) continue;
+			list.Add(new Plan12RelayCandidate {
+				I = i,
+				J = j,
+				Score = score,
+				GoalHits = goalHits,
+				NodeHits = nodeHits,
+			});
+		}
+
+		return list
+			.OrderByDescending(x => x.Score)
+			.ThenBy(x => x.I + x.J)
+			.Take(limit)
+			.ToList();
+	}
+
+	static bool IsAnyBallAt(State state, Input input, int i, int j)
+	{
+		for (int k = 0; k < input.M; k++) {
+			if (state.Balls[k].i == i && state.Balls[k].j == j) return true;
+		}
+		return false;
+	}
+
+	static State SimulatePlan12Move(State source, Input input, bool isLocal, int ti, int tj,
+		(int i, int j, Direction4 dir, bool ok)[,,] macroDest)
+	{
+		int N = input.N;
+		var macrodist = new int[N, N, 4];
+		var macroprev = new (int i, int j, Direction4 dir, char op)[N, N, 4];
+		var macroQue = new Queue<int>();
+		var macroStamp = new int[N, N, 4];
+		int macroCurrentStamp = 0;
+		var routeBuf = new char[N * N * 4 * 8];
+
+		var clone = CloneState(source, input, isLocal);
+		var path = MacroBfs(input, input.Map, clone.Robo.i, clone.Robo.j, clone.Direction,
+			ti, tj, macroDest, macrodist, macroprev, macroQue, macroStamp,
+			ref macroCurrentStamp, int.MaxValue / 4, routeBuf);
+		if (path == null) return null;
+		ApplyPath(clone, path);
+		return clone;
+	}
+
+	static char[] FindPlan12Path(Input input, State state, int ti, int tj,
+		(int i, int j, Direction4 dir, bool ok)[,,] macroDest)
+	{
+		int N = input.N;
+		var macrodist = new int[N, N, 4];
+		var macroprev = new (int i, int j, Direction4 dir, char op)[N, N, 4];
+		var macroQue = new Queue<int>();
+		var macroStamp = new int[N, N, 4];
+		int macroCurrentStamp = 0;
+		var routeBuf = new char[N * N * 4 * 8];
+		return MacroBfs(input, input.Map, state.Robo.i, state.Robo.j, state.Direction,
+			ti, tj, macroDest, macrodist, macroprev, macroQue, macroStamp,
+			ref macroCurrentStamp, int.MaxValue / 4, routeBuf);
+	}
+
+	static List<Plan12RelayCandidate> EnumeratePlan12RelayCandidatesForBall(Input input, State state, int ball,
+		List<Plan12RelayCandidate> relayCandidates, (int i, int j, Direction4 dir, bool ok)[,,] macroDest, int limit)
+	{
+		var (si, sj) = state.Balls[ball];
+		var (ti, tj) = (input.Balls[ball].d, input.Balls[ball].e);
+		var scored = new List<Plan12RelayCandidate>();
+		foreach (var relay in relayCandidates) {
+			if (relay.I == si && relay.J == sj) continue;
+			if (relay.I == ti && relay.J == tj) continue;
+			if (IsAnyBallAt(state, input, relay.I, relay.J)) continue;
+
+			int goalHits = 0;
+			foreach (var dir in GetPlan12Dirs()) {
+				var dest = macroDest[relay.I, relay.J, dir.ToIndex4()];
+				if (dest.ok && dest.i == ti && dest.j == tj) goalHits++;
+			}
+			if (goalHits == 0) continue;
+
+			int distBall = Math.Abs(relay.I - si) + Math.Abs(relay.J - sj);
+			int distGoal = Math.Abs(relay.I - ti) + Math.Abs(relay.J - tj);
+			int score = relay.Score + goalHits * 30 - distBall * 2 - distGoal;
+			scored.Add(new Plan12RelayCandidate {
+				I = relay.I,
+				J = relay.J,
+				Score = score,
+				GoalHits = goalHits,
+				NodeHits = relay.NodeHits,
+			});
+		}
+
+		return scored
+			.OrderByDescending(x => x.Score)
+			.ThenByDescending(x => x.GoalHits)
+			.Take(limit)
+			.ToList();
+	}
+
+	static int EstimatePlan12RecoverStagedCost(bool isLocal, Input input, State state, int ball,
+		(int i, int j, Direction4 dir, bool ok)[,,] macroDest)
+	{
+		var (si, sj) = state.Balls[ball];
+		if (si < 0) return int.MaxValue / 4;
+		var (ti, tj) = (input.Balls[ball].d, input.Balls[ball].e);
+		var pPick = FindPlan12Path(input, state, si, sj, macroDest);
+		if (pPick == null) return int.MaxValue / 4;
+		var afterPick = CloneState(state, input, isLocal);
+		ApplyPath(afterPick, pPick);
+		afterPick.Exchange();
+		var pDrop = FindPlan12Path(input, afterPick, ti, tj, macroDest);
+		if (pDrop == null) return int.MaxValue / 4;
+		return pPick.Length + pDrop.Length + 2;
+	}
+
+	static bool TryRecoverBestPlan12Staged(bool isLocal, Input input, State state, List<(int ball, int ri, int rj)> staged,
+		(int i, int j, Direction4 dir, bool ok)[,,] macroDest)
+	{
+		int bestIdx = -1;
+		int bestCost = int.MaxValue;
+		for (int idx = 0; idx < staged.Count; idx++) {
+			int cost = EstimatePlan12RecoverStagedCost(isLocal, input, state, staged[idx].ball, macroDest);
+			if (cost < bestCost) {
+				bestCost = cost;
+				bestIdx = idx;
+			}
+		}
+		if (bestIdx < 0 || bestCost >= int.MaxValue / 8) return false;
+
+		int ball = staged[bestIdx].ball;
+		staged.RemoveAt(bestIdx);
+		var (si, sj) = state.Balls[ball];
+		var (ti, tj) = (input.Balls[ball].d, input.Balls[ball].e);
+		var pPick = FindPlan12Path(input, state, si, sj, macroDest);
+		if (pPick == null) return false;
+		ApplyPath(state, pPick);
+		state.Exchange();
+		var pDrop = FindPlan12Path(input, state, ti, tj, macroDest);
+		if (pDrop == null) return false;
+		ApplyPath(state, pDrop);
+		state.Exchange();
+		return true;
+	}
+
+	static int EstimatePlan12RelayBenefitForBall(bool isLocal, Input input, State state, int ball,
+		(int i, int j, Direction4 dir, bool ok)[,,] macroDest, List<Plan12RelayCandidate> relayCandidates)
+	{
+		var (si, sj) = state.Balls[ball];
+		if (si < 0) return int.MinValue / 4;
+		var (ti, tj) = (input.Balls[ball].d, input.Balls[ball].e);
+		if (si == ti && sj == tj) return int.MinValue / 4;
+
+		var pPick = FindPlan12Path(input, state, si, sj, macroDest);
+		if (pPick == null) return int.MinValue / 4;
+		var afterPick = CloneState(state, input, isLocal);
+		ApplyPath(afterPick, pPick);
+		afterPick.Exchange();
+
+		var pGoal = FindPlan12Path(input, afterPick, ti, tj, macroDest);
+		if (pGoal == null) return int.MinValue / 4;
+		int direct = pPick.Length + pGoal.Length + 2;
+
+		int bestRelay = int.MaxValue / 4;
+		foreach (var relay in EnumeratePlan12RelayCandidatesForBall(input, state, ball, relayCandidates, macroDest, 3)) {
+			var pRelay = FindPlan12Path(input, afterPick, relay.I, relay.J, macroDest);
+			if (pRelay == null) continue;
+			var afterRelay = CloneState(afterPick, input, isLocal);
+			ApplyPath(afterRelay, pRelay);
+			afterRelay.Exchange();
+			var pRelayGoal = FindPlan12Path(input, afterRelay, ti, tj, macroDest);
+			if (pRelayGoal == null) continue;
+			bestRelay = Math.Min(bestRelay, pPick.Length + pRelay.Length + pRelayGoal.Length + 4);
+		}
+
+		return bestRelay >= int.MaxValue / 8 ? int.MinValue / 4 : direct - bestRelay;
+	}
+
+	static int EstimatePlan12LocalCost(bool isLocal, Input input, State state, int ball,
+		(int i, int j, Direction4 dir, bool ok)[,,] macroDest, List<Plan12RelayCandidate> relayCandidates)
+	{
+		var (si, sj) = state.Balls[ball];
+		if (si < 0) return int.MaxValue / 4;
+		var (ti, tj) = (input.Balls[ball].d, input.Balls[ball].e);
+		if (si == ti && sj == tj) return 0;
+
+		var pPick = FindPlan12Path(input, state, si, sj, macroDest);
+		if (pPick == null) return int.MaxValue / 4;
+		var afterPick = CloneState(state, input, isLocal);
+		ApplyPath(afterPick, pPick);
+		afterPick.Exchange();
+
+		int best = int.MaxValue / 4;
+		var pGoal = FindPlan12Path(input, afterPick, ti, tj, macroDest);
+		if (pGoal != null) best = Math.Min(best, pPick.Length + pGoal.Length + 2);
+
+		foreach (var relay in EnumeratePlan12RelayCandidatesForBall(input, state, ball, relayCandidates, macroDest, 3)) {
+			var pRelay = FindPlan12Path(input, afterPick, relay.I, relay.J, macroDest);
+			if (pRelay == null) continue;
+			var afterRelay = CloneState(afterPick, input, isLocal);
+			ApplyPath(afterRelay, pRelay);
+			afterRelay.Exchange();
+			var pRelayGoal = FindPlan12Path(input, afterRelay, ti, tj, macroDest);
+			if (pRelayGoal == null) continue;
+			best = Math.Min(best, pPick.Length + pRelay.Length + pRelayGoal.Length + 4);
+		}
+
+		return best;
+	}
+
+	static int[] RefinePlan12OrderRollingHorizon(bool isLocal, Input input, int[] baseOrder,
+		(int i, int j, Direction4 dir, bool ok)[,,] macroDest, List<Plan12RelayCandidate> relayCandidates,
+		Stopwatch sw, double deadline)
+	{
+		var remaining = new List<int>(baseOrder);
+		var result = new List<int>(baseOrder.Length);
+		var state = new State(input, isLocal);
+
+		while (remaining.Count > 0) {
+			if (sw.Elapsed.TotalMilliseconds >= deadline) {
+				result.AddRange(remaining);
+				break;
+			}
+
+			int width = Math.Min(4, remaining.Count);
+			var candidateIdx = new HashSet<int>();
+			for (int i = 0; i < width; i++) candidateIdx.Add(i);
+			var relayGains = new List<(int idx, int gain)>();
+			for (int i = width; i < remaining.Count; i++) {
+				int gain = EstimatePlan12RelayBenefitForBall(isLocal, input, state, remaining[i], macroDest, relayCandidates);
+				if (gain > 0) relayGains.Add((i, gain));
+			}
+			foreach (var (idx, _) in relayGains.OrderByDescending(x => x.gain).Take(2)) {
+				candidateIdx.Add(idx);
+			}
+
+			int bestIdx = candidateIdx.First();
+			int bestCost = int.MaxValue;
+			foreach (int i in candidateIdx) {
+				int k = remaining[i];
+				int cost = EstimatePlan12LocalCost(isLocal, input, state, k, macroDest, relayCandidates);
+				int relayBias = EstimatePlan12RelayBenefitForBall(isLocal, input, state, k, macroDest, relayCandidates);
+				if (relayBias > 0) cost -= relayBias;
+				if (cost < bestCost) {
+					bestCost = cost;
+					bestIdx = i;
+				}
+			}
+
+			int chosen = remaining[bestIdx];
+			remaining.RemoveAt(bestIdx);
+			result.Add(chosen);
+
+			var (si, sj) = state.Balls[chosen];
+			var (ti, tj) = (input.Balls[chosen].d, input.Balls[chosen].e);
+			var pPick = FindPlan12Path(input, state, si, sj, macroDest);
+			if (pPick == null) continue;
+			ApplyPath(state, pPick);
+			state.Exchange();
+			var pDrop = FindPlan12Path(input, state, ti, tj, macroDest);
+			if (pDrop == null) continue;
+			ApplyPath(state, pDrop);
+			state.Exchange();
+		}
+
+		return result.ToArray();
+	}
+
+	static int[] ImprovePlan12OrderLns(bool isLocal, Random rnd, Input input, int[] order, string macro,
+		(int i, int j, Direction4 dir, bool ok)[,,] macroDest, List<Plan12RelayCandidate> relayCandidates,
+		long currentScore, Stopwatch sw, double deadline)
+	{
+		var bestOrder = (int[])order.Clone();
+		long bestScore = currentScore;
+		for (int iter = 0; iter < 12; iter++) {
+			if (sw.Elapsed.TotalMilliseconds >= deadline) break;
+			int len = Math.Min(order.Length, rnd.Next(2, 5));
+			if (order.Length <= len) break;
+			int l = rnd.Next(order.Length - len + 1);
+			int r = l + len - 1;
+			var trial = (int[])bestOrder.Clone();
+			int src = rnd.Next(l, r + 1);
+			int dst = rnd.Next(l, r + 1);
+			if (src == dst) continue;
+			int elem = trial[src];
+			if (src < dst) {
+				for (int i = src; i < dst; i++) trial[i] = trial[i + 1];
+				trial[dst] = elem;
+			} else {
+				for (int i = src; i > dst; i--) trial[i] = trial[i - 1];
+				trial[dst] = elem;
+			}
+
+			var state = BuildPlan12InitialState(isLocal, input, trial, macro, macroDest, relayCandidates, sw, deadline, out _);
+			if (state == null) continue;
+			long score = state.Calculate();
+			if (score < bestScore) {
+				bestScore = score;
+				bestOrder = trial;
+			}
+		}
+
+		return bestScore < currentScore ? bestOrder : null;
+	}
+
+	static State BuildPlan12InitialState(bool isLocal, Input input, int[] order, string macro,
+		(int i, int j, Direction4 dir, bool ok)[,,] macroDest, List<Plan12RelayCandidate> relayCandidates,
+		Stopwatch sw, double deadline, out int relayCount)
+	{
+		relayCount = 0;
+		var state = new State(input, isLocal);
+		state.AddOp('M');
+		foreach (var c in macro) state.AddOp(c);
+		state.AddOp('M');
+
+		var staged = new List<(int ball, int ri, int rj)>();
+		var usedRelay = new HashSet<int>();
+
+		for (int oi = 0; oi < order.Length; oi++) {
+			if (sw.Elapsed.TotalMilliseconds >= deadline) return null;
+
+			int k = order[oi];
+			var (si, sj) = state.Balls[k];
+			var (ti, tj) = (input.Balls[k].d, input.Balls[k].e);
+			if (si == ti && sj == tj) continue;
+
+			var pPick = FindPlan12Path(input, state, si, sj, macroDest);
+			if (pPick == null) return null;
+			var afterPick = CloneState(state, input, isLocal);
+			ApplyPath(afterPick, pPick);
+			afterPick.Exchange();
+
+			var pGoal = FindPlan12Path(input, afterPick, ti, tj, macroDest);
+			if (pGoal == null) return null;
+
+			int nextBall = -1;
+			for (int t = oi + 1; t < order.Length; t++) {
+				int kk = order[t];
+				if (state.Balls[kk].i == input.Balls[kk].d && state.Balls[kk].j == input.Balls[kk].e) continue;
+				nextBall = kk;
+				break;
+			}
+
+			int directEstimate = pPick.Length + pGoal.Length + 2;
+			if (nextBall >= 0) {
+				var afterDirect = CloneState(afterPick, input, isLocal);
+				ApplyPath(afterDirect, pGoal);
+				afterDirect.Exchange();
+				var pNext = FindPlan12Path(input, afterDirect, afterDirect.Balls[nextBall].i, afterDirect.Balls[nextBall].j, macroDest);
+				if (pNext != null) directEstimate += pNext.Length;
+			}
+
+			Plan12RelayCandidate bestRelay = null;
+			int bestRelayEstimate = int.MaxValue;
+			if (staged.Count < 3) {
+				foreach (var relay in EnumeratePlan12RelayCandidatesForBall(input, state, k, relayCandidates, macroDest, 3)) {
+					if (sw.Elapsed.TotalMilliseconds >= deadline) return null;
+					int relayKey = relay.I * input.N + relay.J;
+					if (usedRelay.Contains(relayKey)) continue;
+
+					var pRelay = FindPlan12Path(input, afterPick, relay.I, relay.J, macroDest);
+					if (pRelay == null) continue;
+
+					var afterRelay = CloneState(afterPick, input, isLocal);
+					ApplyPath(afterRelay, pRelay);
+					afterRelay.Exchange();
+
+					var pRelayGoal = FindPlan12Path(input, afterRelay, ti, tj, macroDest);
+					if (pRelayGoal == null) continue;
+
+					int stageEstimate = pPick.Length + pRelay.Length + pRelayGoal.Length + 8;
+					if (nextBall >= 0) {
+						var pNext = FindPlan12Path(input, afterRelay, afterRelay.Balls[nextBall].i, afterRelay.Balls[nextBall].j, macroDest);
+						if (pNext != null) stageEstimate += pNext.Length;
+					}
+
+					if (stageEstimate < bestRelayEstimate) {
+						bestRelayEstimate = stageEstimate;
+						bestRelay = relay;
+					}
+				}
+			}
+
+			if (bestRelay != null && bestRelayEstimate + 2 < directEstimate) {
+				ApplyPath(state, pPick);
+				state.Exchange();
+				var pRelay = FindPlan12Path(input, state, bestRelay.I, bestRelay.J, macroDest);
+				if (pRelay == null) return null;
+				ApplyPath(state, pRelay);
+				state.Exchange();
+				staged.Add((k, bestRelay.I, bestRelay.J));
+				usedRelay.Add(bestRelay.I * input.N + bestRelay.J);
+				relayCount++;
+			} else {
+				ApplyPath(state, pPick);
+				state.Exchange();
+				ApplyPath(state, pGoal);
+				state.Exchange();
+			}
+
+			if (staged.Count > 0 && oi + 1 < order.Length) {
+				int nextDirectCost = EstimatePlan12LocalCost(isLocal, input, state, order[oi + 1], macroDest, relayCandidates);
+				int stagedRecoverCost = staged.Min(x => EstimatePlan12RecoverStagedCost(isLocal, input, state, x.ball, macroDest));
+				if (stagedRecoverCost + 1 < nextDirectCost) {
+					TryRecoverBestPlan12Staged(isLocal, input, state, staged, macroDest);
+				}
+			}
+		}
+
+		while (staged.Count > 0) {
+			if (sw.Elapsed.TotalMilliseconds >= deadline) return null;
+			if (!TryRecoverBestPlan12Staged(isLocal, input, state, staged, macroDest)) return null;
+		}
+
+		return state;
+	}
+
+	static int GetPlan12CellDegree(Input input, int i, int j)
+	{
+		int degree = 0;
+		foreach (var dir in new[] { Direction4.R, Direction4.D, Direction4.L, Direction4.U }) {
+			if (input.Map.CanMove(i, j, dir)) degree++;
+		}
+		return degree;
+	}
+
+	static void AddPlan12Node(HashSet<int> used, List<(int i, int j)> nodes, int N, int i, int j)
+	{
+		int key = i * N + j;
+		if (used.Add(key)) {
+			nodes.Add((i, j));
+		}
+	}
+
+	static Plan12Graph BuildPlan12Graph(Input input)
+	{
+		int N = input.N;
+		var graph = new Plan12Graph {
+			NodeId = new int[N, N],
+		};
+		for (int i = 0; i < N; i++) {
+			for (int j = 0; j < N; j++) {
+				graph.NodeId[i, j] = -1;
+			}
+		}
+
+		var used = new HashSet<int>();
+		AddPlan12Node(used, graph.Nodes, N, 0, 0);
+		for (int k = 0; k < input.M; k++) {
+			var (bi, bj, ti, tj) = input.Balls[k];
+			AddPlan12Node(used, graph.Nodes, N, bi, bj);
+			AddPlan12Node(used, graph.Nodes, N, ti, tj);
+		}
+
+		for (int i = 0; i < N; i++) {
+			for (int j = 0; j < N; j++) {
+				int degree = GetPlan12CellDegree(input, i, j);
+				if (degree != 2) {
+					AddPlan12Node(used, graph.Nodes, N, i, j);
+				}
+			}
+		}
+
+		graph.Degree = new int[graph.Nodes.Count];
+		for (int idx = 0; idx < graph.Nodes.Count; idx++) {
+			var (i, j) = graph.Nodes[idx];
+			graph.NodeId[i, j] = idx;
+			graph.Degree[idx] = GetPlan12CellDegree(input, i, j);
+		}
+
+		return graph;
 	}
 
 
