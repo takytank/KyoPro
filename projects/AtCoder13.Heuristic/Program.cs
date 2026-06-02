@@ -82,13 +82,7 @@ public class Program
 			info.P = 9;
 		}
 
-		/*
-		var state11 = Plan11(isLocal, sw, rnd, input, info, state9);
-		if (state11.Ops.Count < best.Ops.Count) {
-			best = state11;
-			info.P = 11;
-		}
-		*/
+
 
 		/*
 		var state5 = Plan5(isLocal, sw, rnd, input, info);
@@ -98,6 +92,12 @@ public class Program
 		}*/
 
 		best = NormalizeStateForDelayedMacroRegistration(best, input, isLocal);
+		/*
+		var state11 = Plan11(isLocal, sw, rnd, input, info, best);
+		if (state11.Ops.Count < best.Ops.Count) {
+			best = state11;
+			info.P = 11;
+		}*/
 
 		input.Output(best);
 
@@ -381,6 +381,35 @@ public class Program
 			"LFFFFFFFR", "RFFFFFFFL",
 			"LFFFFFFFF", "RFFFFFFFF",
 		};
+
+		// ---- 右手法・左手法パターン ----
+		var wallFollowMacros = new List<string>();
+		foreach (int a in new[] { 1, 2, 3, 4, 5 }) {
+			string fa = new string('F', a);
+			foreach (int b in new[] { 1, 2, 3, 4, 5 }) {
+				string fb = new string('F', b);
+				int total = 2 + a + b;   // R/L x2 + F x(a+b)
+				if (total > 12) continue;
+				wallFollowMacros.Add("R" + fa + "L" + fb);   // 右手法
+				wallFollowMacros.Add("L" + fa + "R" + fb);   // 左手法
+				wallFollowMacros.Add(fa + "R" + fb);          // コーナー右
+				wallFollowMacros.Add(fa + "L" + fb);          // コーナー左
+				wallFollowMacros.Add(fa + "R" + fb + "L");    // コーナー右+向き戻し
+				wallFollowMacros.Add(fa + "L" + fb + "R");    // コーナー左+向き戻し
+			}
+		}
+		// 右手法2周
+		foreach (int n in new[] { 1, 2, 3 }) {
+			string unit = "R" + new string('F', n) + "L" + new string('F', n);
+			if (unit.Length * 2 <= 12) wallFollowMacros.Add(unit + unit);
+			string unitL = "L" + new string('F', n) + "R" + new string('F', n);
+			if (unitL.Length * 2 <= 12) wallFollowMacros.Add(unitL + unitL);
+		}
+
+		macroList = macroList.Concat(
+			wallFollowMacros.Distinct().Where(s => s.Contains('F'))
+		).ToArray();
+
 		var dirs = new[] { Direction4.D, Direction4.L, Direction4.U, Direction4.R };
 
 		var macroDestAll = new (int i, int j, Direction4 dir, bool ok)[macroList.Length][,,];
