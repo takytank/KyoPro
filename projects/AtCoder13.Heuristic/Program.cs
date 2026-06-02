@@ -97,6 +97,8 @@ public class Program
 			info.P = 5;
 		}*/
 
+		best = NormalizeStateForDelayedMacroRegistration(best, input, isLocal);
+
 		input.Output(best);
 
 		info.Macro = best.Macro == null ? "" : new string(best.Macro);
@@ -106,6 +108,32 @@ public class Program
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
+	}
+
+	static State NormalizeStateForDelayedMacroRegistration(State source, Input input, bool isLocal)
+	{
+		if (source.Macro == null || source.Macro.Length == 0) return source;
+		if (source.Ops.Count == 0) return source;
+
+		int firstP = source.Ops.IndexOf('P');
+		if (firstP < 0) {
+			return source;
+		}
+
+		var normalized = new State(input, isLocal);
+		for (int i = 0; i < source.Ops.Count; i++) {
+			if (i == firstP) {
+				normalized.AddOp('M');
+				foreach (var c in source.Macro) normalized.AddOp(c);
+				normalized.AddOp('M');
+				normalized.SetMacro(source.Macro);
+				continue;
+			}
+
+			normalized.AddOp(source.Ops[i]);
+		}
+
+		return normalized;
 	}
 
 	static State Plan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
@@ -258,9 +286,7 @@ public class Program
 
 			// State を使って正確に評価
 			var state = new State(input, isLocal);
-			state.AddOp('M');
-			foreach (var c in macro) state.AddOp(c);
-			state.AddOp('M');
+			state.SetMacro(macro.ToCharArray());
 
 			int currentScore = 0;
 			bool ok = true;
@@ -299,9 +325,7 @@ public class Program
 		// 最良マクロで State を1回だけ構築
 		if (bestMacro != null) {
 			var state = new State(input, isLocal);
-			state.AddOp('M');
-			foreach (var c in bestMacro) state.AddOp(c);
-			state.AddOp('M');
+			state.SetMacro(bestMacro.ToCharArray());
 			foreach (int k in order) {
 				ApplyPath(state, bestPickPaths[k]);
 				state.Exchange();
@@ -712,9 +736,7 @@ public class Program
 			var order = bestOrders[mi];
 
 			var state = new State(input, isLocal);
-			state.AddOp('M');
-			foreach (var c in mac) state.AddOp(c);
-			state.AddOp('M');
+			state.SetMacro(mac.ToCharArray());
 
 			int currentScore = 0;
 			bool ok = true;
@@ -760,9 +782,7 @@ public class Program
 		// ---- Step 4: 最良の (マクロ, 訪問順) で State 構築 ----
 		if (globalBestMacro != null) {
 			var state = new State(input, isLocal);
-			state.AddOp('M');
-			foreach (var c in globalBestMacro) state.AddOp(c);
-			state.AddOp('M');
+			state.SetMacro(globalBestMacro.ToCharArray());
 			foreach (int k in globalBestOrder) {
 				ApplyPath(state, globalBestPickPaths[k]);
 				state.Exchange();
@@ -1315,6 +1335,12 @@ public class State
 
 	public void Foward() => AddOp('F');
 	public void Exchange() => AddOp('S');
+	public void SetMacro(char[] macro)
+	{
+		Macro = (char[])macro.Clone();
+		IsMacro = false;
+		NextMacro.Clear();
+	}
 
 	public void Rotate(Rotation rot)
 	{
