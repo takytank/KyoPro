@@ -10,7 +10,7 @@ public class Program
 	static void Main()
 	{
 		HeuristicHelper.RunCases(
-			runCaseCount: 100,
+			runCaseCount: 3000,
 			testCaseCount: 50,
 			isParallel: false,
 			i => Run(i),
@@ -221,20 +221,38 @@ public class Program
 		int N = input.N;
 		int M = input.M;
 
+		int maxMacroLen;
+		//double estimatedPrecompTime = (N * N * 4) * 0.05;  // 粗い推定 (ms)
+		//int estimatedPPM = (int)((1700.0 - estimatedPrecompTime) / 10.0);  // precomp可能マクロ数
+		int K = 1 + M * 2;
+		double estimatedTimePerMacro = K * 4 * N * N * 0.00015 + 1.0;
+		estimatedTimePerMacro *= 1.5;
+		int estimatedPPM = (int)(1200.0 / estimatedTimePerMacro);
+		info.Depth = estimatedPPM;
+
+		if (N <= 11) {
+			maxMacroLen = 16;  // 小盤面: 短マクロで十分
+		} else if (N <= 16) {
+			// 中盤面: PPM十分なら長マクロOK、不足なら制限
+			maxMacroLen = (M >= 25 && estimatedPPM >= 100) ? 24 : 20;
+		} else {
+			// 大盤面: PPM十分なら超長マクロOK、不足なら中長マクロ
+			maxMacroLen = (M >= 30 && estimatedPPM < 80) ? 20 : 24;
+		}
+
 		var tempMacroList = new List<string>();
 
 		// 1. 純直進（長さ7〜12）: 長いものを優先
-		/*
 		tempMacroList.AddRange(new[] {
 			"FFFFFFFFFF",    // 10
 			"FFFFFFFFF",     // 9
 			"FFFFFFFF",      // 8
 			"FFFFFFF",       // 7
 			"FFFFFF",        // 6
-		});*/
+		});
 
 		// 2. 方向保持・両端ターン（長さ9〜14）
-		foreach (int nF in new[] { 7, 8, 9, 10, 11, 12, 13, 14 }) {
+		foreach (int nF in new[] { 7, 8, 9, 10, 11, 12 }) {
 			string f = new string('F', nF);
 			tempMacroList.Add("L" + f + "R");
 			tempMacroList.Add("R" + f + "L");
@@ -287,7 +305,7 @@ public class Program
 		foreach (int n in new[] { 1, 2, 3 }) {
 			string unitR = "R" + new string('F', n) + "L" + new string('F', n);
 			string unitL = "L" + new string('F', n) + "R" + new string('F', n);
-			for (int repeat = 3; repeat <= 8; repeat++) {
+			for (int repeat = 3; repeat <= 5; repeat++) {
 				string macroR = string.Concat(Enumerable.Repeat(unitR, repeat));
 				string macroL = string.Concat(Enumerable.Repeat(unitL, repeat));
 				if (macroR.Length >= 12 && macroR.Length <= 32) {
@@ -307,7 +325,7 @@ public class Program
 		// 重複削除・長さ順ソート（長いほうが precomp で先に評価される）
 		var macroList = tempMacroList
 			.Distinct()
-			.Where(m => m.Length >= 6 && m.Length <= 32)
+			.Where(m => m.Length >= 6 && m.Length <= maxMacroLen)
 			.OrderByDescending(m => m.Length)
 			.ThenBy(m => {
 				int lc = m.Count(c => c == 'L');
@@ -359,7 +377,7 @@ public class Program
 		int macroCurrentStamp = 0;
 		var routeBuf = new char[N * N * 4 * 8];
 
-		int K = 1 + M * 2;
+		//int K = 1 + M * 2;
 		(int i, int j)[] keyPos = new (int, int)[K];
 		keyPos[0] = (0, 0);
 		for (int k = 0; k < M; k++) {
@@ -367,7 +385,8 @@ public class Program
 			keyPos[1 + M + k] = (input.Balls[k].d, input.Balls[k].e);
 		}
 
-		double precompDeadline = Math.Min(sw.Elapsed.TotalMilliseconds + 1300.0, 1700.0);
+		double precompDeadline = Math.Min(sw.Elapsed.TotalMilliseconds + 1200.0, 1600.0);
+		info.Width = (int)precompDeadline;
 		var nodeDistAll = new int[macroList.Length][,,];
 		var nodeArrDirAll = new int[macroList.Length][,,];
 		var macroEnabled = new bool[macroList.Length];
@@ -380,6 +399,7 @@ public class Program
 			if (mi > 0 && sw.Elapsed.TotalMilliseconds > precompDeadline) break;
 
 			info.PPM++;
+
 			var macroDest = macroDestAll[mi];
 			var nodeDist = new int[K, 4, K];
 			var nodeArrDir = new int[K, 4, K];
@@ -514,7 +534,7 @@ public class Program
 			initTemp = cnt > 0 ? Math.Min(sum / cnt * 0.10, cap) : cap;
 		}
 		const double endTemp = 0.01;
-		info.Width = (int)initTemp;
+		// info.Width = (int)initTemp;
 		int saAccept = 0;
 
 		// or-opt 用の作業バッファ
@@ -660,7 +680,7 @@ public class Program
 			}
 		}
 		info.Loop += iter;
-		info.Depth = saAccept;
+		//info.Depth = saAccept;
 
 		// ---- Step 3: 各マクロのベスト訪問順で State 構築用パスを計算 ----
 		int globalBestScore = int.MaxValue;
