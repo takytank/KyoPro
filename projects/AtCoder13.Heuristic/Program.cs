@@ -10,7 +10,7 @@ public class Program
 	static void Main()
 	{
 		HeuristicHelper.RunCases(
-			runCaseCount: 3000,
+			runCaseCount: 100,
 			testCaseCount: 50,
 			isParallel: false,
 			i => Run(i),
@@ -25,12 +25,13 @@ public class Program
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
 						$"P={info.P:d2}",
+						$"MM={info.MM:d3}",
 						$"MC={info.MC:d3}",
 						$"PPM={info.PPM:d3}",
-						$"W={info.Width:d4}",
-						$"D={info.Depth:d7}",
+						//$"W={info.Width:d4}",
+						//$"D={info.Depth:d7}",
 						$"ML={info.ML:d3}",
-						//$"RA={info.RA:d5}",
+						$"RA={info.RA:d5}",
 						//$"A={info.A:d4}",
 						$"score={info.Score:d5}",
 						$"elapsed={info.Elapsed:d4}",
@@ -60,6 +61,7 @@ public class Program
 
 		var best = Plan1(isLocal, sw, rnd, input, info);
 		info.P = 1;
+		long bestScore = best.Calculate(info);
 
 		/*
 		var state3 = Plan3(isLocal, sw, rnd, input, info);
@@ -69,43 +71,22 @@ public class Program
 			best = Plan2(isLocal, sw, rnd, input, info, best);
 		}*/
 
-
-		/*
-		var state8 = Plan8(isLocal, sw, rnd, input, info);
-		if (state8.Ops.Count < best.Ops.Count) {
-			best = state8;
-			info.P = 8;
-		}*/
-
-		var state9 = Plan10(isLocal, sw, rnd, input, info);
-		if (state9.Ops.Count < best.Ops.Count) {
+		var state9 = Plan9(isLocal, sw, rnd, input, info);
+		long score9 = state9.Calculate(info);
+		if (score9 < bestScore) {
+			bestScore = score9;
 			best = state9;
 			info.P = 9;
 		}
 
-
-
-		/*
-		var state5 = Plan5(isLocal, sw, rnd, input, info);
-		if (state5.Ops.Count < best.Ops.Count) {
-			best = state5;
-			info.P = 5;
-		}*/
-
 		best = NormalizeStateForDelayedMacroRegistration(best, input, isLocal);
-		/*
-		var state11 = Plan11(isLocal, sw, rnd, input, info, best);
-		if (state11.Ops.Count < best.Ops.Count) {
-			best = state11;
-			info.P = 11;
-		}*/
 
 		input.Output(best);
 
 		info.Macro = best.Macro == null ? "" : new string(best.Macro);
 		info.ML = best.Macro == null ? 0 : best.Macro.Length;
 		info.A = best.Ops.Count;
-		info.Score = best.Calculate();
+		info.Score = best.Calculate(null);
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
@@ -216,7 +197,7 @@ public class Program
 		return state;
 	}
 
-	static State Plan10(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	static State Plan9(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		int N = input.N;
 		int M = input.M;
@@ -239,6 +220,12 @@ public class Program
 			// 大盤面: PPM十分なら超長マクロOK、不足なら中長マクロ
 			maxMacroLen = (M >= 30 && estimatedPPM < 80) ? 20 : 24;
 		}
+
+		// Tによるマクロ長制限
+		int tLimit = (int)((double)input.T / input.M / 7.5);
+		maxMacroLen.UpdateMin(tLimit);
+		maxMacroLen.UpdateMax(7);
+		info.MM = maxMacroLen;
 
 		var tempMacroList = new List<string>();
 
@@ -1091,8 +1078,29 @@ public class State
 		}
 	}
 
-	public long Calculate()
+	public long Calculate(Information info)
 	{
+		int len = 0;
+		// 簡易
+		int macroLen = Macro.Length;
+		foreach (var op in Ops) {
+			if (op == 'M') {
+				continue;
+			} else if (op == 'P') {
+				len += macroLen;
+			} else {
+				++len;
+			}
+		}
+
+		if (info is not null) {
+			info.RA = len;
+		}
+
+		if (len > _input.T) {
+			return long.MaxValue;
+		}
+
 		int a = Ops.Count;
 		int v = 0;
 		for (int k = 0; k < _input.M; k++) {
@@ -1130,6 +1138,7 @@ public class Information
 	public int Width { get; set; } = 0;
 	public int Depth { get; set; } = 0;
 
+	public int MM { get; set; } = 0;
 	public int MC { get; set; } = 0;
 	public int PPM { get; set; } = 0;
 }
