@@ -26,11 +26,13 @@ public class Program
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
 						$"P={info.P:d2}",
+						$"MC={info.MC:d3}",
+						$"PPM={info.PPM:d3}",
 						$"W={info.Width:d4}",
 						$"D={info.Depth:d7}",
 						//$"ML={info.ML:d3}",
-						$"RA={info.RA:d5}",
-						$"A={info.A:d4}",
+						//$"RA={info.RA:d5}",
+						//$"A={info.A:d4}",
 						$"score={info.Score:d5}",
 						$"elapsed={info.Elapsed:d4}",
 						$"M={info.Macro}",
@@ -76,7 +78,7 @@ public class Program
 			info.P = 8;
 		}*/
 
-		var state9 = Plan9(isLocal, sw, rnd, input, info);
+		var state9 = Plan10(isLocal, sw, rnd, input, info);
 		if (state9.Ops.Count < best.Ops.Count) {
 			best = state9;
 			info.P = 9;
@@ -340,75 +342,176 @@ public class Program
 		return Plan3(isLocal, sw, rnd, input, info);
 	}
 
-	static State Plan9(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	static State Plan10(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		int N = input.N;
 		int M = input.M;
 
-		var macroList = new[] {
-			// 純直進
-			"FF", "FFF", "FFFF", "FFFFF", "FFFFFF", "FFFFFFF",
-			// 両端ターン 長さ5〜7
-			"LFFFR", "RFFFL",
-			"LFFFFR", "RFFFFL",
-			"LLFFFR", "RRFFFL",
-			"LFFFRR", "RFFFLL",
-			"LLFFFFL", "RRFFFFR",
-			"LFFFFFL", "RFFFFFL",
-			// 先頭/末尾のみターン
-			"LFFFFF", "RFFFFF",
-			"FFFFFL", "FFFFFR",
-			"FFFFFFL", "FFFFFFR",
-			"LLFFFFF", "RRFFFFF",
-			// 中間ターン
-			"FFLFFF", "FFRFFF",
-			"FFFLFF", "FFFRFF",
-			"FFL", "FFR", "FFFL", "FFFR",
-			// 長さ8
-			"LFFFFFR", "RFFFFFL",
-			"LLFFFFR", "RRFFFFL",
-			"LFFFFRR", "RFFFFLL",
-			"LFFFFFF", "RFFFFFF",
-			"FFFFFFFL", "FFFFFFFR",
-			"FFFLFFF", "FFFRFFF",
-			// 長さ9
-			"LFFFFFFR", "RFFFFFFL",
-			"LLFFFFR", "RRFFFFL",
-			"LFFFFFR", "RFFFFFLL",
-			"LFFFFFFF", "RFFFFFFF",
-			"FFFFFFFFL", "FFFFFFFFR",
-			// 長さ10
-			"LFFFFFFFR", "RFFFFFFFL",
-			"LFFFFFFFF", "RFFFFFFFF",
-		};
+		var tempMacroList = new List<string>();
 
-		// ---- 右手法・左手法パターン ----
-		var wallFollowMacros = new List<string>();
-		foreach (int a in new[] { 1, 2, 3, 4, 5 }) {
-			string fa = new string('F', a);
-			foreach (int b in new[] { 1, 2, 3, 4, 5 }) {
-				string fb = new string('F', b);
-				int total = 2 + a + b;   // R/L x2 + F x(a+b)
-				if (total > 12) continue;
-				wallFollowMacros.Add("R" + fa + "L" + fb);   // 右手法
-				wallFollowMacros.Add("L" + fa + "R" + fb);   // 左手法
-				wallFollowMacros.Add(fa + "R" + fb);          // コーナー右
-				wallFollowMacros.Add(fa + "L" + fb);          // コーナー左
-				wallFollowMacros.Add(fa + "R" + fb + "L");    // コーナー右+向き戻し
-				wallFollowMacros.Add(fa + "L" + fb + "R");    // コーナー左+向き戻し
+		/*
+		// 1. 純直進（長さ4〜7）: 4種
+		tempMacroList.AddRange(new[] { "FFFF", "FFFFF", "FFFFFF", "FFFFFFF" });
+
+		// 2. 方向保持・両端ターン（長さ6〜9）: 20種程度
+		//    LXXXR, RXXXL 形で F が 4〜7個
+		foreach (int nF in new[] { 4, 5, 6, 7 }) {
+			string f = new string('F', nF);
+			tempMacroList.Add("L" + f + "R");
+			tempMacroList.Add("R" + f + "L");
+			if (nF >= 5) {
+				tempMacroList.Add("LL" + f.Substring(0, nF - 1) + "R");
+				tempMacroList.Add("RR" + f.Substring(0, nF - 1) + "L");
+				tempMacroList.Add("L" + f.Substring(0, nF - 1) + "RR");
+				tempMacroList.Add("R" + f.Substring(0, nF - 1) + "LL");
 			}
 		}
-		// 右手法2周
-		foreach (int n in new[] { 1, 2, 3 }) {
-			string unit = "R" + new string('F', n) + "L" + new string('F', n);
-			if (unit.Length * 2 <= 12) wallFollowMacros.Add(unit + unit);
-			string unitL = "L" + new string('F', n) + "R" + new string('F', n);
-			if (unitL.Length * 2 <= 12) wallFollowMacros.Add(unitL + unitL);
+
+		// 3. 片側ターン（長さ6〜9）: 20種
+		foreach (int nF in new[] { 5, 6, 7, 8 }) {
+			string f = new string('F', nF);
+			tempMacroList.Add("L" + f);
+			tempMacroList.Add("R" + f);
+			tempMacroList.Add(f + "L");
+			tempMacroList.Add(f + "R");
 		}
 
-		macroList = macroList.Concat(
-			wallFollowMacros.Distinct().Where(s => s.Contains('F'))
-		).ToArray();
+		// 4. 中間ターン（長さ7〜9）: 20種
+		foreach (int a in new[] { 2, 3, 4 }) {
+			foreach (int b in new[] { 3, 4, 5 }) {
+				if (a + b + 1 > 10) continue;
+				string fa = new string('F', a);
+				string fb = new string('F', b);
+				tempMacroList.Add(fa + "L" + fb);
+				tempMacroList.Add(fa + "R" + fb);
+			}
+		}
+
+		// 5. 右手法・左手法の基本形（長さ6〜10）: 30種
+		foreach (int a in new[] { 1, 2, 3 }) {
+			foreach (int b in new[] { 1, 2, 3 }) {
+				int total = 2 + a + b;
+				if (total > 10) continue;
+				string fa = new string('F', a);
+				string fb = new string('F', b);
+				tempMacroList.Add("R" + fa + "L" + fb);  // 右手法
+				tempMacroList.Add("L" + fa + "R" + fb);  // 左手法
+				tempMacroList.Add(fa + "R" + fb);        // コーナー右
+				tempMacroList.Add(fa + "L" + fb);        // コーナー左
+			}
+		}
+
+		// 6. 長いマクロ（10〜12）: 少数精鋭で10種程度
+		tempMacroList.AddRange(new[] {
+			"FFFFRFFFFL", "FFFFLFFFFR",  // 採用実績あり
+			"RFFFFFFFL", "LFFFFFFR",
+			"FFFFFFFFL", "FFFFFFFFR",
+			"FFFFFRFFFFFL",  // 12文字・採用実績あり
+			"LFFRFFLFFRFF",  // 12文字・採用実績あり
+			"RFLFFFFLF", "LFRFFFFRF"  // 右手法の長め
+		});
+
+		var macroList = tempMacroList.Distinct().ToArray();
+		*/
+
+		// 1. 純直進（長さ7〜12）: 長いものを優先
+		tempMacroList.AddRange(new[] {
+			"FFFFFFFFFF",    // 10
+			"FFFFFFFFF",     // 9
+			"FFFFFFFF",      // 8
+			"FFFFFFF",       // 7
+			"FFFFFF",        // 6
+		});
+
+		// 2. 方向保持・両端ターン（長さ9〜14）
+		foreach (int nF in new[] { 7, 8, 9, 10, 11, 12 }) {
+			string f = new string('F', nF);
+			tempMacroList.Add("L" + f + "R");
+			tempMacroList.Add("R" + f + "L");
+			if (nF >= 8 && nF <= 10) {  // 長すぎると効率悪い
+				tempMacroList.Add("LL" + f.Substring(0, nF - 1) + "R");
+				tempMacroList.Add("RR" + f.Substring(0, nF - 1) + "L");
+				tempMacroList.Add("L" + f.Substring(0, nF - 1) + "RR");
+				tempMacroList.Add("R" + f.Substring(0, nF - 1) + "LL");
+			}
+		}
+
+		// 3. 片側ターン（長さ8〜12）
+		foreach (int nF in new[] { 7, 8, 9, 10, 11 }) {
+			string f = new string('F', nF);
+			tempMacroList.Add("L" + f);
+			tempMacroList.Add("R" + f);
+			tempMacroList.Add(f + "L");
+			tempMacroList.Add(f + "R");
+		}
+
+		// 4. 中間ターン（長さ9〜12）
+		foreach (int a in new[] { 3, 4, 5, 6 }) {
+			foreach (int b in new[] { 4, 5, 6, 7 }) {
+				int total = a + b + 1;
+				if (total < 9 || total > 14) continue;
+				string fa = new string('F', a);
+				string fb = new string('F', b);
+				tempMacroList.Add(fa + "L" + fb);
+				tempMacroList.Add(fa + "R" + fb);
+			}
+		}
+
+		// 5. 右手法・左手法（長さ8〜18）
+		foreach (int a in new[] { 2, 3, 4, 5 }) {
+			foreach (int b in new[] { 2, 3, 4, 5 }) {
+				int total = 2 + a + b;
+				if (total < 8 || total > 18) continue;
+				string fa = new string('F', a);
+				string fb = new string('F', b);
+				tempMacroList.Add("R" + fa + "L" + fb);
+				tempMacroList.Add("L" + fa + "R" + fb);
+				if (total <= 16) {  // コーナー系は16まで
+					tempMacroList.Add(fa + "R" + fb);
+					tempMacroList.Add(fa + "L" + fb);
+				}
+			}
+		}
+
+		// 6. 右手法2〜5周（長さ12〜20）
+		foreach (int n in new[] { 1, 2, 3 }) {
+			string unitR = "R" + new string('F', n) + "L" + new string('F', n);
+			string unitL = "L" + new string('F', n) + "R" + new string('F', n);
+			for (int repeat = 3; repeat <= 5; repeat++) {
+				string macroR = string.Concat(Enumerable.Repeat(unitR, repeat));
+				string macroL = string.Concat(Enumerable.Repeat(unitL, repeat));
+				if (macroR.Length >= 12 && macroR.Length <= 20) {
+					tempMacroList.Add(macroR);
+					tempMacroList.Add(macroL);
+				}
+			}
+		}
+
+		// 7. 採用実績のある長いマクロを明示的に追加
+		tempMacroList.AddRange(new[] {
+			"LFFRFFLFFRFF",   // 12・実績多数
+			"FFFFFRFFFFFL",   // 12・実績あり
+			"LFFFFFFRR",      // 9・実績多数
+			"RFFFFFFLL",      // 9
+			"FFFFRFFFFL",     // 10・実績あり
+			"FFFFLFFFFR",     // 10・実績あり
+		});
+
+		// 重複削除・長さ順ソート（長いほうが precomp で先に評価される）
+		var macroList = tempMacroList
+			.Distinct()
+			.Where(m => m.Length >= 6 && m.Length <= 20)
+			.OrderByDescending(m => m.Length)
+			.ThenBy(m => {
+				int lc = m.Count(c => c == 'L');
+				int rc = m.Count(c => c == 'R');
+				return Math.Abs(lc - rc);  // 方向保持を優先
+			})
+			//.Take(100)  // 上限100種
+			.ToArray();
+
+		// → 合計 100〜120 種を想定
+		info.MC = macroList.Length;
 
 		var dirs = new[] { Direction4.D, Direction4.L, Direction4.U, Direction4.R };
 
@@ -459,7 +562,7 @@ public class Program
 			keyPos[1 + M + k] = (input.Balls[k].d, input.Balls[k].e);
 		}
 
-		double precompDeadline = Math.Min(sw.Elapsed.TotalMilliseconds + 800.0, 1200.0);
+		double precompDeadline = Math.Min(sw.Elapsed.TotalMilliseconds + 1200.0, 1600.0);
 		var nodeDistAll = new int[macroList.Length][,,];
 		var nodeArrDirAll = new int[macroList.Length][,,];
 		var macroEnabled = new bool[macroList.Length];
@@ -470,6 +573,8 @@ public class Program
 
 		for (int mi = 0; mi < macroList.Length; mi++) {
 			if (mi > 0 && sw.Elapsed.TotalMilliseconds > precompDeadline) break;
+
+			info.PPM++;
 			var macroDest = macroDestAll[mi];
 			var nodeDist = new int[K, 4, K];
 			var nodeArrDir = new int[K, 4, K];
@@ -1497,6 +1602,9 @@ public class Information
 	public int A { get; set; } = 0;
 	public int Width { get; set; } = 0;
 	public int Depth { get; set; } = 0;
+
+	public int MC { get; set; } = 0;
+	public int PPM { get; set; } = 0;
 }
 
 public class Input
