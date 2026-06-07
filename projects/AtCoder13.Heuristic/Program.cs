@@ -425,7 +425,12 @@ public class Program
 						foreach (var op in mac) {
 							switch (op) {
 								case 'F':
-									if (!input.Map.CanMove(nr, nc, nd)) { mOk = false; } else { var mv = nd.Move(nr, nc); nr = mv.i; nc = mv.j; }
+									if (input.Map.CanMove(nr, nc, nd)) {
+										var mv = nd.Move(nr, nc);
+										nr = mv.i;
+										nc = mv.j;
+									}
+
 									break;
 								case 'L': nd = nd.Rotate(Rotation.L); break;
 								case 'R': nd = nd.Rotate(Rotation.R); break;
