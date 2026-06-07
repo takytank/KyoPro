@@ -1,7 +1,6 @@
 ﻿using System.Data;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using System.Runtime.InteropServices;
 
 namespace AtCoder13.Heuristic;
 
@@ -30,7 +29,7 @@ public class Program
 						$"PPM={info.PPM:d3}",
 						$"W={info.Width:d4}",
 						$"D={info.Depth:d7}",
-						//$"ML={info.ML:d3}",
+						$"ML={info.ML:d3}",
 						//$"RA={info.RA:d5}",
 						//$"A={info.A:d4}",
 						$"score={info.Score:d5}",
@@ -217,131 +216,6 @@ public class Program
 		return state;
 	}
 
-	static State Plan5(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var order = OptimizeBallOrder(input, sw, rnd);
-		// bestScore は純粋な経路ステップ数の和（overhead 除く）
-		int bestScore = int.MaxValue;
-
-		var macros = GenerateMacros();
-		// 短いマクロ優先でソート
-		macros = macros.OrderBy(x => x.Length).ThenBy(x => rnd.Next()).ToList();
-
-		double timeLimit = 1900;
-
-		// macroDest を遅延計算でキャッシュ
-		var macroDestCache = new Dictionary<string, (int i, int j, Direction4 dir, bool ok)[,,]>();
-		var dirs = new[] { Direction4.D, Direction4.L, Direction4.U, Direction4.R };
-
-		var dist = new int[input.N, input.N, 4];
-		var prev = new (int i, int j, Direction4 dir, char op)[input.N, input.N, 4];
-		var que = new Queue<int>();
-		// stamp 方式で visited クリアを O(1) に
-		var stamp = new int[input.N, input.N, 4];
-		int currentStamp = 0;
-		// routeBuffer: 最大経路長として盤面サイズ×4方向×7(マクロ長)で十分な大きさ
-		var routeBuffer = new char[input.N * input.N * 4 * 8];
-		// dist を初期化
-		MemoryMarshal.CreateSpan(ref dist[0, 0, 0], dist.Length).Fill(int.MaxValue);
-
-		// 経路バッファ: ボールごとに pick/drop の経路を保存
-		var pickPaths = new char[input.M][];
-		var dropPaths = new char[input.M][];
-		// 確定した最良経路を保存
-		var bestPickPaths = new char[input.M][];
-		var bestDropPaths = new char[input.M][];
-		string bestMacro = null;
-
-		// 全マクロを1周だけ試す
-		var allMacros = macros.ToList();
-
-		foreach (var macro in allMacros) {
-			if (sw.Elapsed.TotalMilliseconds > timeLimit) break;
-			++info.Loop;
-
-			// macroDest を遅延計算
-			if (!macroDestCache.TryGetValue(macro, out var macroDest)) {
-				macroDest = new (int i, int j, Direction4 dir, bool ok)[input.N, input.N, 4];
-				for (int i = 0; i < input.N; i++) {
-					for (int j = 0; j < input.N; j++) {
-						foreach (var dir in dirs) {
-							int nr = i, nc = j;
-							Direction4 nd = dir;
-							bool mOk = true;
-							foreach (var op in macro) {
-								if (op == 'F') {
-									if (!input.Map.CanMove(nr, nc, nd)) { mOk = false; break; }
-									var moved = nd.Move(nr, nc);
-									nr = moved.i; nc = moved.j;
-								} else if (op == 'L') {
-									nd = nd.Rotate(Rotation.L);
-								} else if (op == 'R') {
-									nd = nd.Rotate(Rotation.R);
-								}
-							}
-							macroDest[i, j, dir.ToIndex4()] = (nr, nc, nd, mOk);
-						}
-					}
-				}
-				macroDestCache[macro] = macroDest;
-			}
-
-			// State を使って正確に評価
-			var state = new State(input, isLocal);
-			state.SetMacro(macro.ToCharArray());
-
-			int currentScore = 0;
-			bool ok = true;
-
-			foreach (int k in order) {
-				var (si, sj, ti, tj) = input.Balls[k];
-
-				var pPick = MacroBfs(input, input.Map, state.Robo.i, state.Robo.j, state.Direction, si, sj, macroDest, dist, prev, que, stamp, ref currentStamp, bestScore - currentScore, routeBuffer);
-				if (pPick == null) { ok = false; break; }
-				currentScore += pPick.Length;
-				if (currentScore >= bestScore) { ok = false; break; }
-				foreach (var op in pPick) state.AddOp(op);
-				pickPaths[k] = pPick;
-				state.Exchange();
-
-				var pDrop = MacroBfs(input, input.Map, state.Robo.i, state.Robo.j, state.Direction, ti, tj, macroDest, dist, prev, que, stamp, ref currentStamp, bestScore - currentScore, routeBuffer);
-				if (pDrop == null) { ok = false; break; }
-				currentScore += pDrop.Length;
-				if (currentScore >= bestScore) { ok = false; break; }
-				foreach (var op in pDrop) state.AddOp(op);
-				dropPaths[k] = pDrop;
-				state.Exchange();
-			}
-
-			if (ok && currentScore < bestScore) {
-				bestScore = currentScore;
-				for (int k = 0; k < input.M; k++) {
-					bestPickPaths[k] = (char[])pickPaths[k].Clone();
-					bestDropPaths[k] = (char[])dropPaths[k].Clone();
-				}
-				bestMacro = macro;
-				++info.Up;
-			}
-		}
-
-		// 最良マクロで State を1回だけ構築
-		if (bestMacro != null) {
-			var state = new State(input, isLocal);
-			state.SetMacro(bestMacro.ToCharArray());
-			foreach (int k in order) {
-				ApplyPath(state, bestPickPaths[k]);
-				state.Exchange();
-				ApplyPath(state, bestDropPaths[k]);
-				state.Exchange();
-			}
-			info.ML = bestMacro.Length;
-			info.Macro = bestMacro;
-			return state;
-		}
-
-		return Plan3(isLocal, sw, rnd, input, info);
-	}
-
 	static State Plan10(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		int N = input.N;
@@ -349,82 +223,18 @@ public class Program
 
 		var tempMacroList = new List<string>();
 
-		/*
-		// 1. 純直進（長さ4〜7）: 4種
-		tempMacroList.AddRange(new[] { "FFFF", "FFFFF", "FFFFFF", "FFFFFFF" });
-
-		// 2. 方向保持・両端ターン（長さ6〜9）: 20種程度
-		//    LXXXR, RXXXL 形で F が 4〜7個
-		foreach (int nF in new[] { 4, 5, 6, 7 }) {
-			string f = new string('F', nF);
-			tempMacroList.Add("L" + f + "R");
-			tempMacroList.Add("R" + f + "L");
-			if (nF >= 5) {
-				tempMacroList.Add("LL" + f.Substring(0, nF - 1) + "R");
-				tempMacroList.Add("RR" + f.Substring(0, nF - 1) + "L");
-				tempMacroList.Add("L" + f.Substring(0, nF - 1) + "RR");
-				tempMacroList.Add("R" + f.Substring(0, nF - 1) + "LL");
-			}
-		}
-
-		// 3. 片側ターン（長さ6〜9）: 20種
-		foreach (int nF in new[] { 5, 6, 7, 8 }) {
-			string f = new string('F', nF);
-			tempMacroList.Add("L" + f);
-			tempMacroList.Add("R" + f);
-			tempMacroList.Add(f + "L");
-			tempMacroList.Add(f + "R");
-		}
-
-		// 4. 中間ターン（長さ7〜9）: 20種
-		foreach (int a in new[] { 2, 3, 4 }) {
-			foreach (int b in new[] { 3, 4, 5 }) {
-				if (a + b + 1 > 10) continue;
-				string fa = new string('F', a);
-				string fb = new string('F', b);
-				tempMacroList.Add(fa + "L" + fb);
-				tempMacroList.Add(fa + "R" + fb);
-			}
-		}
-
-		// 5. 右手法・左手法の基本形（長さ6〜10）: 30種
-		foreach (int a in new[] { 1, 2, 3 }) {
-			foreach (int b in new[] { 1, 2, 3 }) {
-				int total = 2 + a + b;
-				if (total > 10) continue;
-				string fa = new string('F', a);
-				string fb = new string('F', b);
-				tempMacroList.Add("R" + fa + "L" + fb);  // 右手法
-				tempMacroList.Add("L" + fa + "R" + fb);  // 左手法
-				tempMacroList.Add(fa + "R" + fb);        // コーナー右
-				tempMacroList.Add(fa + "L" + fb);        // コーナー左
-			}
-		}
-
-		// 6. 長いマクロ（10〜12）: 少数精鋭で10種程度
-		tempMacroList.AddRange(new[] {
-			"FFFFRFFFFL", "FFFFLFFFFR",  // 採用実績あり
-			"RFFFFFFFL", "LFFFFFFR",
-			"FFFFFFFFL", "FFFFFFFFR",
-			"FFFFFRFFFFFL",  // 12文字・採用実績あり
-			"LFFRFFLFFRFF",  // 12文字・採用実績あり
-			"RFLFFFFLF", "LFRFFFFRF"  // 右手法の長め
-		});
-
-		var macroList = tempMacroList.Distinct().ToArray();
-		*/
-
 		// 1. 純直進（長さ7〜12）: 長いものを優先
+		/*
 		tempMacroList.AddRange(new[] {
 			"FFFFFFFFFF",    // 10
 			"FFFFFFFFF",     // 9
 			"FFFFFFFF",      // 8
 			"FFFFFFF",       // 7
 			"FFFFFF",        // 6
-		});
+		});*/
 
 		// 2. 方向保持・両端ターン（長さ9〜14）
-		foreach (int nF in new[] { 7, 8, 9, 10, 11, 12 }) {
+		foreach (int nF in new[] { 7, 8, 9, 10, 11, 12, 13, 14 }) {
 			string f = new string('F', nF);
 			tempMacroList.Add("L" + f + "R");
 			tempMacroList.Add("R" + f + "L");
@@ -473,14 +283,14 @@ public class Program
 			}
 		}
 
-		// 6. 右手法2〜5周（長さ12〜20）
+		// 6. 右手法2〜5周（長さ12〜32）
 		foreach (int n in new[] { 1, 2, 3 }) {
 			string unitR = "R" + new string('F', n) + "L" + new string('F', n);
 			string unitL = "L" + new string('F', n) + "R" + new string('F', n);
-			for (int repeat = 3; repeat <= 5; repeat++) {
+			for (int repeat = 3; repeat <= 8; repeat++) {
 				string macroR = string.Concat(Enumerable.Repeat(unitR, repeat));
 				string macroL = string.Concat(Enumerable.Repeat(unitL, repeat));
-				if (macroR.Length >= 12 && macroR.Length <= 20) {
+				if (macroR.Length >= 12 && macroR.Length <= 32) {
 					tempMacroList.Add(macroR);
 					tempMacroList.Add(macroL);
 				}
@@ -489,10 +299,7 @@ public class Program
 
 		// 7. 採用実績のある長いマクロを明示的に追加
 		tempMacroList.AddRange(new[] {
-			"LFFRFFLFFRFF",   // 12・実績多数
 			"FFFFFRFFFFFL",   // 12・実績あり
-			"LFFFFFFRR",      // 9・実績多数
-			"RFFFFFFLL",      // 9
 			"FFFFRFFFFL",     // 10・実績あり
 			"FFFFLFFFFR",     // 10・実績あり
 		});
@@ -500,7 +307,7 @@ public class Program
 		// 重複削除・長さ順ソート（長いほうが precomp で先に評価される）
 		var macroList = tempMacroList
 			.Distinct()
-			.Where(m => m.Length >= 6 && m.Length <= 20)
+			.Where(m => m.Length >= 6 && m.Length <= 32)
 			.OrderByDescending(m => m.Length)
 			.ThenBy(m => {
 				int lc = m.Count(c => c == 'L');
@@ -515,16 +322,15 @@ public class Program
 
 		var dirs = new[] { Direction4.D, Direction4.L, Direction4.U, Direction4.R };
 
-		var macroDestAll = new (int i, int j, Direction4 dir, bool ok)[macroList.Length][,,];
+		var macroDestAll = new (int i, int j, Direction4 dir)[macroList.Length][,,];
 		for (int mi = 0; mi < macroList.Length; mi++) {
 			var mac = macroList[mi];
-			var dest = new (int i, int j, Direction4 dir, bool ok)[N, N, 4];
+			var dest = new (int i, int j, Direction4 dir)[N, N, 4];
 			for (int i = 0; i < N; i++) {
 				for (int j = 0; j < N; j++) {
 					foreach (var dir in dirs) {
 						int nr = i, nc = j;
 						Direction4 nd = dir;
-						bool mOk = true;
 						foreach (var op in mac) {
 							switch (op) {
 								case 'F':
@@ -538,9 +344,8 @@ public class Program
 								case 'L': nd = nd.Rotate(Rotation.L); break;
 								case 'R': nd = nd.Rotate(Rotation.R); break;
 							}
-							if (!mOk) break;
 						}
-						dest[i, j, dir.ToIndex4()] = (nr, nc, nd, mOk);
+						dest[i, j, dir.ToIndex4()] = (nr, nc, nd);
 					}
 				}
 			}
@@ -562,7 +367,7 @@ public class Program
 			keyPos[1 + M + k] = (input.Balls[k].d, input.Balls[k].e);
 		}
 
-		double precompDeadline = Math.Min(sw.Elapsed.TotalMilliseconds + 1200.0, 1600.0);
+		double precompDeadline = Math.Min(sw.Elapsed.TotalMilliseconds + 1300.0, 1700.0);
 		var nodeDistAll = new int[macroList.Length][,,];
 		var nodeArrDirAll = new int[macroList.Length][,,];
 		var macroEnabled = new bool[macroList.Length];
@@ -618,7 +423,7 @@ public class Program
 						Push2(ci, cj, cdir.Rotate(Rotation.L));
 						Push2(ci, cj, cdir.Rotate(Rotation.R));
 						var dest = macroDest[ci, cj, cIdx];
-						if (dest.ok) Push2(dest.i, dest.j, dest.dir);
+						Push2(dest.i, dest.j, dest.dir);
 					}
 
 					for (int to = 0; to < K; to++) {
@@ -699,7 +504,7 @@ public class Program
 
 		// SA: 2-opt と or-opt を交互に試みる
 		double saStartMs = sw.Elapsed.TotalMilliseconds;
-		const double saEndMs = 1700.0;
+		const double saEndMs = 1950.0;
 		double initTemp;
 		{
 			double sum = 0; int cnt = 0;
@@ -729,12 +534,12 @@ public class Program
 
 			if (iter - pruneIter >= 500) {
 				pruneIter = iter;
-				if (elapsed > 900.0) {
+				if (progress > 0.3) {
 					int globalMin = int.MaxValue;
 					for (int i = 0; i < macroList.Length; i++)
 						if (macroEnabled[i] && bestCosts[i] < globalMin)
 							globalMin = bestCosts[i];
-					double threshold = elapsed < 1300.0 ? 1.1 : 1.03;
+					double threshold = progress < 0.5 ? 1.1 : 1.03;
 					for (int i = 0; i < macroList.Length; i++)
 						if (macroEnabled[i] && bestCosts[i] > globalMin * threshold)
 							macroEnabled[i] = false;
@@ -869,7 +674,7 @@ public class Program
 
 		for (int mi = 0; mi < macroList.Length; mi++) {
 			if (!macroEnabled[mi] || bestOrders[mi] == null) continue;
-			if (sw.Elapsed.TotalMilliseconds > 1880.0) break;
+			if (sw.Elapsed.TotalMilliseconds > 1980.0) break;
 			var mac = macroList[mi];
 			var macroDest = macroDestAll[mi];
 			var order = bestOrders[mi];
@@ -1071,23 +876,20 @@ public class Program
 		return snapshots.Length == order.Length;
 	}
 
-	static (int i, int j, Direction4 dir, bool ok)[,,] BuildMacroDest(Input input, char[] macro)
+	static (int i, int j, Direction4 dir)[,,] BuildMacroDest(Input input, char[] macro)
 	{
 		int N = input.N;
 		var dirs = new[] { Direction4.D, Direction4.L, Direction4.U, Direction4.R };
-		var dest = new (int i, int j, Direction4 dir, bool ok)[N, N, 4];
+		var dest = new (int i, int j, Direction4 dir)[N, N, 4];
 		for (int i = 0; i < N; i++) {
 			for (int j = 0; j < N; j++) {
 				foreach (var dir in dirs) {
 					int nr = i, nc = j;
 					Direction4 nd = dir;
-					bool ok = true;
 					foreach (var op in macro) {
 						switch (op) {
 							case 'F':
-								if (!input.Map.CanMove(nr, nc, nd)) {
-									ok = false;
-								} else {
+								if (input.Map.CanMove(nr, nc, nd)) {
 									var mv = nd.Move(nr, nc);
 									nr = mv.i;
 									nc = mv.j;
@@ -1100,9 +902,8 @@ public class Program
 								nd = nd.Rotate(Rotation.R);
 								break;
 						}
-						if (!ok) break;
 					}
-					dest[i, j, dir.ToIndex4()] = (nr, nc, nd, ok);
+					dest[i, j, dir.ToIndex4()] = (nr, nc, nd);
 				}
 			}
 		}
@@ -1121,7 +922,7 @@ public class Program
 	}
 
 	static List<(int i, int j)> EnumeratePlan11RelayTargets(Input input, State state, int k, int ti, int tj,
-		(int i, int j, Direction4 dir, bool ok)[,,] macroDest, int limit)
+		(int i, int j, Direction4 dir)[,,] macroDest, int limit)
 	{
 		int N = input.N;
 		var (si, sj) = state.Balls[k];
@@ -1131,7 +932,7 @@ public class Program
 				int dirCount = 0;
 				for (int d = 0; d < 4; d++) {
 					var dest = macroDest[i, j, d];
-					if (dest.ok && dest.i == ti && dest.j == tj) {
+					if (dest.i == ti && dest.j == tj) {
 						dirCount++;
 					}
 				}
@@ -1154,7 +955,7 @@ public class Program
 			.ToList();
 	}
 
-	static bool TryInsertBallMoveToCell(Input input, State state, int k, int ti, int tj, (int i, int j, Direction4 dir, bool ok)[,,] macroDest)
+	static bool TryInsertBallMoveToCell(Input input, State state, int k, int ti, int tj, (int i, int j, Direction4 dir)[,,] macroDest)
 	{
 		int N = input.N;
 		var macrodist = new int[N, N, 4];
@@ -1183,7 +984,7 @@ public class Program
 	}
 
 	static State BuildPlan11Tail(bool isLocal, Input input, State prefixState, int[] order, int startIndex, bool[] skipBalls,
-		(int i, int j, Direction4 dir, bool ok)[,,] macroDest, Stopwatch sw, double deadline)
+		(int i, int j, Direction4 dir)[,,] macroDest, Stopwatch sw, double deadline)
 	{
 		int N = input.N;
 		var state = CloneState(prefixState, input, isLocal);
@@ -1253,7 +1054,7 @@ public class Program
 		}
 	}
 
-	static char[] MacroBfs(Input input, Maze map, int si, int sj, Direction4 sdir, int ti, int tj, (int i, int j, Direction4 dir, bool ok)[,,] macroDest, int[,,] dist, (int i, int j, Direction4 dir, char op)[,,] prev, Queue<int> que, int[,,] stamp, ref int currentStamp, int bestScoreSoFar, char[] routeBuffer)
+	static char[] MacroBfs(Input input, Maze map, int si, int sj, Direction4 sdir, int ti, int tj, (int i, int j, Direction4 dir)[,,] macroDest, int[,,] dist, (int i, int j, Direction4 dir, char op)[,,] prev, Queue<int> que, int[,,] stamp, ref int currentStamp, int bestScoreSoFar, char[] routeBuffer)
 	{
 		if (si == ti && sj == tj) return [];
 
@@ -1318,9 +1119,7 @@ public class Program
 
 			// P (マクロ実行)
 			var dest = macroDest[ci, cj, cIdx];
-			if (dest.ok) {
-				Push(dest.i, dest.j, dest.dir, 'P');
-			}
+			Push(dest.i, dest.j, dest.dir, 'P');
 		}
 
 		if (goalDist == int.MaxValue) return null;
