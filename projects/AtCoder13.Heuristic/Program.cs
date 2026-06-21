@@ -27,7 +27,7 @@ public class Program
 						//$"N={input.N:d2}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
-						$"score={info.Score:d5}",
+						$"score={info.Score:d9}",
 						$"elapsed={info.Elapsed:d4}",
 					};
 
@@ -46,15 +46,428 @@ public class Program
 	static (Input input, Information info)
 		Run(int caseNumber)
 	{
-		var (isDebug, sw, rnd) = HeuristicHelper.Initialize();
-		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC056\tools\in\", caseNumber);
+		var (isLocal, sw, rnd) = HeuristicHelper.Initialize();
+		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC067\tools\in\", caseNumber);
 
-		var input = new Input(io, isDebug);
+		var input = new Input(io, isLocal);
 		var info = new Information();
 
+		var best = Plan1(isLocal, sw, rnd, input, info);
+
+		input.Output(best);
+
+		info.Score = best.Calculate();
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
+	}
+
+	static State Plan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		int n = input.N;
+		int k = input.K;
+
+		var initialDists = state.GetDistance();
+
+		// 玉座の上と左のマスをチェックして、どちらも障害物ではなく、かつ玉座よりも勇者に近い場合、
+		// 上方向を扉 2K-1 で塞ぐ。
+		int goalI = n - 1;
+		int goalJ = n - 1;
+		int upI = goalI - 1;
+		int leftJ = goalJ - 1;
+
+		bool hasUpPath = upI >= 0 && input.C[upI][goalJ] == '.' && initialDists[0, upI, goalJ] != -1
+			&& initialDists[0, upI, goalJ] < initialDists[0, goalI, goalJ];
+		bool hasLeftPath = leftJ >= 0 && input.C[goalI][leftJ] == '.' && initialDists[0, goalI, leftJ] != -1
+			&& initialDists[0, goalI, leftJ] < initialDists[0, goalI, goalJ];
+
+		int blockDoor = 2 * k - 1;
+		if (hasUpPath && hasLeftPath) {
+			// 両方有効な場合、距離が短い方を扉 2K-1 で塞ぐ
+			if (initialDists[0, upI, goalJ] <= initialDists[0, goalI, leftJ]) {
+				// 上方向を扉 2K-1 で塞ぐ (d=0: 上下方向)
+				state.AddDoor(0, upI, goalJ, blockDoor);
+				// 左方向を扉 1 で塞ぐ
+				state.AddDoor(1, goalI, leftJ, 1);
+			} else {
+				// 左方向を扉 2K-1 で塞ぐ (d=1: 左右方向)
+				state.AddDoor(1, goalI, leftJ, blockDoor);
+				// 上方向を扉 1 で塞ぐ
+				state.AddDoor(0, upI, goalJ, 1);
+			}
+		} else if (hasUpPath) {
+			// 上方向を扉 1 で塞ぐ
+			state.AddDoor(0, upI, goalJ, 1);
+		} else if (hasLeftPath) {
+			// 左方向を扉 1 で塞ぐ
+			state.AddDoor(1, goalI, leftJ, 1);
+		}
+
+		// スイッチ 0 ~ K - 2 において、
+		// 魔王城の袋小路になっているマスにスイッチ i をおき、そのマスへ到達可能な方向に扉 (i + 1) * 2 + 1 をおく。
+		// 配置可能な袋小路がなくなったらそこでやめる。
+
+		// 袋小路を探す: 隣接する空きマスが1つだけのマス
+		var deadEnds = new List<(int i, int j, int distance, Direction4 exitDir)>();
+		for (int i = 0; i < n; i++) {
+			for (int j = 0; j < n; j++) {
+				if (input.C[i][j] == '#' || initialDists[0, i, j] == -1) {
+					continue;
+				}
+
+				// 玉座、及び、玉座よりも遠いマスは除く
+				int dist = initialDists[0, i, j];
+				if ((i == goalI && j == goalJ)
+					|| (dist > initialDists[0, goalI, goalJ])) {
+					continue;
+				}
+
+				var adjacentCells = new List<(int ni, int nj, Direction4 dir)>();
+				foreach (var (ni, nj, dir) in Direction4Extensions.Adjacence4(i, j, n, n)) {
+					if (input.C[ni][nj] == '.') {
+						adjacentCells.Add((ni, nj, dir));
+					}
+				}
+
+				// 隣接する空きマスが1つだけなら袋小路
+				if (adjacentCells.Count == 1) {
+					deadEnds.Add((i, j, initialDists[0, i, j], adjacentCells[0].dir));
+				}
+			}
+		}
+
+		// 距離が遠い順にソート
+		deadEnds.Sort((a, b) => b.distance.CompareTo(a.distance));
+
+		// スイッチ 0 ~ K-2 に対して袋小路に配置
+		int switchIndex = 0;
+		foreach (var (deadI, deadJ, distance, exitDir) in deadEnds) {
+			if (switchIndex >= k - 1) {
+				break;
+			}
+
+			// 袋小路にスイッチを配置
+			state.AddSwitch(deadI, deadJ, switchIndex);
+
+			// 出口方向に扉 (switchIndex + 1) * 2 + 1 を配置
+			int doorType = (switchIndex + 1) * 2 + 1;
+
+			// 扉の配置座標を計算
+			if (exitDir == Direction4.D) {
+				// 下方向: (deadI, deadJ) と (deadI+1, deadJ) の間
+				state.AddDoor(0, deadI, deadJ, doorType);
+			} else if (exitDir == Direction4.U) {
+				// 上方向: (deadI-1, deadJ) と (deadI, deadJ) の間
+				state.AddDoor(0, deadI - 1, deadJ, doorType);
+			} else if (exitDir == Direction4.R) {
+				// 右方向: (deadI, deadJ) と (deadI, deadJ+1) の間
+				state.AddDoor(1, deadI, deadJ, doorType);
+			} else if (exitDir == Direction4.L) {
+				// 左方向: (deadI, deadJ-1) と (deadI, deadJ) の間
+				state.AddDoor(1, deadI, deadJ - 1, doorType);
+			}
+
+			switchIndex++;
+		}
+
+		// 最後に配置した扉を開くためのスイッチを、この状態で一番勇者から遠いマスに配置する。
+		{
+			// 現在の状態で距離を再計算
+			var currentDists = state.GetDistance();
+
+			int maxDist = -1;
+			int maxI = -1;
+			int maxJ = -1;
+			int maxMask = -1;
+
+			// すべての状態で最も遠いマスを探す
+			int maxMask2 = 1 << k;
+			for (int mask = 0; mask < maxMask2; mask++) {
+				for (int i = 0; i < n; i++) {
+					for (int j = 0; j < n; j++) {
+						if (currentDists[mask, i, j] > maxDist) {
+							maxDist = currentDists[mask, i, j];
+							maxI = i;
+							maxJ = j;
+							maxMask = mask;
+						}
+					}
+				}
+			}
+
+			// 最も遠いマスにスイッチ K-1 を配置
+			if (maxI != -1 && maxJ != -1) {
+				state.AddSwitch(maxI, maxJ, k - 1);
+			}
+		}
+
+		return state;
+	}
+}
+
+public class State
+{
+	private readonly bool _isLocal;
+	private readonly Input _input;
+
+	public List<(int d, int i, int j, int g)> Doors { get; }
+	public List<(int p, int q, int s)> Switches { get; }
+
+
+	public State(bool isLocal, Input input)
+	{
+		_isLocal = isLocal;
+		_input = input;
+
+		Doors = [];
+		Switches = [];
+	}
+
+	public void AddDoor(int d, int i, int j, int g)
+	{
+		Doors.Add((d, i, j, g));
+	}
+
+	public void AddSwitch(int p, int q, int s)
+	{
+		Switches.Add((p, q, s));
+	}
+
+	public long Calculate()
+	{
+		int n = _input.N;
+		int k = _input.K;
+
+		// door_h[i,j] は (i,j) と (i+1,j) の間の扉の型。扉なしは -1
+		var doorH = new Array2D<int>(n, n);
+		doorH.Fill(-1);
+
+		// door_v[i,j] は (i,j) と (i,j+1) の間の扉の型。扉なしは -1
+		var doorV = new Array2D<int>(n, n);
+		doorV.Fill(-1);
+
+		// switch[i,j] はマス (i,j) に置かれたスイッチの種類。スイッチなしは -1
+		var switchMap = new Array2D<int>(n, n);
+		switchMap.Fill(-1);
+
+		// 扉の配置
+		foreach (var (d, i, j, g) in Doors) {
+			if (d == 0) {
+				// マス (i,j) とマス (i+1,j) の間
+				doorH[i, j] = g;
+			} else {
+				// マス (i,j) とマス (i,j+1) の間
+				doorV[i, j] = g;
+			}
+		}
+
+		// スイッチの配置
+		foreach (var (p, q, s) in Switches) {
+			switchMap[p, q] = s;
+		}
+
+		// BFS で最小行動回数を計算
+		// 状態: (mask, i, j)
+		// mask: 各スイッチが押された回数の偶奇を表すビットマスク
+		int maxMask = 1 << k;
+		var dist = new int[maxMask, n, n];
+		for (int m = 0; m < maxMask; m++) {
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					dist[m, i, j] = -1;
+				}
+			}
+		}
+
+		var que = new Queue<(int mask, int i, int j)>();
+		dist[0, 0, 0] = 0;
+		que.Enqueue((0, 0, 0));
+
+		while (que.Count > 0) {
+			var (mask, i, j) = que.Dequeue();
+			int d = dist[mask, i, j];
+
+			// ゴールに到達
+			if (i == n - 1 && j == n - 1) {
+				// スコア計算: round(10^6 × log₂(T/N))
+				long t = d;
+				double score = 1000000.0 * Math.Log2((double)t / n);
+				return (long)Math.Round(score);
+			}
+
+			// 行動 1: 隣接する空きマスへ移動する
+			foreach (var (ni, nj, dir) in Direction4Extensions.Adjacence4(i, j, n, n)) {
+				// 移動先が障害物なら移動できない
+				if (_input.C[ni][nj] == '#') {
+					continue;
+				}
+
+				// 扉の開閉をチェック
+				int g = -1;
+				if (dir == Direction4.D) {
+					// 下方向: (i,j) と (i+1,j) の間
+					g = doorH[i, j];
+				} else if (dir == Direction4.U) {
+					// 上方向: (i-1,j) と (i,j) の間
+					g = doorH[ni, nj];
+				} else if (dir == Direction4.R) {
+					// 右方向: (i,j) と (i,j+1) の間
+					g = doorV[i, j];
+				} else if (dir == Direction4.L) {
+					// 左方向: (i,j-1) と (i,j) の間
+					g = doorV[ni, nj];
+				}
+
+				// 扉が開いているかチェック
+				if (!IsOpen(g, mask, k)) {
+					continue;
+				}
+
+				if (dist[mask, ni, nj] == -1) {
+					dist[mask, ni, nj] = d + 1;
+					que.Enqueue((mask, ni, nj));
+				}
+			}
+
+			// 行動 2: 現在のマスのスイッチを押す
+			int s = switchMap[i, j];
+			if (s != -1) {
+				int nmask = mask ^ (1 << s);
+				if (dist[nmask, i, j] == -1) {
+					dist[nmask, i, j] = d + 1;
+					que.Enqueue((nmask, i, j));
+				}
+			}
+		}
+
+		// 到達不能な場合
+		return 1;
+	}
+
+	/// <summary>
+	/// 型 g の扉が、状態 mask において開いているかを返す
+	/// </summary>
+	private static bool IsOpen(int g, int mask, int k)
+	{
+		if (g == -1) {
+			return true;
+		}
+
+		int switchK = g / 2;
+		// スイッチ k が押された回数が偶数回なら、扉 2k が開き、扉 2k+1 が閉じている
+		// スイッチ k が押された回数が奇数回なら、扉 2k が閉じ、扉 2k+1 が開いている
+		bool switchPressed = ((mask >> switchK) & 1) == 1;
+		bool doorShouldBeOpen = (g & 1) == (switchPressed ? 1 : 0);
+		return doorShouldBeOpen;
+	}
+
+	/// <summary>
+	/// 勇者が入口 (0,0) から各マス、各スイッチ状態への最短距離を計算
+	/// </summary>
+	/// <returns>dist[mask, i, j]: スイッチ状態が mask のときのマス (i,j) への最短距離。到達不能な場合は -1</returns>
+	public int[,,] GetDistance()
+	{
+		int n = _input.N;
+		int k = _input.K;
+
+		// door_h[i,j] は (i,j) と (i+1,j) の間の扉の型。扉なしは -1
+		var doorH = new Array2D<int>(n, n);
+		doorH.Fill(-1);
+
+		// door_v[i,j] は (i,j) と (i,j+1) の間の扉の型。扉なしは -1
+		var doorV = new Array2D<int>(n, n);
+		doorV.Fill(-1);
+
+		// switch[i,j] はマス (i,j) に置かれたスイッチの種類。スイッチなしは -1
+		var switchMap = new Array2D<int>(n, n);
+		switchMap.Fill(-1);
+
+		// 扉の配置
+		foreach (var (d, i, j, g) in Doors) {
+			if (d == 0) {
+				// マス (i,j) とマス (i+1,j) の間
+				doorH[i, j] = g;
+			} else {
+				// マス (i,j) とマス (i,j+1) の間
+				doorV[i, j] = g;
+			}
+		}
+
+		// スイッチの配置
+		foreach (var (p, q, s) in Switches) {
+			switchMap[p, q] = s;
+		}
+
+		// BFS で最短距離を計算
+		// 状態: (mask, i, j)
+		// mask: 各スイッチが押された回数の偶奇を表すビットマスク
+		int maxMask = 1 << k;
+		var dist = new int[maxMask, n, n];
+		for (int m = 0; m < maxMask; m++) {
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					dist[m, i, j] = -1;
+				}
+			}
+		}
+
+		var que = new Queue<(int mask, int i, int j)>();
+		dist[0, 0, 0] = 0;
+		que.Enqueue((0, 0, 0));
+
+		while (que.Count > 0) {
+			var (mask, i, j) = que.Dequeue();
+			int d = dist[mask, i, j];
+
+			// Calculate と異なり、玉座に到達しても処理を続ける
+
+			// 行動 1: 隣接する空きマスへ移動する
+			foreach (var (ni, nj, dir) in Direction4Extensions.Adjacence4(i, j, n, n)) {
+				// 移動先が障害物なら移動できない
+				if (_input.C[ni][nj] == '#') {
+					continue;
+				}
+
+				// 扉の開閉をチェック
+				int g = -1;
+				if (dir == Direction4.D) {
+					// 下方向: (i,j) と (i+1,j) の間
+					g = doorH[i, j];
+				} else if (dir == Direction4.U) {
+					// 上方向: (i-1,j) と (i,j) の間
+					g = doorH[ni, nj];
+				} else if (dir == Direction4.R) {
+					// 右方向: (i,j) と (i,j+1) の間
+					g = doorV[i, j];
+				} else if (dir == Direction4.L) {
+					// 左方向: (i,j-1) と (i,j) の間
+					g = doorV[ni, nj];
+				}
+
+				// 扉が開いているかチェック
+				if (!IsOpen(g, mask, k)) {
+					continue;
+				}
+
+				if (dist[mask, ni, nj] == -1) {
+					dist[mask, ni, nj] = d + 1;
+					que.Enqueue((mask, ni, nj));
+				}
+			}
+
+			// 行動 2: 現在のマスのスイッチを押す
+			int s = switchMap[i, j];
+			if (s != -1) {
+				int nmask = mask ^ (1 << s);
+				if (dist[nmask, i, j] == -1) {
+					dist[nmask, i, j] = d + 1;
+					que.Enqueue((nmask, i, j));
+				}
+			}
+		}
+
+		return dist;
 	}
 }
 
@@ -73,10 +486,30 @@ public class Input
 	private readonly IOManager _io;
 	private readonly bool _isDebug;
 
+	public int N { get; }
+	public int M { get; }
+	public int K { get; }
+	public string[] C { get; }
+
 	public Input(IOManager io, bool isDebug)
 	{
 		_io = io;
 		_isDebug = isDebug;
+		(N, M, K) = io.Int3();
+		C = io.ArrayString(N);
+	}
+
+	public void Output(State state)
+	{
+		_io.WriteLine(state.Doors.Count);
+		foreach (var (d, i, j, g) in state.Doors) {
+			_io.WriteLine($"{d} {i} {j} {g}");
+		}
+
+		_io.WriteLine(state.Switches.Count);
+		foreach (var (p, q, s) in state.Switches) {
+			_io.WriteLine($"{p} {q} {s}");
+		}
 	}
 }
 
