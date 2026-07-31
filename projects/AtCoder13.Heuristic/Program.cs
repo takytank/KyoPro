@@ -24,10 +24,11 @@ public class Program
 				lock (locker) {
 					var status = new List<string> {
 						$"{i:d4}:",
-						//$"N={input.N:d2}",
+						$"N={input.N:d2}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
-						$"score={info.Score:d5}",
+						$"A={info.Accept:d4}",
+						$"score={info.Score:d10}",
 						$"elapsed={info.Elapsed:d4}",
 					};
 
@@ -46,15 +47,222 @@ public class Program
 	static (Input input, Information info)
 		Run(int caseNumber)
 	{
-		var (isDebug, sw, rnd) = HeuristicHelper.Initialize();
-		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC056\tools\in\", caseNumber);
+		var (isLocal, sw, rnd) = HeuristicHelper.Initialize();
+		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC069\tools\in\", caseNumber);
 
-		var input = new Input(io, isDebug);
+		var input = new Input(io, isLocal);
 		var info = new Information();
 
+		var best = Plan1(isLocal, sw, rnd, input, info);
+
+		info.Accept = best.AcceptedCount;
+		info.Score = best.Calculate();
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
+	}
+
+	static State Plan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			state.ProcessGuest(guest);
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+
+		return state;
+	}
+
+	internal static List<(int x, int y)> CreateNearSquareShape(int p)
+	{
+		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(p);
+
+		List<(int x, int y)> bestShape = [];
+		int bestPerimeter = int.MaxValue;
+		int bestImbalance = int.MaxValue;
+		int bestUnusedArea = int.MaxValue;
+
+		for (int width = 1; width <= p; ++width) {
+			int height = (p + width - 1) / width;
+			var shape = new List<(int x, int y)>(p);
+
+			for (int index = 0; index < p; ++index) {
+				shape.Add((index / width, index % width));
+			}
+
+			var cells = shape.ToHashSet();
+			int perimeter = 0;
+			foreach (var (x, y) in shape) {
+				perimeter += cells.Contains((x - 1, y)) ? 0 : 1;
+				perimeter += cells.Contains((x + 1, y)) ? 0 : 1;
+				perimeter += cells.Contains((x, y - 1)) ? 0 : 1;
+				perimeter += cells.Contains((x, y + 1)) ? 0 : 1;
+			}
+
+			int imbalance = Math.Abs(height - width);
+			int unusedArea = height * width - p;
+
+			if (perimeter < bestPerimeter
+				|| perimeter == bestPerimeter && imbalance < bestImbalance
+				|| perimeter == bestPerimeter && imbalance == bestImbalance
+					&& unusedArea < bestUnusedArea) {
+				bestShape = shape;
+				bestPerimeter = perimeter;
+				bestImbalance = imbalance;
+				bestUnusedArea = unusedArea;
+			}
+		}
+
+		return bestShape;
+	}
+
+	internal static List<(int x, int y)> FindPlacementByFullSearch(
+		string[] row,
+		bool[,] occupied,
+		IReadOnlyList<(int x, int y)> shape)
+	{
+		if (shape.Count == 0) {
+			return [];
+		}
+
+		int height = row.Length;
+		int width = row[0].Length;
+
+		if (occupied.GetLength(0) != height
+			|| occupied.GetLength(1) != width) {
+			throw new ArgumentException(
+				"公園と占有状態の大きさが一致していません。",
+				nameof(occupied));
+		}
+
+		int shapeHeight = 0;
+		int shapeWidth = 0;
+		foreach (var (x, y) in shape) {
+			if (x < 0 || y < 0) {
+				throw new ArgumentException(
+					"形状の相対座標は非負である必要があります。",
+					nameof(shape));
+			}
+
+			shapeHeight = Math.Max(shapeHeight, x + 1);
+			shapeWidth = Math.Max(shapeWidth, y + 1);
+		}
+
+		for (int baseX = 0; baseX + shapeHeight <= height; ++baseX) {
+			for (int baseY = 0; baseY + shapeWidth <= width; ++baseY) {
+				bool canPlace = true;
+
+				foreach (var (offsetX, offsetY) in shape) {
+					int x = baseX + offsetX;
+					int y = baseY + offsetY;
+
+					if (row[x][y] != '.' || occupied[x, y]) {
+						canPlace = false;
+						break;
+					}
+				}
+
+				if (canPlace == false) {
+					continue;
+				}
+
+				var placement = new List<(int x, int y)>(shape.Count);
+				foreach (var (offsetX, offsetY) in shape) {
+					placement.Add((baseX + offsetX, baseY + offsetY));
+				}
+
+				return placement;
+			}
+		}
+
+		return [];
+	}
+}
+
+public class State
+{
+	private readonly bool _isLocal;
+	private readonly Input _input;
+	private readonly bool[,] _occupied;
+	private readonly Dictionary<int, (int departureTime, long usageFee, List<(int x, int y)> points)> _activeGroups = [];
+	private readonly PriorityQueue<int, int> _departureQueue = new();
+	private long _money;
+
+	public int AcceptedCount { get; private set; } = 0;
+
+	public State(bool isLocal, Input input)
+	{
+		_isLocal = isLocal;
+		_input = input;
+		_occupied = new bool[input.N, input.N];
+	}
+
+	public void ProcessGuest((int i, int s, int t, int p, int v) guest)
+	{
+		_input.OutputMove([]);
+
+		bool canAccept = CanAccept(guest.p, out var points);
+		if (canAccept) {
+			Accept(guest.i, guest.t, guest.v, points);
+			++AcceptedCount;
+		}
+
+		_input.OutputReception(canAccept, points);
+	}
+
+	public bool CanAccept(int p, out List<(int x, int y)> points)
+	{
+		var shape = Program.CreateNearSquareShape(p);
+		points = Program.FindPlacementByFullSearch(_input.Row, _occupied, shape);
+		return points.Count == p;
+	}
+
+	private void Accept(int groupId, int departureTime, int value, List<(int x, int y)> points)
+	{
+		foreach (var (x, y) in points) {
+			_occupied[x, y] = true;
+		}
+
+		long usageFee = CalculateUsageFee(value, points);
+		_activeGroups.Add(groupId, (departureTime, usageFee, points));
+		_departureQueue.Enqueue(groupId, departureTime);
+	}
+
+	private static long CalculateUsageFee(int value, IReadOnlyCollection<(int x, int y)> points)
+	{
+		var cells = points.ToHashSet();
+		int perimeter = 0;
+		foreach (var (x, y) in points) {
+			perimeter += cells.Contains((x - 1, y)) ? 0 : 1;
+			perimeter += cells.Contains((x + 1, y)) ? 0 : 1;
+			perimeter += cells.Contains((x, y - 1)) ? 0 : 1;
+			perimeter += cells.Contains((x, y + 1)) ? 0 : 1;
+		}
+
+		double compactness = 4.0 * Math.Sqrt(points.Count) / perimeter;
+		return (long)Math.Floor(value * compactness + 0.5);
+	}
+
+	public void ReleaseDepartedGroups(int currentTime)
+	{
+		while (_departureQueue.TryPeek(out int groupId, out int departureTime)
+			&& departureTime < currentTime) {
+			_departureQueue.Dequeue();
+			var group = _activeGroups[groupId];
+			foreach (var (x, y) in group.points) {
+				_occupied[x, y] = false;
+			}
+
+			_money += group.usageFee;
+			_activeGroups.Remove(groupId);
+		}
+	}
+
+	public long Calculate()
+	{
+		return Math.Max(0, _money);
 	}
 }
 
@@ -66,17 +274,57 @@ public class Information
 	public int Up { get; set; } = 0;
 	public long Elapsed { get; set; } = 0;
 
+	public int Accept { get; set; } = 0;
 }
 
 public class Input
 {
 	private readonly IOManager _io;
-	private readonly bool _isDebug;
+	private readonly bool _isLocal;
 
-	public Input(IOManager io, bool isDebug)
+	public int N { get; }
+	public int M { get; }
+	public double R { get; }
+	public string[] Row { get; }
+
+	public Input(IOManager io, bool isLocal)
 	{
 		_io = io;
-		_isDebug = isDebug;
+		_isLocal = isLocal;
+
+		(N, M) = io.Int2();
+		R = io.Double();
+		Row = io.ArrayString(N);
+	}
+
+	public (int i, int s, int t, int p, int v) InputGuest()
+	{
+		return _io.Int5();
+	}
+
+	public void OutputMove(List<(int j, List<(int z, int w)> points)> moveGroups)
+	{
+		_io.WriteLine(moveGroups.Count);
+		foreach (var (j, points) in moveGroups) {
+			_io.WriteLine(j);
+			foreach (var (z, w) in points) {
+				_io.WriteLine($"{z} {w}");
+			}
+		}
+	}
+
+	public void OutputReception(bool takes, List<(int x, int y)> points)
+	{
+		if (takes) {
+			_io.WriteLine("Yes");
+			foreach (var (x, y) in points) {
+				_io.WriteLine($"{x} {y}");
+			}
+		} else {
+			_io.WriteLine("No");
+		}
+
+		_io.Flush();
 	}
 }
 
