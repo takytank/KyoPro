@@ -62,20 +62,45 @@ public class Program
 		return (input, info);
 	}
 
-	static State Plan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	static State Plan0(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(isLocal, input);
 		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
 			var guest = input.InputGuest();
 			state.ReleaseDepartedGroups(guest.s);
-			state.ProcessGuest(guest);
+			input.OutputMove([]);
+
+			var points = state.FindPlacementByBreadthFirstSearch(guest.p);
+			bool canAccept = points.Count == guest.p;
+			state.ProcessGuest(guest, canAccept, points);
 		}
 		state.ReleaseDepartedGroups(int.MaxValue);
 
 		return state;
 	}
 
-	internal static List<(int x, int y)> CreateNearSquareShape(int p)
+	static State Plan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			input.OutputMove([]);
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByFullSearch(shape);
+			bool canAccept = points.Count == guest.p;
+			state.ProcessGuest(guest, canAccept, points);
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+
+		return state;
+	}
+}
+
+public static class Utils
+{
+	internal static (List<(int x, int y)> points, double compactness) CreateNearSquareShape(int p)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(p);
 
@@ -92,15 +117,7 @@ public class Program
 				shape.Add((index / width, index % width));
 			}
 
-			var cells = shape.ToHashSet();
-			int perimeter = 0;
-			foreach (var (x, y) in shape) {
-				perimeter += cells.Contains((x - 1, y)) ? 0 : 1;
-				perimeter += cells.Contains((x + 1, y)) ? 0 : 1;
-				perimeter += cells.Contains((x, y - 1)) ? 0 : 1;
-				perimeter += cells.Contains((x, y + 1)) ? 0 : 1;
-			}
-
+			int perimeter = 2 * (height + width);
 			int imbalance = Math.Abs(height - width);
 			int unusedArea = height * width - p;
 
@@ -115,7 +132,8 @@ public class Program
 			}
 		}
 
-		return bestShape;
+		double compactness = 4.0 * Math.Sqrt(p) / bestPerimeter;
+		return (bestShape, compactness);
 	}
 
 	internal static List<(int x, int y)> FindPlacementByFullSearch(
@@ -179,6 +197,71 @@ public class Program
 
 		return [];
 	}
+
+	internal static List<(int x, int y)> FindPlacementByBreadthFirstSearch(
+		string[] row,
+		bool[,] occupied,
+		int p)
+	{
+		int n = row.Length;
+		(int x, int y) start = (-1, -1);
+		for (int x = 0; x < n && start.x < 0; ++x) {
+			for (int y = 0; y < n; ++y) {
+				if (row[x][y] == '.' && occupied[x, y] == false) {
+					start = (x, y);
+					break;
+				}
+			}
+		}
+
+		if (start.x < 0) {
+			return [];
+		}
+
+		var visited = new bool[n, n];
+		var queue = new Queue<(int x, int y)>();
+		var points = new List<(int x, int y)>(p);
+		visited[start.x, start.y] = true;
+		queue.Enqueue(start);
+
+		ReadOnlySpan<int> deltaX = [-1, 1, 0, 0];
+		ReadOnlySpan<int> deltaY = [0, 0, -1, 1];
+		while (queue.Count > 0 && points.Count < p) {
+			var (x, y) = queue.Dequeue();
+			points.Add((x, y));
+
+			for (int direction = 0; direction < 4; ++direction) {
+				int nextX = x + deltaX[direction];
+				int nextY = y + deltaY[direction];
+				if ((uint)nextX >= (uint)n
+					|| (uint)nextY >= (uint)n
+					|| visited[nextX, nextY]
+					|| row[nextX][nextY] != '.'
+					|| occupied[nextX, nextY]) {
+					continue;
+				}
+
+				visited[nextX, nextY] = true;
+				queue.Enqueue((nextX, nextY));
+			}
+		}
+
+		return points.Count == p ? points : [];
+	}
+
+	internal static double CalculateCompactness(IReadOnlyCollection<(int x, int y)> points)
+	{
+		var cells = points.ToHashSet();
+		int perimeter = 0;
+		foreach (var (x, y) in points) {
+			perimeter += cells.Contains((x - 1, y)) ? 0 : 1;
+			perimeter += cells.Contains((x + 1, y)) ? 0 : 1;
+			perimeter += cells.Contains((x, y - 1)) ? 0 : 1;
+			perimeter += cells.Contains((x, y + 1)) ? 0 : 1;
+		}
+
+		return 4.0 * Math.Sqrt(points.Count) / perimeter;
+	}
 }
 
 public class State
@@ -186,7 +269,7 @@ public class State
 	private readonly bool _isLocal;
 	private readonly Input _input;
 	private readonly bool[,] _occupied;
-	private readonly Dictionary<int, (int departureTime, long usageFee, List<(int x, int y)> points)> _activeGroups = [];
+	private readonly Dictionary<int, (int departureTime, long usageFee, List<(int x, int y)> points, double compactness)> _activeGroups = [];
 	private readonly PriorityQueue<int, int> _departureQueue = new();
 	private long _money;
 
@@ -199,49 +282,44 @@ public class State
 		_occupied = new bool[input.N, input.N];
 	}
 
-	public void ProcessGuest((int i, int s, int t, int p, int v) guest)
+	public List<(int x, int y)> FindPlacementByBreadthFirstSearch(int p)
 	{
-		_input.OutputMove([]);
+		return Utils.FindPlacementByBreadthFirstSearch(_input.Row, _occupied, p);
+	}
 
-		bool canAccept = CanAccept(guest.p, out var points);
+	public List<(int x, int y)> FindPlacementByFullSearch(
+		IReadOnlyList<(int x, int y)> shape)
+	{
+		return Utils.FindPlacementByFullSearch(_input.Row, _occupied, shape);
+	}
+
+	public void ProcessGuest(
+		(int i, int s, int t, int p, int v) guest,
+		bool canAccept,
+		List<(int x, int y)> points)
+	{
 		if (canAccept) {
-			Accept(guest.i, guest.t, guest.v, points);
+			double compactness = Utils.CalculateCompactness(points);
+			Accept(guest.i, guest.t, guest.v, points, compactness);
 			++AcceptedCount;
 		}
 
 		_input.OutputReception(canAccept, points);
 	}
 
-	public bool CanAccept(int p, out List<(int x, int y)> points)
-	{
-		var shape = Program.CreateNearSquareShape(p);
-		points = Program.FindPlacementByFullSearch(_input.Row, _occupied, shape);
-		return points.Count == p;
-	}
-
-	private void Accept(int groupId, int departureTime, int value, List<(int x, int y)> points)
+	private void Accept(int groupId, int departureTime, int value, List<(int x, int y)> points, double compactness)
 	{
 		foreach (var (x, y) in points) {
 			_occupied[x, y] = true;
 		}
 
-		long usageFee = CalculateUsageFee(value, points);
-		_activeGroups.Add(groupId, (departureTime, usageFee, points));
+		long usageFee = CalculateUsageFee(value, compactness);
+		_activeGroups.Add(groupId, (departureTime, usageFee, points, compactness));
 		_departureQueue.Enqueue(groupId, departureTime);
 	}
 
-	private static long CalculateUsageFee(int value, IReadOnlyCollection<(int x, int y)> points)
+	private static long CalculateUsageFee(int value, double compactness)
 	{
-		var cells = points.ToHashSet();
-		int perimeter = 0;
-		foreach (var (x, y) in points) {
-			perimeter += cells.Contains((x - 1, y)) ? 0 : 1;
-			perimeter += cells.Contains((x + 1, y)) ? 0 : 1;
-			perimeter += cells.Contains((x, y - 1)) ? 0 : 1;
-			perimeter += cells.Contains((x, y + 1)) ? 0 : 1;
-		}
-
-		double compactness = 4.0 * Math.Sqrt(points.Count) / perimeter;
 		return (long)Math.Floor(value * compactness + 0.5);
 	}
 
