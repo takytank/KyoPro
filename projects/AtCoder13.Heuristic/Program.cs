@@ -577,19 +577,13 @@ public static class Utils
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(p);
 
-		List<(int x, int y)> bestShape = [];
+		int bestWidth = 0;
 		int bestPerimeter = int.MaxValue;
 		int bestImbalance = int.MaxValue;
 		int bestUnusedArea = int.MaxValue;
 
 		for (int width = 1; width <= p; ++width) {
 			int height = (p + width - 1) / width;
-			var shape = new List<(int x, int y)>(p);
-
-			for (int index = 0; index < p; ++index) {
-				shape.Add((index / width, index % width));
-			}
-
 			int perimeter = 2 * (height + width);
 			int imbalance = Math.Abs(height - width);
 			int unusedArea = height * width - p;
@@ -598,11 +592,16 @@ public static class Utils
 				|| perimeter == bestPerimeter && imbalance < bestImbalance
 				|| perimeter == bestPerimeter && imbalance == bestImbalance
 					&& unusedArea < bestUnusedArea) {
-				bestShape = shape;
+				bestWidth = width;
 				bestPerimeter = perimeter;
 				bestImbalance = imbalance;
 				bestUnusedArea = unusedArea;
 			}
+		}
+
+		var bestShape = new List<(int x, int y)>(p);
+		for (int index = 0; index < p; ++index) {
+			bestShape.Add((index / bestWidth, index % bestWidth));
 		}
 
 		double compactness = 4.0 * Math.Sqrt(p) / bestPerimeter;
@@ -642,17 +641,62 @@ public static class Utils
 			shapeWidth = Math.Max(shapeWidth, y + 1);
 		}
 
+		bool isRowMajorRectanglePrefix = true;
+		for (int index = 0; index < shape.Count; ++index) {
+			var (x, y) = shape[index];
+			if (x != index / shapeWidth || y != index % shapeWidth) {
+				isRowMajorRectanglePrefix = false;
+				break;
+			}
+		}
+
+		int prefixWidth = width + 1;
+		int[] blockedPrefixSum = [];
+		if (isRowMajorRectanglePrefix) {
+			blockedPrefixSum = new int[(height + 1) * prefixWidth];
+			for (int x = 0; x < height; ++x) {
+				int rowSum = 0;
+				int previousRowOffset = x * prefixWidth;
+				int currentRowOffset = previousRowOffset + prefixWidth;
+				for (int y = 0; y < width; ++y) {
+					rowSum += row[x][y] != '.' || occupied[x, y] ? 1 : 0;
+					blockedPrefixSum[currentRowOffset + y + 1]
+						= blockedPrefixSum[previousRowOffset + y + 1] + rowSum;
+				}
+			}
+		}
+
 		for (int baseX = 0; baseX + shapeHeight <= height; ++baseX) {
 			for (int baseY = 0; baseY + shapeWidth <= width; ++baseY) {
-				bool canPlace = true;
+				bool canPlace;
+				if (isRowMajorRectanglePrefix) {
+					int completeRowCount = shapeHeight - 1;
+					int lastRowWidth = shape.Count - completeRowCount * shapeWidth;
+					int topRowOffset = baseX * prefixWidth;
+					int completeBottomRowOffset = (baseX + completeRowCount) * prefixWidth;
+					int right = baseY + shapeWidth;
+					int blockedCount = blockedPrefixSum[completeBottomRowOffset + right]
+						- blockedPrefixSum[topRowOffset + right]
+						- blockedPrefixSum[completeBottomRowOffset + baseY]
+						+ blockedPrefixSum[topRowOffset + baseY];
+					int lastRowOffset = completeBottomRowOffset;
+					int lastRowBottomOffset = lastRowOffset + prefixWidth;
+					int lastRowRight = baseY + lastRowWidth;
+					blockedCount += blockedPrefixSum[lastRowBottomOffset + lastRowRight]
+						- blockedPrefixSum[lastRowOffset + lastRowRight]
+						- blockedPrefixSum[lastRowBottomOffset + baseY]
+						+ blockedPrefixSum[lastRowOffset + baseY];
+					canPlace = blockedCount == 0;
+				} else {
+					canPlace = true;
+					foreach (var (offsetX, offsetY) in shape) {
+						int x = baseX + offsetX;
+						int y = baseY + offsetY;
 
-				foreach (var (offsetX, offsetY) in shape) {
-					int x = baseX + offsetX;
-					int y = baseY + offsetY;
-
-					if (row[x][y] != '.' || occupied[x, y]) {
-						canPlace = false;
-						break;
+						if (row[x][y] != '.' || occupied[x, y]) {
+							canPlace = false;
+							break;
+						}
 					}
 				}
 
@@ -783,21 +827,39 @@ public static class Utils
 		bool[,] occupied,
 		int p)
 	{
+		var pondPrefixSum = CreatePondPrefixSum(row);
+		var rectangleCandidates = CreateRectangleCandidates(row.Length, row[0].Length, p);
+		return FindPlacementByReverseBreadthFirstSearch2(
+			row,
+			occupied,
+			p,
+			pondPrefixSum,
+			rectangleCandidates);
+	}
+
+	internal static int[] CreatePondPrefixSum(string[] row)
+	{
 		int height = row.Length;
 		int width = row[0].Length;
-		var occupiedPrefixSum = new int[height + 1, width + 1];
-		var pondPrefixSum = new int[height + 1, width + 1];
+		int prefixWidth = width + 1;
+		var pondPrefixSum = new int[(height + 1) * prefixWidth];
 		for (int x = 0; x < height; ++x) {
-			int occupiedRowSum = 0;
 			int pondRowSum = 0;
+			int previousRowOffset = x * prefixWidth;
+			int currentRowOffset = previousRowOffset + prefixWidth;
 			for (int y = 0; y < width; ++y) {
-				occupiedRowSum += occupied[x, y] ? 1 : 0;
 				pondRowSum += row[x][y] == '#' ? 1 : 0;
-				occupiedPrefixSum[x + 1, y + 1] = occupiedPrefixSum[x, y + 1] + occupiedRowSum;
-				pondPrefixSum[x + 1, y + 1] = pondPrefixSum[x, y + 1] + pondRowSum;
+				int currentIndex = currentRowOffset + y + 1;
+				int previousIndex = previousRowOffset + y + 1;
+				pondPrefixSum[currentIndex] = pondPrefixSum[previousIndex] + pondRowSum;
 			}
 		}
+		return pondPrefixSum;
+	}
 
+	internal static (int boxHeight, int boxWidth, int perimeter, int unusedArea, int imbalance)[]
+		CreateRectangleCandidates(int height, int width, int p)
+	{
 		var rectangleCandidates = new List<(int boxHeight, int boxWidth, int perimeter, int unusedArea, int imbalance)>();
 		int maximumArea = Math.Min(height * width, p + 32);
 		for (int boxHeight = 1; boxHeight <= height; ++boxHeight) {
@@ -828,6 +890,30 @@ public static class Utils
 			compare = left.unusedArea.CompareTo(right.unusedArea);
 			return compare != 0 ? compare : left.imbalance.CompareTo(right.imbalance);
 		});
+		return rectangleCandidates.ToArray();
+	}
+
+	internal static List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch2(
+		string[] row,
+		bool[,] occupied,
+		int p,
+		int[] pondPrefixSum,
+		IReadOnlyList<(int boxHeight, int boxWidth, int perimeter, int unusedArea, int imbalance)> rectangleCandidates)
+	{
+		int height = row.Length;
+		int width = row[0].Length;
+		int prefixWidth = width + 1;
+		var occupiedPrefixSum = new int[(height + 1) * prefixWidth];
+		for (int x = 0; x < height; ++x) {
+			int occupiedRowSum = 0;
+			int previousRowOffset = x * prefixWidth;
+			int currentRowOffset = previousRowOffset + prefixWidth;
+			for (int y = 0; y < width; ++y) {
+				occupiedRowSum += occupied[x, y] ? 1 : 0;
+				occupiedPrefixSum[currentRowOffset + y + 1]
+					= occupiedPrefixSum[previousRowOffset + y + 1] + occupiedRowSum;
+			}
+		}
 
 		foreach (var rectangle in rectangleCandidates) {
 			var positions = new List<(int top, int left, int occupiedCount, int pondCount)>();
@@ -835,14 +921,16 @@ public static class Utils
 				for (int left = width - rectangle.boxWidth; left >= 0; --left) {
 					int bottom = top + rectangle.boxHeight;
 					int right = left + rectangle.boxWidth;
-					int occupiedCount = occupiedPrefixSum[bottom, right]
-						- occupiedPrefixSum[top, right]
-						- occupiedPrefixSum[bottom, left]
-						+ occupiedPrefixSum[top, left];
-					int pondCount = pondPrefixSum[bottom, right]
-						- pondPrefixSum[top, right]
-						- pondPrefixSum[bottom, left]
-						+ pondPrefixSum[top, left];
+					int bottomRowOffset = bottom * prefixWidth;
+					int topRowOffset = top * prefixWidth;
+					int occupiedCount = occupiedPrefixSum[bottomRowOffset + right]
+						- occupiedPrefixSum[topRowOffset + right]
+						- occupiedPrefixSum[bottomRowOffset + left]
+						+ occupiedPrefixSum[topRowOffset + left];
+					int pondCount = pondPrefixSum[bottomRowOffset + right]
+						- pondPrefixSum[topRowOffset + right]
+						- pondPrefixSum[bottomRowOffset + left]
+						+ pondPrefixSum[topRowOffset + left];
 
 					if (rectangle.boxHeight * rectangle.boxWidth - occupiedCount - pondCount >= p) {
 						positions.Add((top, left, occupiedCount, pondCount));
@@ -896,24 +984,29 @@ public static class Utils
 	{
 		int height = row.Length;
 		int width = row[0].Length;
-		var visited = new bool[height, width];
+		int boxArea = boxHeight * boxWidth;
+		var visited = new bool[boxArea];
+		var queue = new (int x, int y)[boxArea];
+		var component = new List<(int x, int y)>(boxArea);
 		ReadOnlySpan<int> deltaX = [-1, 1, 0, 0];
 		ReadOnlySpan<int> deltaY = [0, 0, -1, 1];
 
 		for (int startX = top + boxHeight - 1; startX >= top; --startX) {
 			for (int startY = left + boxWidth - 1; startY >= left; --startY) {
-				if (visited[startX, startY]
+				int startIndex = (startX - top) * boxWidth + startY - left;
+				if (visited[startIndex]
 					|| row[startX][startY] != '.'
 					|| occupied[startX, startY]) {
 					continue;
 				}
 
-				var component = new List<(int x, int y)>();
-				var queue = new Queue<(int x, int y)>();
-				visited[startX, startY] = true;
-				queue.Enqueue((startX, startY));
-				while (queue.Count > 0) {
-					var (x, y) = queue.Dequeue();
+				component.Clear();
+				int queueHead = 0;
+				int queueTail = 0;
+				visited[startIndex] = true;
+				queue[queueTail++] = (startX, startY);
+				while (queueHead < queueTail) {
+					var (x, y) = queue[queueHead++];
 					component.Add((x, y));
 					for (int direction = 0; direction < 4; ++direction) {
 						int nextX = x + deltaX[direction];
@@ -922,14 +1015,14 @@ public static class Utils
 							|| nextX >= top + boxHeight
 							|| nextY < left
 							|| nextY >= left + boxWidth
-							|| visited[nextX, nextY]
+							|| visited[(nextX - top) * boxWidth + nextY - left]
 							|| row[nextX][nextY] != '.'
 							|| occupied[nextX, nextY]) {
 							continue;
 						}
 
-						visited[nextX, nextY] = true;
-						queue.Enqueue((nextX, nextY));
+						visited[(nextX - top) * boxWidth + nextY - left] = true;
+						queue[queueTail++] = (nextX, nextY);
 					}
 				}
 
@@ -958,15 +1051,15 @@ public static class Utils
 		int width,
 		int p)
 	{
-		var inComponent = new bool[height, width];
+		var inComponent = new bool[height * width];
 		foreach (var (x, y) in component) {
-			inComponent[x, y] = true;
+			inComponent[x * width + y] = true;
 		}
 
-		var selected = new bool[height, width];
-		var frontier = new HashSet<(int x, int y)>();
+		var selected = new bool[height * width];
+		var frontier = new HashSet<int>();
 		var points = new List<(int x, int y)>(p) { (startX, startY) };
-		selected[startX, startY] = true;
+		selected[startX * width + startY] = true;
 		int minX = startX;
 		int maxX = startX;
 		int minY = startY;
@@ -974,17 +1067,23 @@ public static class Utils
 
 		AddNeighborsToFrontier(startX, startY);
 		while (points.Count < p) {
-			(int x, int y) best = (-1, -1);
+			int bestIndex = -1;
 			(int neighborPriority, int areaIncrease, int boxPerimeter, int imbalance, int xPriority, int yPriority) bestPriority
 				= (int.MaxValue, int.MaxValue, int.MaxValue, int.MaxValue, int.MaxValue, int.MaxValue);
 			int currentArea = (maxX - minX + 1) * (maxY - minY + 1);
 
-			foreach (var candidate in frontier) {
-				int selectedNeighbors = CountSelectedNeighbors(selected, candidate.x, candidate.y);
-				int nextMinX = Math.Min(minX, candidate.x);
-				int nextMaxX = Math.Max(maxX, candidate.x);
-				int nextMinY = Math.Min(minY, candidate.y);
-				int nextMaxY = Math.Max(maxY, candidate.y);
+			foreach (int candidateIndex in frontier) {
+				int candidateX = candidateIndex / width;
+				int candidateY = candidateIndex - candidateX * width;
+				int selectedNeighbors = 0;
+				selectedNeighbors += candidateX > 0 && selected[candidateIndex - width] ? 1 : 0;
+				selectedNeighbors += candidateX + 1 < height && selected[candidateIndex + width] ? 1 : 0;
+				selectedNeighbors += candidateY > 0 && selected[candidateIndex - 1] ? 1 : 0;
+				selectedNeighbors += candidateY + 1 < width && selected[candidateIndex + 1] ? 1 : 0;
+				int nextMinX = Math.Min(minX, candidateX);
+				int nextMaxX = Math.Max(maxX, candidateX);
+				int nextMinY = Math.Min(minY, candidateY);
+				int nextMaxY = Math.Max(maxY, candidateY);
 				int boxHeight = nextMaxX - nextMinX + 1;
 				int boxWidth = nextMaxY - nextMinY + 1;
 
@@ -994,23 +1093,25 @@ public static class Utils
 					areaIncrease: boxHeight * boxWidth - currentArea,
 					boxPerimeter: 2 * (boxHeight + boxWidth),
 					imbalance: Math.Abs(boxHeight - boxWidth),
-					xPriority: -candidate.x,
-					yPriority: -candidate.y);
+					xPriority: -candidateX,
+					yPriority: -candidateY);
 				if (priority.CompareTo(bestPriority) < 0) {
-					best = candidate;
+					bestIndex = candidateIndex;
 					bestPriority = priority;
 				}
 			}
 
 			// component全体が連結でPマス以上あるため、Pマス選ぶまではfrontierが空にならない。
-			frontier.Remove(best);
-			selected[best.x, best.y] = true;
-			points.Add(best);
-			minX = Math.Min(minX, best.x);
-			maxX = Math.Max(maxX, best.x);
-			minY = Math.Min(minY, best.y);
-			maxY = Math.Max(maxY, best.y);
-			AddNeighborsToFrontier(best.x, best.y);
+			frontier.Remove(bestIndex);
+			selected[bestIndex] = true;
+			int bestX = bestIndex / width;
+			int bestY = bestIndex - bestX * width;
+			points.Add((bestX, bestY));
+			minX = Math.Min(minX, bestX);
+			maxX = Math.Max(maxX, bestX);
+			minY = Math.Min(minY, bestY);
+			maxY = Math.Max(maxY, bestY);
+			AddNeighborsToFrontier(bestX, bestY);
 		}
 
 		return points;
@@ -1023,10 +1124,12 @@ public static class Utils
 				int nextX = x + deltaX[direction];
 				int nextY = y + deltaY[direction];
 				if ((uint)nextX < (uint)height
-					&& (uint)nextY < (uint)width
-					&& inComponent[nextX, nextY]
-					&& selected[nextX, nextY] == false) {
-					frontier.Add((nextX, nextY));
+					&& (uint)nextY < (uint)width) {
+					int nextIndex = nextX * width + nextY;
+					if (inComponent[nextIndex]
+						&& selected[nextIndex] == false) {
+						frontier.Add(nextIndex);
+					}
 				}
 			}
 		}
@@ -1055,6 +1158,9 @@ public class State
 	private readonly Input _input;
 	// trueのマスは現在いずれかの利用中グループが占有している。
 	private readonly bool[,] _occupied;
+	private readonly int[] _pondPrefixSum;
+	private readonly Dictionary<int, (int boxHeight, int boxWidth, int perimeter, int unusedArea, int imbalance)[]>
+		_rectangleCandidatesByP = [];
 	// 退去時の解放と利用料加算に必要な情報だけを、受け入れ済みグループごとに保持する。
 	private readonly Dictionary<int, (int departureTime, long usageFee, List<(int x, int y)> points, double compactness)> _activeGroups = [];
 	// 到着ごとに全グループを走査せず、退去時刻が早い順に処理する。
@@ -1069,6 +1175,7 @@ public class State
 		_isLocal = isLocal;
 		_input = input;
 		_occupied = new bool[input.N, input.N];
+		_pondPrefixSum = Utils.CreatePondPrefixSum(input.Row);
 	}
 
 	// Utilsへ現在盤面を渡すための薄い窓口。戦略上の分岐は持たない。
@@ -1085,7 +1192,20 @@ public class State
 	// Plan5用のコンパクト領域成長へ現在の占有盤面を渡す。
 	public List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch2(int p)
 	{
-		return Utils.FindPlacementByReverseBreadthFirstSearch2(_input.Row, _occupied, p);
+		if (_rectangleCandidatesByP.TryGetValue(p, out var rectangleCandidates) == false) {
+			rectangleCandidates = Utils.CreateRectangleCandidates(
+				_input.Row.Length,
+				_input.Row[0].Length,
+				p);
+			_rectangleCandidatesByP.Add(p, rectangleCandidates);
+		}
+
+		return Utils.FindPlacementByReverseBreadthFirstSearch2(
+			_input.Row,
+			_occupied,
+			p,
+			_pondPrefixSum,
+			rectangleCandidates);
 	}
 
 	public List<(int x, int y)> FindPlacementByFullSearch(
