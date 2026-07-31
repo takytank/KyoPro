@@ -14,6 +14,9 @@ public class Program
 	[MethodImpl(MethodImplOptions.AggressiveOptimization)]
 	static void Main()
 	{
+		double sumA = 0;
+		double sumC = 0;
+
 		HeuristicHelper.RunCases(
 			runCaseCount: 100,
 			testCaseCount: 50,
@@ -24,13 +27,19 @@ public class Program
 				lock (locker) {
 					var status = new List<string> {
 						$"{i:d4}:",
-						$"N={input.N:d2}",
+						//$"N={input.N:d2}",
+						$"R={input.R:f3}",
+						$"P={info.PondCount:d4}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
 						$"A={info.Accept:d4}",
+						$"C={info.CompactnessAverage:f3}",
 						$"score={info.Score:d10}",
 						$"elapsed={info.Elapsed:d4}",
 					};
+
+					sumA += info.Accept;
+					sumC += info.CompactnessAverage;
 
 					Console.WriteLine(status.Join(" "));
 					Console.Out.Flush();
@@ -39,7 +48,10 @@ public class Program
 				return (info.Score, info.Loop, info.Up);
 			},
 			(tc, rc) => {
-				//Console.WriteLine($"enabled count: {count}");
+				double averageA = sumA / rc;
+				double averageC = sumC / rc;
+				Console.WriteLine($"accept average: {averageA:f3}");
+				Console.WriteLine($"compactness average: {averageC:f3}");
 			});
 	}
 
@@ -52,16 +64,25 @@ public class Program
 
 		var input = new Input(io, isLocal);
 		var info = new Information();
+		for (int i = 0; i < input.N; i++) {
+			for (int j = 0; j < input.N; j++) {
+				if (input.Row[i][j] == '#') {
+					++info.PondCount;
+				}
+			}
+		}
 
-		var best = Plan2(isLocal, sw, rnd, input, info);
+		var best = Plan4(isLocal, sw, rnd, input, info);
 
 		info.Accept = best.AcceptedCount;
+		info.CompactnessAverage = best.ComactnessSum / best.AcceptedCount;
 		info.Score = best.Calculate();
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
 	}
 
+	// 公式サンプル相当。左上の最初の空きマスから1回だけBFSし、基準性能を測る。
 	static State Plan0(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(isLocal, input);
@@ -79,6 +100,7 @@ public class Program
 		return state;
 	}
 
+	// コンパクト度を優先し、正方形に近い単一形状を盤面全体から探す。
 	static State Plan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(isLocal, input);
@@ -97,6 +119,7 @@ public class Program
 		return state;
 	}
 
+	// Plan1で置けない場合だけ複数始点BFSへフォールバックし、受け入れ率を補う。
 	static State Plan2(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(isLocal, input);
@@ -118,10 +141,363 @@ public class Program
 
 		return state;
 	}
+
+	// 非重複の固定スロットだけを再利用し、時間経過による空き領域の断片化を防ぐ。
+	static State Plan3(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		var slots = Utils.CreateFixedSlots(input.Row);
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			input.OutputMove([]);
+
+			var points = state.FindPlacementByFixedSlots(slots, guest.p);
+			bool canAccept = points.Count == guest.p;
+			state.ProcessGuest(guest, canAccept, points);
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+
+		return state;
+	}
+
+	// Plan3の配置を維持し、未予約領域へ小サイズ用スロットを追加してrejectを減らす。
+	static State Plan4(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		var slots = Utils.CreateFixedSlotsForPlan4(input.Row);
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			input.OutputMove([]);
+
+			var points = state.FindPlacementByFixedSlots(slots, guest.p);
+			bool canAccept = points.Count == guest.p;
+			state.ProcessGuest(guest, canAccept, points);
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+
+		return state;
+	}
 }
 
+// 同じ固定スロットを共有する人数帯。最大人数分を予約し、実配置では先頭Pマスを使う。
+public readonly record struct GuestSizeBand(int MinP, int MaxP);
+
+// 退去後も同じ領域を再利用するための、盤面に固定された非重複の配置候補。
+public sealed class FixedSlot
+{
+	public GuestSizeBand Band { get; }
+	public (int x, int y)[] Points { get; }
+
+	public FixedSlot(GuestSizeBand band, IReadOnlyCollection<(int x, int y)> points)
+	{
+		Band = band;
+		Points = points.ToArray();
+	}
+}
+
+// 配置形状の生成・探索・評価を集約し、各Planは戦略の組み合わせだけを担当する。
 public static class Utils
 {
+	// 最大サイズを急増させすぎず、Pの生成分布もある程度まとめられる人数帯。
+	internal static readonly GuestSizeBand[] GuestSizeBands = [
+		new(4, 7),
+		new(8, 15),
+		new(16, 31),
+		new(32, 47),
+		new(48, 71),
+		new(72, 99),
+		new(100, 150),
+	];
+
+	// P=round(U^2) の出現確率に対して、候補数の比率が近くなるよう芝生面積を配分する。
+	internal static int[] CalculateFixedSlotCounts(string[] row)
+	{
+		int grassCount = row.Sum(line => line.Count(cell => cell == '.'));
+		double minSource = 2.0;
+		double maxSource = Math.Sqrt(150.0);
+		double sourceRange = maxSource - minSource;
+		var probabilities = new double[GuestSizeBands.Length];
+
+		for (int bandIndex = 0; bandIndex < GuestSizeBands.Length; ++bandIndex) {
+			var band = GuestSizeBands[bandIndex];
+			for (int p = band.MinP; p <= band.MaxP; ++p) {
+				double lower = Math.Max(minSource, Math.Sqrt(Math.Max(0, p - 0.5)));
+				double upper = Math.Min(maxSource, Math.Sqrt(p + 0.5));
+				probabilities[bandIndex] += Math.Max(0, upper - lower) / sourceRange;
+			}
+		}
+
+		var counts = new int[GuestSizeBands.Length];
+		int remainingGrass = grassCount;
+		while (true) {
+			int selectedBand = -1;
+			double selectedRatio = double.MaxValue;
+			for (int bandIndex = 0; bandIndex < GuestSizeBands.Length; ++bandIndex) {
+				int slotSize = GuestSizeBands[bandIndex].MaxP;
+				if (slotSize > remainingGrass || probabilities[bandIndex] <= 0) {
+					continue;
+				}
+
+				double ratio = (counts[bandIndex] + 1) / probabilities[bandIndex];
+				if (ratio < selectedRatio) {
+					selectedBand = bandIndex;
+					selectedRatio = ratio;
+				}
+			}
+
+			if (selectedBand < 0) {
+				break;
+			}
+
+			++counts[selectedBand];
+			remainingGrass -= GuestSizeBands[selectedBand].MaxP;
+		}
+
+		return counts;
+	}
+
+	// 大きい帯から先に場所を確保し、互いに重ならないPlan3用スロットを作る。
+	internal static List<FixedSlot> CreateFixedSlots(string[] row)
+	{
+		var slotCounts = CalculateFixedSlotCounts(row);
+		var reserved = new bool[row.Length, row[0].Length];
+		var slots = new List<FixedSlot>();
+
+		for (int bandIndex = GuestSizeBands.Length - 1; bandIndex >= 0; --bandIndex) {
+			var band = GuestSizeBands[bandIndex];
+			for (int slotIndex = 0; slotIndex < slotCounts[bandIndex]; ++slotIndex) {
+				var points = FindBestFixedSlot(row, reserved, band.MaxP);
+				if (points.Count != band.MaxP) {
+					break;
+				}
+
+				slots.Add(new FixedSlot(band, points));
+				foreach (var (x, y) in points) {
+					reserved[x, y] = true;
+				}
+			}
+		}
+
+		return slots;
+	}
+
+	// Plan3のスロットには触れず、残った領域を4～31人用スロットで可能な限り埋める。
+	internal static List<FixedSlot> CreateFixedSlotsForPlan4(string[] row)
+	{
+		var slots = CreateFixedSlots(row);
+		var reserved = new bool[row.Length, row[0].Length];
+		foreach (var slot in slots) {
+			foreach (var (x, y) in slot.Points) {
+				reserved[x, y] = true;
+			}
+		}
+
+		var probabilities = CalculateGuestSizeBandProbabilities();
+		var additionalCounts = new int[3];
+		var enabled = new bool[3] { true, true, true };
+		while (enabled.Any(value => value)) {
+			int selectedBand = -1;
+			double selectedRatio = double.MaxValue;
+			for (int bandIndex = 0; bandIndex < 3; ++bandIndex) {
+				if (enabled[bandIndex] == false) {
+					continue;
+				}
+
+				double ratio = (additionalCounts[bandIndex] + 1) / probabilities[bandIndex];
+				if (ratio < selectedRatio) {
+					selectedBand = bandIndex;
+					selectedRatio = ratio;
+				}
+			}
+
+			var band = GuestSizeBands[selectedBand];
+			var points = FindBestFixedSlot(row, reserved, band.MaxP);
+			if (points.Count != band.MaxP) {
+				enabled[selectedBand] = false;
+				continue;
+			}
+
+			slots.Add(new FixedSlot(band, points));
+			++additionalCounts[selectedBand];
+			foreach (var (x, y) in points) {
+				reserved[x, y] = true;
+			}
+		}
+
+		return slots;
+	}
+
+	// 小サイズ追加スロットの比率を決めるため、各人数帯の理論出現確率を求める。
+	private static double[] CalculateGuestSizeBandProbabilities()
+	{
+		double minSource = 2.0;
+		double maxSource = Math.Sqrt(150.0);
+		double sourceRange = maxSource - minSource;
+		var probabilities = new double[GuestSizeBands.Length];
+		for (int bandIndex = 0; bandIndex < GuestSizeBands.Length; ++bandIndex) {
+			var band = GuestSizeBands[bandIndex];
+			for (int p = band.MinP; p <= band.MaxP; ++p) {
+				double lower = Math.Max(minSource, Math.Sqrt(Math.Max(0, p - 0.5)));
+				double upper = Math.Min(maxSource, Math.Sqrt(p + 0.5));
+				probabilities[bandIndex] += Math.Max(0, upper - lower) / sourceRange;
+			}
+		}
+
+		return probabilities;
+	}
+
+	// 池際を使いつつ形を崩しすぎないよう、複数の成長結果から最良候補を選ぶ。
+	private static List<(int x, int y)> FindBestFixedSlot(
+		string[] row,
+		bool[,] reserved,
+		int size)
+	{
+		int height = row.Length;
+		int width = row[0].Length;
+		var seeds = new List<(int x, int y, int pondEdges)>();
+		for (int x = 0; x < height; ++x) {
+			for (int y = 0; y < width; ++y) {
+				if (row[x][y] == '.' && reserved[x, y] == false) {
+					seeds.Add((x, y, CountPondEdges(row, x, y)));
+				}
+			}
+		}
+
+		seeds.Sort((left, right) => {
+			int compare = right.pondEdges.CompareTo(left.pondEdges);
+			if (compare != 0) {
+				return compare;
+			}
+
+			compare = left.x.CompareTo(right.x);
+			return compare != 0 ? compare : left.y.CompareTo(right.y);
+		});
+
+		List<(int x, int y)> bestPoints = [];
+		double bestScore = double.MinValue;
+		int seedCount = Math.Min(seeds.Count, 256);
+		for (int seedIndex = 0; seedIndex < seedCount; ++seedIndex) {
+			var seed = seeds[seedIndex];
+			var points = GrowFixedSlot(row, reserved, seed.x, seed.y, size);
+			if (points.Count != size) {
+				continue;
+			}
+
+			double compactness = CalculateCompactness(points);
+			int pondEdges = points.Sum(point => CountPondEdges(row, point.x, point.y));
+			int minX = points.Min(point => point.x);
+			int maxX = points.Max(point => point.x);
+			int minY = points.Min(point => point.y);
+			int maxY = points.Max(point => point.y);
+			double fillRate = (double)size / ((maxX - minX + 1) * (maxY - minY + 1));
+			double score = compactness
+				+ 0.20 * pondEdges / (4.0 * size)
+				+ 0.05 * fillRate;
+			if (score > bestScore) {
+				bestScore = score;
+				bestPoints = points;
+			}
+		}
+
+		return bestPoints;
+	}
+
+	// 追加済みセルとの隣接数を優先して成長し、すべての接頭辞を連結に保つ。
+	private static List<(int x, int y)> GrowFixedSlot(
+		string[] row,
+		bool[,] reserved,
+		int startX,
+		int startY,
+		int size)
+	{
+		int height = row.Length;
+		int width = row[0].Length;
+		var selected = new bool[height, width];
+		var points = new List<(int x, int y)>(size) { (startX, startY) };
+		var candidates = new PriorityQueue<(int x, int y), (int adjacency, int pondEdges, int area, int order)>();
+		selected[startX, startY] = true;
+		int minX = startX;
+		int maxX = startX;
+		int minY = startY;
+		int maxY = startY;
+		int order = 0;
+
+		EnqueueNeighbors(startX, startY);
+		while (points.Count < size && candidates.Count > 0) {
+			var (x, y) = candidates.Dequeue();
+			if (selected[x, y]) {
+				continue;
+			}
+
+			selected[x, y] = true;
+			points.Add((x, y));
+			minX = Math.Min(minX, x);
+			maxX = Math.Max(maxX, x);
+			minY = Math.Min(minY, y);
+			maxY = Math.Max(maxY, y);
+			EnqueueNeighbors(x, y);
+		}
+
+		return points.Count == size ? points : [];
+
+		void EnqueueNeighbors(int x, int y)
+		{
+			ReadOnlySpan<int> deltaX = [-1, 1, 0, 0];
+			ReadOnlySpan<int> deltaY = [0, 0, -1, 1];
+			for (int direction = 0; direction < 4; ++direction) {
+				int nextX = x + deltaX[direction];
+				int nextY = y + deltaY[direction];
+				if ((uint)nextX >= (uint)height
+					|| (uint)nextY >= (uint)width
+					|| selected[nextX, nextY]
+					|| row[nextX][nextY] != '.'
+					|| reserved[nextX, nextY]) {
+					continue;
+				}
+
+				int adjacency = CountSelectedNeighbors(selected, nextX, nextY);
+				int pondEdges = CountPondEdges(row, nextX, nextY);
+				int nextMinX = Math.Min(minX, nextX);
+				int nextMaxX = Math.Max(maxX, nextX);
+				int nextMinY = Math.Min(minY, nextY);
+				int nextMaxY = Math.Max(maxY, nextY);
+				int area = (nextMaxX - nextMinX + 1) * (nextMaxY - nextMinY + 1);
+				candidates.Enqueue(
+					(nextX, nextY),
+					(-adjacency, -pondEdges, area, order++));
+			}
+		}
+	}
+
+	// 隣接数が多いセルほど周長の増加が小さいため、領域成長の優先度に使う。
+	private static int CountSelectedNeighbors(bool[,] selected, int x, int y)
+	{
+		int height = selected.GetLength(0);
+		int width = selected.GetLength(1);
+		int count = 0;
+		count += x > 0 && selected[x - 1, y] ? 1 : 0;
+		count += x + 1 < height && selected[x + 1, y] ? 1 : 0;
+		count += y > 0 && selected[x, y - 1] ? 1 : 0;
+		count += y + 1 < width && selected[x, y + 1] ? 1 : 0;
+		return count;
+	}
+
+	// 他の形状では使いにくい池際のマスを固定スロットへ取り込むための評価値。
+	private static int CountPondEdges(string[] row, int x, int y)
+	{
+		int height = row.Length;
+		int width = row[0].Length;
+		int count = 0;
+		count += x > 0 && row[x - 1][y] == '#' ? 1 : 0;
+		count += x + 1 < height && row[x + 1][y] == '#' ? 1 : 0;
+		count += y > 0 && row[x][y - 1] == '#' ? 1 : 0;
+		count += y + 1 < width && row[x][y + 1] == '#' ? 1 : 0;
+		return count;
+	}
+
+	// 行優先で埋めた長方形候補から、周長が短く正方形に近い形を選ぶ。
 	internal static (List<(int x, int y)> points, double compactness) CreateNearSquareShape(int p)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(p);
@@ -158,6 +534,7 @@ public static class Utils
 		return (bestShape, compactness);
 	}
 
+	// 相対座標で表した形状を左上から平行移動し、最初の配置可能位置を返す。
 	internal static List<(int x, int y)> FindPlacementByFullSearch(
 		string[] row,
 		bool[,] occupied,
@@ -220,6 +597,7 @@ public static class Utils
 		return [];
 	}
 
+	// 公式サンプルと比較するため、左上の最初の空き連結成分だけをBFSする。
 	internal static List<(int x, int y)> FindPlacementByBreadthFirstSearch(
 		string[] row,
 		bool[,] occupied,
@@ -271,6 +649,7 @@ public static class Utils
 		return points.Count == p ? points : [];
 	}
 
+	// 定型形状が入らない隙間を使うため、右下から未探索の連結成分を順にBFSする。
 	internal static List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch(
 		string[] row,
 		bool[,] occupied,
@@ -323,6 +702,7 @@ public static class Utils
 		return [];
 	}
 
+	// 領域外との境界を数え、問題定義どおり 4*sqrt(P)/L を計算する。
 	internal static double CalculateCompactness(IReadOnlyCollection<(int x, int y)> points)
 	{
 		var cells = points.ToHashSet();
@@ -338,16 +718,21 @@ public static class Utils
 	}
 }
 
+// 現在の占有状態・利用中グループ・所持金を管理する。探索方針の選択はPlan側で行う。
 public class State
 {
 	private readonly bool _isLocal;
 	private readonly Input _input;
+	// trueのマスは現在いずれかの利用中グループが占有している。
 	private readonly bool[,] _occupied;
+	// 退去時の解放と利用料加算に必要な情報だけを、受け入れ済みグループごとに保持する。
 	private readonly Dictionary<int, (int departureTime, long usageFee, List<(int x, int y)> points, double compactness)> _activeGroups = [];
+	// 到着ごとに全グループを走査せず、退去時刻が早い順に処理する。
 	private readonly PriorityQueue<int, int> _departureQueue = new();
 	private long _money;
 
 	public int AcceptedCount { get; private set; } = 0;
+	public double ComactnessSum { get; private set; } = 0;
 
 	public State(bool isLocal, Input input)
 	{
@@ -356,6 +741,7 @@ public class State
 		_occupied = new bool[input.N, input.N];
 	}
 
+	// Utilsへ現在盤面を渡すための薄い窓口。戦略上の分岐は持たない。
 	public List<(int x, int y)> FindPlacementByBreadthFirstSearch(int p)
 	{
 		return Utils.FindPlacementByBreadthFirstSearch(_input.Row, _occupied, p);
@@ -372,6 +758,38 @@ public class State
 		return Utils.FindPlacementByFullSearch(_input.Row, _occupied, shape);
 	}
 
+	// 小さいPでもスロット全体を予約扱いにし、同じスロットの同時利用を防ぐ。
+	public List<(int x, int y)> FindPlacementByFixedSlots(
+		IReadOnlyList<FixedSlot> slots,
+		int p)
+	{
+		foreach (var slot in slots) {
+			if (p < slot.Band.MinP || slot.Band.MaxP < p) {
+				continue;
+			}
+
+			bool isAvailable = true;
+			foreach (var (x, y) in slot.Points) {
+				if (_occupied[x, y]) {
+					isAvailable = false;
+					break;
+				}
+			}
+
+			if (isAvailable) {
+				var points = new List<(int x, int y)>(p);
+				for (int pointIndex = 0; pointIndex < p; ++pointIndex) {
+					points.Add(slot.Points[pointIndex]);
+				}
+
+				return points;
+			}
+		}
+
+		return [];
+	}
+
+	// Planが決めた配置結果を状態へ反映し、インタラクティブ出力を確定する。
 	public void ProcessGuest(
 		(int i, int s, int t, int p, int v) guest,
 		bool canAccept,
@@ -381,11 +799,13 @@ public class State
 			double compactness = Utils.CalculateCompactness(points);
 			Accept(guest.i, guest.t, guest.v, points, compactness);
 			++AcceptedCount;
+			ComactnessSum += compactness;
 		}
 
 		_input.OutputReception(canAccept, points);
 	}
 
+	// 利用料は移動しない各Planでは配置時に確定するため、退去時用に保存しておく。
 	private void Accept(int groupId, int departureTime, int value, List<(int x, int y)> points, double compactness)
 	{
 		foreach (var (x, y) in points) {
@@ -402,6 +822,7 @@ public class State
 		return (long)Math.Floor(value * compactness + 0.5);
 	}
 
+	// 問題の時刻順序に従い、T_j < currentTime のグループを解放して利用料を加算する。
 	public void ReleaseDepartedGroups(int currentTime)
 	{
 		while (_departureQueue.TryPeek(out int groupId, out int departureTime)
@@ -417,6 +838,7 @@ public class State
 		}
 	}
 
+	// 最終退去処理は各Planが済ませるため、ここでは現在の絶対スコアだけを返す。
 	public long Calculate()
 	{
 		return Math.Max(0, _money);
@@ -431,7 +853,9 @@ public class Information
 	public int Up { get; set; } = 0;
 	public long Elapsed { get; set; } = 0;
 
+	public int PondCount { get; set; } = 0;
 	public int Accept { get; set; } = 0;
+	public double CompactnessAverage { get; set; } = 0;
 }
 
 public class Input
