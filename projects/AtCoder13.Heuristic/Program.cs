@@ -16,6 +16,7 @@ public class Program
 	{
 		double sumA = 0;
 		double sumC = 0;
+		double sumZ = 0;
 
 		HeuristicHelper.RunCases(
 			runCaseCount: 100,
@@ -34,12 +35,14 @@ public class Program
 						$"up={info.Up:d4}",
 						$"A={info.Accept:d4}",
 						$"C={info.CompactnessAverage:f3}",
+						$"Z={info.ZAverage:f3}",
 						$"score={info.Score:d10}",
 						$"elapsed={info.Elapsed:d4}",
 					};
 
 					sumA += info.Accept;
 					sumC += info.CompactnessAverage;
+					sumZ += info.ZAverage;
 
 					Console.WriteLine(status.Join(" "));
 					Console.Out.Flush();
@@ -50,8 +53,10 @@ public class Program
 			(tc, rc) => {
 				double averageA = sumA / rc;
 				double averageC = sumC / rc;
+				double averageZ = sumZ / rc;
 				Console.WriteLine($"accept average: {averageA:f3}");
 				Console.WriteLine($"compactness average: {averageC:f3}");
+				Console.WriteLine($"Z average: {averageZ:f6}");
 			});
 	}
 
@@ -72,10 +77,11 @@ public class Program
 			}
 		}
 
-		var best = Plan4(isLocal, sw, rnd, input, info);
+		var best = Plan5(isLocal, sw, rnd, input, info);
 
 		info.Accept = best.AcceptedCount;
 		info.CompactnessAverage = best.ComactnessSum / best.AcceptedCount;
+		info.ZAverage /= best.ComactnessSum;
 		info.Score = best.Calculate();
 		info.Elapsed = sw.ElapsedMilliseconds;
 
@@ -125,8 +131,19 @@ public class Program
 		var state = new State(isLocal, input);
 		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
 			var guest = input.InputGuest();
+
 			state.ReleaseDepartedGroups(guest.s);
 			input.OutputMove([]);
+
+			//const double Bottom10PercentZ = -1.025242;
+			//const double Bottom15PercentZ = -0.829147;
+			const double Bottom20PercentZ = -0.673297;
+			double z = Utils.CalculateValueZScore(guest);
+			bool shouldReject = z < Bottom20PercentZ;
+			if (shouldReject) {
+				state.ProcessGuest(guest, false, []);
+				continue;
+			}
 
 			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
 			var points = state.FindPlacementByFullSearch(shape);
@@ -136,6 +153,9 @@ public class Program
 
 			bool canAccept = points.Count == guest.p;
 			state.ProcessGuest(guest, canAccept, points);
+			if (canAccept) {
+				info.ZAverage += z;
+			}
 		}
 		state.ReleaseDepartedGroups(int.MaxValue);
 
@@ -179,6 +199,44 @@ public class Program
 
 		return state;
 	}
+
+	// Plan2の価値選別と定型形状を維持し、隙間用の探索だけを周長重視の領域成長へ置き換える。
+	static State Plan5(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			input.OutputMove([]);
+
+			// 低価値グループで将来の配置余地を消費しないよう、Plan2と同じ下位20%を事前拒否する。
+			//const double Bottom10PercentZ = -1.025242;
+			//const double Bottom15PercentZ = -0.829147;
+			const double Bottom20PercentZ = -0.673297;
+			double z = Utils.CalculateValueZScore(guest);
+			bool shouldReject = z < Bottom20PercentZ;
+			if (shouldReject) {
+				state.ProcessGuest(guest, false, []);
+				continue;
+			}
+
+			// 高コンパクトな定型形状を優先し、入らない場合だけ柔軟な領域成長を利用する。
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+
+			bool canAccept = points.Count == guest.p;
+			state.ProcessGuest(guest, canAccept, points);
+			if (canAccept) {
+				info.ZAverage += z;
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+
+		return state;
+	}
 }
 
 // 同じ固定スロットを共有する人数帯。最大人数分を予約し、実配置では先頭Pマスを使う。
@@ -200,6 +258,23 @@ public sealed class FixedSlot
 // 配置形状の生成・探索・評価を集約し、各Planは戦略の組み合わせだけを担当する。
 public static class Utils
 {
+	// 入力生成時に基本支払額へ掛けられた 2^Z を逆算する。
+	// Vは整数へ丸められているため厳密値ではないが、下位判定には十分な精度がある。
+	internal static double CalculateValueFactor(
+		(int i, int s, int t, int p, int v) guest)
+	{
+		int duration = guest.t - guest.s;
+		double baseValue = guest.p * Math.Pow(duration, 0.9);
+		return guest.v / baseValue;
+	}
+
+	// Z～N(0, 0.8) に相当する値を逆算する。
+	internal static double CalculateValueZScore(
+		(int i, int s, int t, int p, int v) guest)
+	{
+		return Math.Log2(CalculateValueFactor(guest));
+	}
+
 	// 最大サイズを急増させすぎず、Pの生成分布もある程度まとめられる人数帯。
 	internal static readonly GuestSizeBand[] GuestSizeBands = [
 		new(4, 7),
@@ -702,6 +777,261 @@ public static class Utils
 		return [];
 	}
 
+	// Pを収容する目標矩形を先に固定し、極端に細長い形を作らずに矩形内でPマスを選ぶ。
+	internal static List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch2(
+		string[] row,
+		bool[,] occupied,
+		int p)
+	{
+		int height = row.Length;
+		int width = row[0].Length;
+		var occupiedPrefixSum = new int[height + 1, width + 1];
+		var pondPrefixSum = new int[height + 1, width + 1];
+		for (int x = 0; x < height; ++x) {
+			int occupiedRowSum = 0;
+			int pondRowSum = 0;
+			for (int y = 0; y < width; ++y) {
+				occupiedRowSum += occupied[x, y] ? 1 : 0;
+				pondRowSum += row[x][y] == '#' ? 1 : 0;
+				occupiedPrefixSum[x + 1, y + 1] = occupiedPrefixSum[x, y + 1] + occupiedRowSum;
+				pondPrefixSum[x + 1, y + 1] = pondPrefixSum[x, y + 1] + pondRowSum;
+			}
+		}
+
+		var rectangleCandidates = new List<(int boxHeight, int boxWidth, int perimeter, int unusedArea, int imbalance)>();
+		int maximumArea = Math.Min(height * width, p + 32);
+		for (int boxHeight = 1; boxHeight <= height; ++boxHeight) {
+			for (int boxWidth = 1; boxWidth <= width; ++boxWidth) {
+				int area = boxHeight * boxWidth;
+				if (area < p
+					|| area > maximumArea
+					|| Math.Max(boxHeight, boxWidth) > 2 * Math.Min(boxHeight, boxWidth)) {
+					continue;
+				}
+
+				rectangleCandidates.Add((
+					boxHeight,
+					boxWidth,
+					2 * (boxHeight + boxWidth),
+					area - p,
+					Math.Abs(boxHeight - boxWidth)));
+			}
+		}
+
+		// 矩形自体の周長を最優先にし、同値なら無駄面積と縦横差が小さいものから試す。
+		rectangleCandidates.Sort((left, right) => {
+			int compare = left.perimeter.CompareTo(right.perimeter);
+			if (compare != 0) {
+				return compare;
+			}
+
+			compare = left.unusedArea.CompareTo(right.unusedArea);
+			return compare != 0 ? compare : left.imbalance.CompareTo(right.imbalance);
+		});
+
+		foreach (var rectangle in rectangleCandidates) {
+			var positions = new List<(int top, int left, int occupiedCount, int pondCount)>();
+			for (int top = height - rectangle.boxHeight; top >= 0; --top) {
+				for (int left = width - rectangle.boxWidth; left >= 0; --left) {
+					int bottom = top + rectangle.boxHeight;
+					int right = left + rectangle.boxWidth;
+					int occupiedCount = occupiedPrefixSum[bottom, right]
+						- occupiedPrefixSum[top, right]
+						- occupiedPrefixSum[bottom, left]
+						+ occupiedPrefixSum[top, left];
+					int pondCount = pondPrefixSum[bottom, right]
+						- pondPrefixSum[top, right]
+						- pondPrefixSum[bottom, left]
+						+ pondPrefixSum[top, left];
+
+					if (rectangle.boxHeight * rectangle.boxWidth - occupiedCount - pondCount >= p) {
+						positions.Add((top, left, occupiedCount, pondCount));
+					}
+				}
+			}
+
+			// 他グループを囲う形は退去後の穴を生むため、池よりも占有マスを強く避ける。
+			positions.Sort((left, right) => {
+				int compare = left.occupiedCount.CompareTo(right.occupiedCount);
+				if (compare != 0) {
+					return compare;
+				}
+
+				compare = left.pondCount.CompareTo(right.pondCount);
+				if (compare != 0) {
+					return compare;
+				}
+
+				compare = right.top.CompareTo(left.top);
+				return compare != 0 ? compare : right.left.CompareTo(left.left);
+			});
+
+			foreach (var position in positions) {
+				var points = FindCompactRegionInRectangle(
+					row,
+					occupied,
+					position.top,
+					position.left,
+					rectangle.boxHeight,
+					rectangle.boxWidth,
+					p);
+				if (points.Count == p) {
+					return points;
+				}
+			}
+		}
+
+		return [];
+	}
+
+	// 目標矩形内の空き連結成分を一度ずつ列挙し、Pマス以上ある成分だけを領域成長へ渡す。
+	private static List<(int x, int y)> FindCompactRegionInRectangle(
+		string[] row,
+		bool[,] occupied,
+		int top,
+		int left,
+		int boxHeight,
+		int boxWidth,
+		int p)
+	{
+		int height = row.Length;
+		int width = row[0].Length;
+		var visited = new bool[height, width];
+		ReadOnlySpan<int> deltaX = [-1, 1, 0, 0];
+		ReadOnlySpan<int> deltaY = [0, 0, -1, 1];
+
+		for (int startX = top + boxHeight - 1; startX >= top; --startX) {
+			for (int startY = left + boxWidth - 1; startY >= left; --startY) {
+				if (visited[startX, startY]
+					|| row[startX][startY] != '.'
+					|| occupied[startX, startY]) {
+					continue;
+				}
+
+				var component = new List<(int x, int y)>();
+				var queue = new Queue<(int x, int y)>();
+				visited[startX, startY] = true;
+				queue.Enqueue((startX, startY));
+				while (queue.Count > 0) {
+					var (x, y) = queue.Dequeue();
+					component.Add((x, y));
+					for (int direction = 0; direction < 4; ++direction) {
+						int nextX = x + deltaX[direction];
+						int nextY = y + deltaY[direction];
+						if (nextX < top
+							|| nextX >= top + boxHeight
+							|| nextY < left
+							|| nextY >= left + boxWidth
+							|| visited[nextX, nextY]
+							|| row[nextX][nextY] != '.'
+							|| occupied[nextX, nextY]) {
+							continue;
+						}
+
+						visited[nextX, nextY] = true;
+						queue.Enqueue((nextX, nextY));
+					}
+				}
+
+				if (component.Count >= p) {
+					// 中央付近から成長させると、矩形の片側だけを使う細長い接頭辞になりにくい。
+					int centerX2 = 2 * top + boxHeight - 1;
+					int centerY2 = 2 * left + boxWidth - 1;
+					var seed = component.MinBy(point => (
+						Math.Abs(2 * point.x - centerX2) + Math.Abs(2 * point.y - centerY2),
+						-point.x,
+						-point.y));
+					return GrowCompactRegion(component, seed.x, seed.y, height, width, p);
+				}
+			}
+		}
+
+		return [];
+	}
+
+	// 選択済み領域に接する候補を毎回再評価し、局所的な周長増加が小さい順に追加する。
+	private static List<(int x, int y)> GrowCompactRegion(
+		IReadOnlyCollection<(int x, int y)> component,
+		int startX,
+		int startY,
+		int height,
+		int width,
+		int p)
+	{
+		var inComponent = new bool[height, width];
+		foreach (var (x, y) in component) {
+			inComponent[x, y] = true;
+		}
+
+		var selected = new bool[height, width];
+		var frontier = new HashSet<(int x, int y)>();
+		var points = new List<(int x, int y)>(p) { (startX, startY) };
+		selected[startX, startY] = true;
+		int minX = startX;
+		int maxX = startX;
+		int minY = startY;
+		int maxY = startY;
+
+		AddNeighborsToFrontier(startX, startY);
+		while (points.Count < p) {
+			(int x, int y) best = (-1, -1);
+			(int neighborPriority, int areaIncrease, int boxPerimeter, int imbalance, int xPriority, int yPriority) bestPriority
+				= (int.MaxValue, int.MaxValue, int.MaxValue, int.MaxValue, int.MaxValue, int.MaxValue);
+			int currentArea = (maxX - minX + 1) * (maxY - minY + 1);
+
+			foreach (var candidate in frontier) {
+				int selectedNeighbors = CountSelectedNeighbors(selected, candidate.x, candidate.y);
+				int nextMinX = Math.Min(minX, candidate.x);
+				int nextMaxX = Math.Max(maxX, candidate.x);
+				int nextMinY = Math.Min(minY, candidate.y);
+				int nextMaxY = Math.Max(maxY, candidate.y);
+				int boxHeight = nextMaxX - nextMinX + 1;
+				int boxWidth = nextMaxY - nextMinY + 1;
+
+				// 隣接辺が1本増えるごとに追加後の周長は2減るため、隣接数を最優先する。
+				var priority = (
+					neighborPriority: -selectedNeighbors,
+					areaIncrease: boxHeight * boxWidth - currentArea,
+					boxPerimeter: 2 * (boxHeight + boxWidth),
+					imbalance: Math.Abs(boxHeight - boxWidth),
+					xPriority: -candidate.x,
+					yPriority: -candidate.y);
+				if (priority.CompareTo(bestPriority) < 0) {
+					best = candidate;
+					bestPriority = priority;
+				}
+			}
+
+			// component全体が連結でPマス以上あるため、Pマス選ぶまではfrontierが空にならない。
+			frontier.Remove(best);
+			selected[best.x, best.y] = true;
+			points.Add(best);
+			minX = Math.Min(minX, best.x);
+			maxX = Math.Max(maxX, best.x);
+			minY = Math.Min(minY, best.y);
+			maxY = Math.Max(maxY, best.y);
+			AddNeighborsToFrontier(best.x, best.y);
+		}
+
+		return points;
+
+		void AddNeighborsToFrontier(int x, int y)
+		{
+			ReadOnlySpan<int> deltaX = [-1, 1, 0, 0];
+			ReadOnlySpan<int> deltaY = [0, 0, -1, 1];
+			for (int direction = 0; direction < 4; ++direction) {
+				int nextX = x + deltaX[direction];
+				int nextY = y + deltaY[direction];
+				if ((uint)nextX < (uint)height
+					&& (uint)nextY < (uint)width
+					&& inComponent[nextX, nextY]
+					&& selected[nextX, nextY] == false) {
+					frontier.Add((nextX, nextY));
+				}
+			}
+		}
+	}
+
 	// 領域外との境界を数え、問題定義どおり 4*sqrt(P)/L を計算する。
 	internal static double CalculateCompactness(IReadOnlyCollection<(int x, int y)> points)
 	{
@@ -750,6 +1080,12 @@ public class State
 	public List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch(int p)
 	{
 		return Utils.FindPlacementByReverseBreadthFirstSearch(_input.Row, _occupied, p);
+	}
+
+	// Plan5用のコンパクト領域成長へ現在の占有盤面を渡す。
+	public List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch2(int p)
+	{
+		return Utils.FindPlacementByReverseBreadthFirstSearch2(_input.Row, _occupied, p);
 	}
 
 	public List<(int x, int y)> FindPlacementByFullSearch(
@@ -856,6 +1192,7 @@ public class Information
 	public int PondCount { get; set; } = 0;
 	public int Accept { get; set; } = 0;
 	public double CompactnessAverage { get; set; } = 0;
+	public double ZAverage { get; set; } = 0;
 }
 
 public class Input
@@ -907,6 +1244,204 @@ public class Input
 
 		_io.Flush();
 	}
+}
+
+public class Deque<T> : IEnumerable<T>
+{
+	/// <summary>リングバッファのサイズ</summary>
+	private int _capacity;
+	/// <summary>両端キューの実体であるリングバッファ</summary>
+	private T[] _ringBuffer;
+	/// <summary>キューの先頭のインデックス</summary>
+	/// <remarks>
+	/// キューに格納されている要素を閉区間[front, back]の範囲で持つ。
+	/// 閉区間のため、中身が空のときはbackがfront-1の位置にある。
+	/// </remarks>
+	private int _front;
+	/// <summary>キューの末尾のインデックス</summary>
+	private int _back;
+
+	/// <summary>格納されている要素数</summary>
+	public int Count { get; private set; } = 0;
+	/// <summary>キューの先頭の要素</summary>
+	public T Front => _ringBuffer[_front];
+	/// <summary>キューの末尾の要素</summary>
+	public T Back => _ringBuffer[_back];
+
+	/// <summary>ランダムアクセス</summary>
+	/// <remarks>
+	/// 範囲チェックは省いてあるので注意。
+	/// </remarks>
+	public T this[int index]
+	{
+		get
+		{
+			index += _front;
+			// バッファの終端を超えた場合は先頭に戻る
+			return _ringBuffer[index < _capacity ? index : index - _capacity];
+		}
+	}
+
+	/// <summary>既定のサイズでインスタンスを生成</summary>
+	public Deque() : this(1024) { }
+	/// <summary>
+	/// 指定したサイズでインスタンスを生成
+	/// </summary>
+	/// <param name="capacity">リングバッファのサイズ</param>
+	public Deque(int capacity)
+	{
+		if (capacity <= 0) {
+			capacity = 1024;
+		}
+
+		_capacity = capacity;
+		_ringBuffer = new T[capacity];
+		Clear();
+	}
+
+	/// <summary>
+	/// キューの中身を空にする O(1)
+	/// </summary>
+	public void Clear()
+	{
+		_front = 0;
+		_back = _capacity - 1;
+		Count = 0;
+		// バッファのクリアはしない。
+		// 再度バッファにアクセスされる際には新しい値に上書きされるので問題無い。
+	}
+
+	/// <summary>
+	/// キューの先頭に要素を追加する amortized O(1)
+	/// </summary>
+	/// <param name="item">追加する要素</param>
+	public void PushFront(T item)
+	{
+		// リングバッファが一杯の場合、バッファサイズを倍に拡張する。
+		// この部分がならしO(1)。
+		if (Count == _capacity) {
+			Extend(_capacity * 2);
+		}
+
+		// 要素が格納されている区間を前方向に拡張。
+		// バッファの先頭を超えた場合は末尾に追加する。
+		--_front;
+		if (_front < 0) {
+			_front += _capacity;
+		}
+
+		++Count;
+		_ringBuffer[_front] = item;
+	}
+
+	/// <summary>
+	/// キューの末尾に要素を追加する amortized O(1)
+	/// </summary>
+	/// <param name="item">追加する要素</param>
+	public void PushBack(T item)
+	{
+		// リングバッファが一杯の場合、バッファサイズを倍に拡張する。
+		// この部分がならしO(1)。
+		if (Count == _capacity) {
+			Extend(_capacity * 2);
+		}
+
+		// 要素が格納されている区間を後ろ方向に拡張。
+		// バッファの末尾を超えた場合は先頭に追加する。
+		++_back;
+		if (_back >= _capacity) {
+			_back -= _capacity;
+		}
+
+		++Count;
+		_ringBuffer[_back] = item;
+	}
+
+	/// <summary>
+	/// キューの先頭から要素を取り出す O(1)
+	/// </summary>
+	/// <returns>取り出した要素</returns>
+	public T PopFront()
+	{
+		if (Count == 0) {
+			// 例外を投げるべき？
+			return default(T);
+		}
+
+		T ret = _ringBuffer[_front];
+		--Count;
+		// 要素が格納されている区間の先頭を縮小。
+		// バッファの末尾を超えた場合は先頭を指すようにする。
+		++_front;
+		if (_front >= _capacity) {
+			_front -= _capacity;
+		}
+
+		return ret;
+	}
+
+	/// <summary>
+	/// キューの末尾から要素を取り出す O(1)
+	/// </summary>
+	/// <returns>取り出した要素</returns>
+	public T PopBack()
+	{
+		if (Count == 0) {
+			// 例外を投げるべき？
+			return default(T);
+		}
+
+		T ret = _ringBuffer[_back];
+		--Count;
+		// 要素が格納されている区間の末尾を縮小。
+		// バッファの先頭を超えた場合は末尾を指すようにする。
+		--_back;
+		if (_back < 0) {
+			_back += _capacity;
+		}
+
+		return ret;
+	}
+
+	/// <summary>
+	/// バッファサイズを倍に拡張
+	/// </summary>
+	/// <remarks>
+	/// この処理自体はO(N)かかるのであるが、
+	/// 呼ばれるタイイングがサイズNのバッファーが埋まったときなので、
+	/// 実際に使われるケースでの計算量はならしO(1)となる。
+	/// </remarks>
+	/// <param name="newSize">拡張後のサイズ</param>
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void Extend(int newSize)
+	{
+		var newBuffer = new T[newSize];
+		if (Count > 0) {
+			if (_front <= _back) {
+				// ここにくるのは実質frontが0でbackが^1のときだけ。
+				Array.Copy(_ringBuffer, _front, newBuffer, 0, Count);
+			} else {
+				// [front, 末尾] と [先頭, back] の2回に分けてコピーする必要がある。
+				int prevLength = _ringBuffer.Length - _front;
+				Array.Copy(_ringBuffer, _front, newBuffer, 0, prevLength);
+				Array.Copy(_ringBuffer, 0, newBuffer, prevLength, _back + 1);
+			}
+		}
+
+		_ringBuffer = newBuffer;
+		_capacity = newSize;
+		_front = 0;
+		_back = Count - 1;
+	}
+
+	public IEnumerator<T> GetEnumerator()
+	{
+		for (int i = 0; i < Count; i++) {
+			yield return this[i];
+		}
+	}
+
+	IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 }
 
 [Flags]
