@@ -16,7 +16,7 @@ public class Program
 	{
 		HeuristicHelper.RunCases(
 			runCaseCount: 100,
-			testCaseCount: 150,
+			testCaseCount: 50,
 			isParallel: false,
 			i => Run(i),
 			(locker, i, ret) => {
@@ -53,7 +53,7 @@ public class Program
 		var input = new Input(io, isLocal);
 		var info = new Information();
 
-		var best = Plan1(isLocal, sw, rnd, input, info);
+		var best = Plan2(isLocal, sw, rnd, input, info);
 
 		info.Accept = best.AcceptedCount;
 		info.Score = best.Calculate();
@@ -89,6 +89,28 @@ public class Program
 
 			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
 			var points = state.FindPlacementByFullSearch(shape);
+			bool canAccept = points.Count == guest.p;
+			state.ProcessGuest(guest, canAccept, points);
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+
+		return state;
+	}
+
+	static State Plan2(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			input.OutputMove([]);
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch(guest.p);
+			}
+
 			bool canAccept = points.Count == guest.p;
 			state.ProcessGuest(guest, canAccept, points);
 		}
@@ -249,6 +271,58 @@ public static class Utils
 		return points.Count == p ? points : [];
 	}
 
+	internal static List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch(
+		string[] row,
+		bool[,] occupied,
+		int p)
+	{
+		int n = row.Length;
+		var visited = new bool[n, n];
+		ReadOnlySpan<int> deltaX = [-1, 1, 0, 0];
+		ReadOnlySpan<int> deltaY = [0, 0, -1, 1];
+
+		for (int startX = n - 1; startX >= 0; --startX) {
+			for (int startY = n - 1; startY >= 0; --startY) {
+				if (visited[startX, startY]
+					|| row[startX][startY] != '.'
+					|| occupied[startX, startY]) {
+					continue;
+				}
+
+				var queue = new Queue<(int x, int y)>();
+				var points = new List<(int x, int y)>(p);
+				visited[startX, startY] = true;
+				queue.Enqueue((startX, startY));
+
+				while (queue.Count > 0 && points.Count < p) {
+					var (x, y) = queue.Dequeue();
+					points.Add((x, y));
+
+					for (int direction = 0; direction < 4; ++direction) {
+						int nextX = x + deltaX[direction];
+						int nextY = y + deltaY[direction];
+						if ((uint)nextX >= (uint)n
+							|| (uint)nextY >= (uint)n
+							|| visited[nextX, nextY]
+							|| row[nextX][nextY] != '.'
+							|| occupied[nextX, nextY]) {
+							continue;
+						}
+
+						visited[nextX, nextY] = true;
+						queue.Enqueue((nextX, nextY));
+					}
+				}
+
+				if (points.Count == p) {
+					return points;
+				}
+			}
+		}
+
+		return [];
+	}
+
 	internal static double CalculateCompactness(IReadOnlyCollection<(int x, int y)> points)
 	{
 		var cells = points.ToHashSet();
@@ -285,6 +359,11 @@ public class State
 	public List<(int x, int y)> FindPlacementByBreadthFirstSearch(int p)
 	{
 		return Utils.FindPlacementByBreadthFirstSearch(_input.Row, _occupied, p);
+	}
+
+	public List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch(int p)
+	{
+		return Utils.FindPlacementByReverseBreadthFirstSearch(_input.Row, _occupied, p);
 	}
 
 	public List<(int x, int y)> FindPlacementByFullSearch(
