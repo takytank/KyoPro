@@ -32,6 +32,7 @@ public class Program
 						//$"N={input.N:d2}",
 						$"R={input.R:f3}",
 						$"P={info.PondCount:d4}",
+						$"PC={input.PondClusterCount:d3}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
 						$"A={info.Accept:d4}",
@@ -82,7 +83,7 @@ public class Program
 			}
 		}
 
-		var best = Plan6(isLocal, sw, rnd, input, info);
+		var best = Plan8(isLocal, sw, rnd, input, info);
 
 		info.Accept = best.AcceptedCount;
 		info.CompactnessAverage = best.ComactnessSum / best.AcceptedCount;
@@ -126,6 +127,93 @@ public class Program
 
 		return state;
 	}
+
+	// Plan6の配置探索を維持し、盤面混雑度に応じて低価値・大面積・長期滞在を選別する。
+	static State Plan7(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		var parameters = Utils.LoadPlan7Parameters(isLocal);
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			input.OutputMove([]);
+
+			double z = Utils.CalculateValueZScore(guest);
+			double progress = (double)guestCount / input.M;
+			if (Utils.ShouldRejectDynamically(
+				guest,
+				z,
+				state.OccupiedRate,
+				progress,
+				input.PondClusterCount,
+				parameters)) {
+				state.ProcessGuest(guest, false, []);
+				continue;
+			}
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByBestFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+
+			bool canAccept = points.Count == guest.p;
+			state.ProcessGuest(guest, canAccept, points);
+			if (canAccept) {
+				info.ZAverage += z;
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+
+		return state;
+	}
+
+	// Plan7のreject判定に、処理済みゲストから得られる動的スコアレートを加える。
+	static State Plan8(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		var parameters = Utils.LoadPlan7Parameters(isLocal);
+		long arrivedValueSum = 0;
+
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			input.OutputMove([]);
+			arrivedValueSum += guest.v;
+
+			double z = Utils.CalculateValueZScore(guest);
+			double progress = (double)guestCount / input.M;
+			double dynamicRate = progress >= parameters.DynamicRateStartProgress
+			? state.GetProjectedRate(arrivedValueSum)
+			: double.NaN;
+			if (Utils.ShouldRejectDynamically(
+				guest,
+				z,
+				state.OccupiedRate,
+				progress,
+				input.PondClusterCount,
+				parameters,
+				dynamicRate)) {
+				state.ProcessGuest(guest, false, []);
+				continue;
+			}
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByBestFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+
+			bool canAccept = points.Count == guest.p;
+			state.ProcessGuest(guest, canAccept, points);
+			if (canAccept) {
+				info.ZAverage += z;
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+
+		return state;
+	}
 }
 
 // 配置形状の生成・探索・評価を集約し、各Planは戦略の組み合わせだけを担当する。
@@ -146,6 +234,107 @@ public static class Utils
 		(int i, int s, int t, int p, int v) guest)
 	{
 		return Math.Log2(CalculateValueFactor(guest));
+	}
+
+	internal sealed record Plan7Parameters(
+		double BaseZ,
+		double OccupiedCoefficient,
+		double SizeCoefficient,
+		double DurationCoefficient,
+		double LateRelaxation,
+		double SmallShortBonus,
+		double FewPondClusterBonus,
+		double PondClusterReference,
+		double FewPondClusterOccupiedStart,
+		double DynamicRateBonus,
+		double DynamicRateReference,
+		double DynamicRateStartProgress);
+
+	// 空きが十分ある間は低価値グループも受け入れ、混雑するほど低価値グループを拒否する。
+	internal static bool ShouldRejectDynamically(
+		(int i, int s, int t, int p, int v) guest,
+		double z,
+		double occupiedRate,
+		double progress,
+		int pondClusterCount,
+		Plan7Parameters parameters,
+		double dynamicRate = double.NaN)
+	{
+		double sizeRate = guest.p / 150.0;
+		double durationRate = Math.Clamp((guest.t - guest.s) / 50000.0, 0.0, 1.0);
+		double lateRate = Math.Clamp((progress - 0.65) / 0.35, 0.0, 1.0);
+		double minimumZ = parameters.BaseZ
+			+ parameters.OccupiedCoefficient * occupiedRate
+			+ parameters.SizeCoefficient * occupiedRate * sizeRate
+			+ parameters.DurationCoefficient * occupiedRate * durationRate
+			- parameters.LateRelaxation * lateRate
+			- parameters.SmallShortBonus
+				* (1.0 - sizeRate) * (1.0 - durationRate);
+		double fewClusterRate = Math.Clamp(
+			(parameters.PondClusterReference - pondClusterCount) / parameters.PondClusterReference,
+			0.0,
+			1.0);
+		double occupiedRateAfterStart = parameters.FewPondClusterOccupiedStart <= 0.0
+			? 1.0
+			: Math.Clamp(
+				(occupiedRate - parameters.FewPondClusterOccupiedStart)
+					/ (1.0 - parameters.FewPondClusterOccupiedStart),
+				0.0,
+				1.0);
+		minimumZ -= parameters.FewPondClusterBonus * fewClusterRate
+			* occupiedRateAfterStart;
+		if (double.IsNaN(dynamicRate) == false) {
+			double highDynamicRate = Math.Clamp(
+				dynamicRate - parameters.DynamicRateReference,
+				0.0,
+				1.0);
+			minimumZ -= parameters.DynamicRateBonus * highDynamicRate * fewClusterRate;
+		}
+		return z < minimumZ;
+	}
+
+	internal static Plan7Parameters LoadPlan7Parameters(bool isLocal)
+	{
+		var parameters = new Plan7Parameters(
+			-0.75, 0.55, 0.30, 0.25, 0.35, 0.00, 0.00, 10.0, 0.0, 0.00, 0.50, 0.20);
+		if (isLocal == false) {
+			return parameters;
+		}
+
+		string path = Path.Combine(
+			@$"D:\kyopro\AtCoder\AHC069\tools\in\",
+			"plan7.parameters");
+		if (File.Exists(path) == false) {
+			return parameters;
+		}
+
+		var values = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
+		foreach (string line in File.ReadLines(path)) {
+			string[] parts = line.Split('=', 2, StringSplitOptions.TrimEntries);
+			if (parts.Length == 2
+				&& double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double value)) {
+				values[parts[0]] = value;
+			}
+		}
+
+		return new Plan7Parameters(
+			GetValue(values, "BaseZ", parameters.BaseZ),
+			GetValue(values, "OccupiedCoefficient", parameters.OccupiedCoefficient),
+			GetValue(values, "SizeCoefficient", parameters.SizeCoefficient),
+			GetValue(values, "DurationCoefficient", parameters.DurationCoefficient),
+			GetValue(values, "LateRelaxation", parameters.LateRelaxation),
+			GetValue(values, "SmallShortBonus", parameters.SmallShortBonus),
+			GetValue(values, "FewPondClusterBonus", parameters.FewPondClusterBonus),
+			GetValue(values, "PondClusterReference", parameters.PondClusterReference),
+			GetValue(values, "FewPondClusterOccupiedStart", parameters.FewPondClusterOccupiedStart),
+			GetValue(values, "DynamicRateBonus", parameters.DynamicRateBonus),
+			GetValue(values, "DynamicRateReference", parameters.DynamicRateReference),
+			GetValue(values, "DynamicRateStartProgress", parameters.DynamicRateStartProgress));
+
+		static double GetValue(Dictionary<string, double> values, string key, double defaultValue)
+		{
+			return values.TryGetValue(key, out double value) ? value : defaultValue;
+		}
 	}
 
 	// 行優先で埋めた長方形候補から、周長が短く正方形に近い形を選ぶ。
@@ -739,6 +928,8 @@ public class State
 	private readonly Input _input;
 	// trueのマスは現在いずれかの利用中グループが占有している。
 	private readonly bool[,] _occupied;
+	private readonly int _grassCellCount;
+	private int _occupiedCellCount;
 	// 退去時の解放と利用料加算に必要な情報だけを、受け入れ済みグループごとに保持する。
 	private readonly Dictionary<int, (int departureTime, long usageFee, List<(int x, int y)> points, double compactness)> _activeGroups = [];
 	// 到着ごとに全グループを走査せず、退去時刻が早い順に処理する。
@@ -747,12 +938,22 @@ public class State
 
 	public int AcceptedCount { get; private set; } = 0;
 	public double ComactnessSum { get; private set; } = 0;
+	public double OccupiedRate => (double)_occupiedCellCount / _grassCellCount;
+	public long ProjectedScore => _money + _activeGroups.Values.Sum(group => group.usageFee);
 
 	public State(bool isLocal, Input input)
 	{
 		_isLocal = isLocal;
 		_input = input;
 		_occupied = new bool[input.N, input.N];
+		_grassCellCount = input.Row.Sum(row => row.Count(cell => cell == '.'));
+	}
+
+	public double GetProjectedRate(long arrivedValueSum)
+	{
+		return arrivedValueSum <= 0
+			? 0.0
+			: (double)ProjectedScore / arrivedValueSum;
 	}
 
 	// Plan6のフォールバック用のコンパクト領域成長へ現在の占有盤面を渡す。
@@ -789,6 +990,7 @@ public class State
 		foreach (var (x, y) in points) {
 			_occupied[x, y] = true;
 		}
+		_occupiedCellCount += points.Count;
 
 		long usageFee = CalculateUsageFee(value, compactness);
 		_activeGroups.Add(groupId, (departureTime, usageFee, points, compactness));
@@ -810,6 +1012,7 @@ public class State
 			foreach (var (x, y) in group.points) {
 				_occupied[x, y] = false;
 			}
+			_occupiedCellCount -= group.points.Count;
 
 			_money += group.usageFee;
 			_activeGroups.Remove(groupId);
@@ -845,6 +1048,7 @@ public class Input
 
 	public int N { get; }
 	public int M { get; }
+	public int PondClusterCount { get; }
 	public double R { get; }
 	public string[] Row { get; }
 
@@ -858,6 +1062,94 @@ public class Input
 		(N, M) = io.Int2();
 		R = io.Double();
 		Row = io.ArrayString(N);
+		PondClusterCount = CountPondClusters();
+		ConvertSmallEnclosedGrassToPonds();
+	}
+
+	private int CountPondClusters()
+	{
+		var visited = new bool[N, N];
+		int[] dx = [-1, 1, 0, 0];
+		int[] dy = [0, 0, -1, 1];
+		int clusterCount = 0;
+
+		for (int x = 0; x < N; ++x) {
+			for (int y = 0; y < N; ++y) {
+				if (visited[x, y] || Row[x][y] != '#') {
+					continue;
+				}
+
+				++clusterCount;
+				var queue = new Queue<(int x, int y)>();
+				queue.Enqueue((x, y));
+				visited[x, y] = true;
+				while (queue.TryDequeue(out var point)) {
+					for (int direction = 0; direction < 4; ++direction) {
+						int nx = point.x + dx[direction];
+						int ny = point.y + dy[direction];
+						if (nx >= 0 && nx < N && ny >= 0 && ny < N
+							&& visited[nx, ny] == false && Row[nx][ny] == '#') {
+							visited[nx, ny] = true;
+							queue.Enqueue((nx, ny));
+						}
+					}
+				}
+			}
+		}
+
+		return clusterCount;
+	}
+
+	private void ConvertSmallEnclosedGrassToPonds()
+	{
+		var visited = new bool[N, N];
+		char[][] temp = Row.Select(row => row.ToCharArray()).ToArray();
+		int[] dx = [-1, 1, 0, 0];
+		int[] dy = [0, 0, -1, 1];
+
+		for (int x = 0; x < N; ++x) {
+			for (int y = 0; y < N; ++y) {
+				if (visited[x, y] || Row[x][y] != '.') {
+					continue;
+				}
+
+				var component = new List<(int x, int y)>();
+				var queue = new Queue<(int x, int y)>();
+				queue.Enqueue((x, y));
+				visited[x, y] = true;
+				bool enclosed = true;
+
+				while (queue.TryDequeue(out var point)) {
+					component.Add(point);
+					for (int direction = 0; direction < 4; ++direction) {
+						int nx = point.x + dx[direction];
+						int ny = point.y + dy[direction];
+						if (nx < 0 || nx >= N || ny < 0 || ny >= N) {
+							enclosed = false;
+							continue;
+						}
+						if (Row[nx][ny] == '.') {
+							if (visited[nx, ny] == false) {
+								visited[nx, ny] = true;
+								queue.Enqueue((nx, ny));
+							}
+						} else if (Row[nx][ny] != '#') {
+							enclosed = false;
+						}
+					}
+				}
+
+				if (enclosed && component.Count < 4) {
+					foreach (var (cx, cy) in component) {
+						temp[cx][cy] = '#';
+					}
+				}
+			}
+		}
+
+		for (int x = 0; x < N; ++x) {
+			Row[x] = new string(temp[x]);
+		}
 	}
 
 	public (int i, int s, int t, int p, int v) InputGuest()
