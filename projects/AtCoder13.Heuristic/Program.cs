@@ -34,14 +34,18 @@ public class Program
 						$"R={input.R:f3}",
 						$"P={info.PondCount:d4}",
 						$"PC={input.PondClusterCount:d3}",
+						$"Th={info.Theta:d4}",
 						//$"loop={info.Loop:d8}",
 						//$"up={info.Up:d4}",
-						$"M={info.MoveCount:d4}",
+						$"AL={info.AcceptLimit:d4}",
 						$"A={info.Accept:d4}",
+						$"M={info.MoveCount:d4}",
 						$"C={info.CompactnessAverage:f3}",
 						$"ZT={info.ZThresholdAverage:+0.000;-0.000}",
 						$"Z={info.ZAverage:f3}",
 						$"O={info.OccupyAverage:f3}",
+						$"SR={info.AcceptedSizeRatio:f3}",
+						$"VR={info.AcceptedValueRatio:f3}",
 						$"score={info.Score:d10}",
 						$"rate={info.ScoreRate:f3}",
 						$"elapsed={info.Elapsed:d4}",
@@ -92,7 +96,15 @@ public class Program
 
 		var best = Plan11(isLocal, sw, rnd, input, info);
 
+		info.Theta = (int)(input.StayTimeSum / input.M);
+		info.AcceptLimit = input.CalculateAcceptLimit();
 		info.Accept = best.AcceptedCount;
+		info.AcceptedSizeRatio = best.AcceptedCount == 0 || input.PersonSum == 0
+			? 0.0
+			: (double)best.AcceptedPersonSum * input.M / best.AcceptedCount / input.PersonSum;
+		info.AcceptedValueRatio = best.AcceptedCount == 0 || input.ScoreLimit == 0
+			? 0.0
+			: (double)best.AcceptedValueSum * input.M / best.AcceptedCount / input.ScoreLimit;
 		info.CompactnessAverage = best.ComactnessSum / best.AcceptedCount;
 		info.ZAverage /= best.ComactnessSum;
 		info.ZThresholdAverage /= input.M;
@@ -1206,6 +1218,8 @@ public class State
 	private long _money;
 
 	public int AcceptedCount { get; private set; } = 0;
+	public long AcceptedPersonSum { get; private set; } = 0;
+	public long AcceptedValueSum { get; private set; } = 0;
 	public double ComactnessSum { get; private set; } = 0;
 	public double OccupiedRate => (double)_occupiedCellCount / _grassCellCount;
 	public long ProjectedScore => _money + _activeGroups.Values.Sum(group => group.usageFee);
@@ -1402,6 +1416,8 @@ public class State
 			double compactness = Utils.CalculateCompactness(points);
 			Accept(guest.i, guest.t, guest.v, points, compactness);
 			++AcceptedCount;
+			AcceptedPersonSum += guest.p;
+			AcceptedValueSum += guest.v;
 			ComactnessSum += compactness;
 		}
 
@@ -1463,6 +1479,8 @@ public class Information
 	public long Elapsed { get; set; } = 0;
 
 	public int PondCount { get; set; } = 0;
+	public int Theta { get; set; } = 0;
+	public int AcceptLimit { get; set; } = 0;
 	public int Accept { get; set; } = 0;
 	public int MoveCount { get; set; } = 0;
 	public double CompactnessAverage { get; set; } = 0;
@@ -1470,6 +1488,8 @@ public class Information
 	public double ZAverage { get; set; } = 0;
 	public double OccupyAverage { get; set; } = 0;
 	public double ScoreRate { get; set; } = 0;
+	public double AcceptedSizeRatio { get; set; } = 0;
+	public double AcceptedValueRatio { get; set; } = 0;
 }
 
 public class Input
@@ -1486,6 +1506,21 @@ public class Input
 	public int[] PondPrefixSum { get; }
 
 	public long ScoreLimit { get; private set; }
+	public long StayTimeSum { get; private set; }
+	public long PersonStayTimeSum { get; private set; }
+	public long PersonSum { get; private set; }
+	public int GrassCellCount => Row.Sum(row => row.Count(cell => cell == '.'));
+
+	public int CalculateAcceptLimit()
+	{
+		if (PersonStayTimeSum <= 0) {
+			return 0;
+		}
+
+		long capacity = (long)GrassCellCount * 100000;
+		long limit = capacity * M / PersonStayTimeSum;
+		return (int)Math.Clamp(limit, 0, M);
+	}
 
 	public Input(IOManager io, bool isLocal)
 	{
@@ -1600,6 +1635,9 @@ public class Input
 	{
 		(int i, int s, int t, int p, int v) ret = _io.Int5();
 		ScoreLimit += ret.v;
+		StayTimeSum += ret.t - ret.s;
+		PersonStayTimeSum += (long)ret.p * (ret.t - ret.s);
+		PersonSum += ret.p;
 
 		return ret;
 	}

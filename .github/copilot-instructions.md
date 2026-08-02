@@ -13,3 +13,7 @@ Most importantly, after running the solution program, you must not modify or imp
 You may run the solution program and report its execution results, logs, scores, or other observations. After reporting them, you must stop and wait for a new instruction from the user before making any improvement based on those results.
 
 Here, "solution program" refers to any program created or being created for the purpose of solving this contest problem, regardless of whether it was created by the user or by generative AI, and regardless of whether it is still in progress or already complete.
+
+## Build Configuration
+- Use Debug build for local testing.
+- Treat Release build as the version for production submission.
