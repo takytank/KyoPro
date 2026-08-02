@@ -33,8 +33,9 @@ public class Program
 						$"R={input.R:f3}",
 						$"P={info.PondCount:d4}",
 						$"PC={input.PondClusterCount:d3}",
-						$"loop={info.Loop:d8}",
-						$"up={info.Up:d4}",
+						//$"loop={info.Loop:d8}",
+						//$"up={info.Up:d4}",
+						$"M={info.MoveCount:d4}",
 						$"A={info.Accept:d4}",
 						$"C={info.CompactnessAverage:f3}",
 						$"Z={info.ZAverage:f3}",
@@ -83,7 +84,7 @@ public class Program
 			}
 		}
 
-		var best = Plan8(isLocal, sw, rnd, input, info);
+		var best = Plan10(isLocal, sw, rnd, input, info);
 
 		info.Accept = best.AcceptedCount;
 		info.CompactnessAverage = best.ComactnessSum / best.AcceptedCount;
@@ -102,7 +103,7 @@ public class Program
 		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
 			var guest = input.InputGuest();
 			state.ReleaseDepartedGroups(guest.s);
-			input.OutputMove([]);
+			input.OutputMove([], info);
 
 			const double Bottom20PercentZ = -0.673297;
 			double z = Utils.CalculateValueZScore(guest);
@@ -136,7 +137,7 @@ public class Program
 		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
 			var guest = input.InputGuest();
 			state.ReleaseDepartedGroups(guest.s);
-			input.OutputMove([]);
+			input.OutputMove([], info);
 
 			double z = Utils.CalculateValueZScore(guest);
 			double progress = (double)guestCount / input.M;
@@ -178,7 +179,7 @@ public class Program
 		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
 			var guest = input.InputGuest();
 			state.ReleaseDepartedGroups(guest.s);
-			input.OutputMove([]);
+			input.OutputMove([], info);
 			arrivedValueSum += guest.v;
 
 			double z = Utils.CalculateValueZScore(guest);
@@ -208,6 +209,120 @@ public class Program
 			state.ProcessGuest(guest, canAccept, points);
 			if (canAccept) {
 				info.ZAverage += z;
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+
+		return state;
+	}
+
+	// Plan8の選別を維持し、通常配置に失敗したときだけ利用中グループ1組の再配置を試す。
+	static State Plan9(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		var parameters = Utils.LoadPlan7Parameters(isLocal);
+		long arrivedValueSum = 0;
+
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			arrivedValueSum += guest.v;
+
+			double z = Utils.CalculateValueZScore(guest);
+			double progress = (double)guestCount / input.M;
+			double dynamicRate = progress >= parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
+			if (Utils.ShouldRejectDynamically(
+				guest,
+				z,
+				state.OccupiedRate,
+				progress,
+				input.PondClusterCount,
+				parameters,
+				dynamicRate)) {
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, []);
+				continue;
+			}
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByBestFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+
+			if (points.Count == guest.p) {
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, true, points);
+				info.ZAverage += z;
+				continue;
+			}
+
+			if (state.TryMoveOneGroupForGuest(shape, guest.p, out var moveGroup, out points)) {
+				input.OutputMove([moveGroup], info);
+				state.ProcessGuest(guest, true, points);
+				info.ZAverage += z;
+			} else {
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, []);
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+
+		return state;
+	}
+
+	// Plan9の配置不能時に、全利用中グループを候補として最良の再配置を選ぶ。
+	static State Plan10(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		var parameters = Utils.LoadPlan7Parameters(isLocal);
+		long arrivedValueSum = 0;
+
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			arrivedValueSum += guest.v;
+
+			double z = Utils.CalculateValueZScore(guest);
+			double progress = (double)guestCount / input.M;
+			double dynamicRate = progress >= parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
+			if (Utils.ShouldRejectDynamically(
+				guest,
+				z,
+				state.OccupiedRate,
+				progress,
+				input.PondClusterCount,
+				parameters,
+				dynamicRate)) {
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, []);
+				continue;
+			}
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByBestFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+
+			if (points.Count == guest.p) {
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, true, points);
+				info.ZAverage += z;
+				continue;
+			}
+
+			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
+				input.OutputMove([moveGroup], info);
+				state.ProcessGuest(guest, true, points);
+				info.ZAverage += z;
+			} else {
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, []);
 			}
 		}
 		state.ReleaseDepartedGroups(int.MaxValue);
@@ -687,6 +802,8 @@ public static class Utils
 
 		foreach (var rectangle in rectangleCandidates) {
 			var positions = new List<(int top, int left, int occupiedCount, int pondCount)>();
+			(int top, int left, int occupiedCount, int pondCount) bestPosition = default;
+			bool hasBestPosition = false;
 			for (int top = height - rectangle.boxHeight; top >= 0; --top) {
 				for (int left = width - rectangle.boxWidth; left >= 0; --left) {
 					int bottom = top + rectangle.boxHeight;
@@ -740,6 +857,31 @@ public static class Utils
 		}
 
 		return [];
+
+		static bool IsBetterRectanglePosition(
+			(int top, int left, int occupiedCount, int pondCount) left,
+			(int top, int left, int occupiedCount, int pondCount) right)
+		{
+			return CompareRectanglePositions(left, right) < 0;
+		}
+
+		static int CompareRectanglePositions(
+			(int top, int left, int occupiedCount, int pondCount) left,
+			(int top, int left, int occupiedCount, int pondCount) right)
+		{
+			int compare = left.occupiedCount.CompareTo(right.occupiedCount);
+			if (compare != 0) {
+				return compare;
+			}
+
+			compare = left.pondCount.CompareTo(right.pondCount);
+			if (compare != 0) {
+				return compare;
+			}
+
+			compare = right.top.CompareTo(left.top);
+			return compare != 0 ? compare : right.left.CompareTo(left.left);
+		}
 	}
 
 	// 目標矩形内の空き連結成分を一度ずつ列挙し、Pマス以上ある成分だけを領域成長へ渡す。
@@ -931,7 +1073,7 @@ public class State
 	private readonly int _grassCellCount;
 	private int _occupiedCellCount;
 	// 退去時の解放と利用料加算に必要な情報だけを、受け入れ済みグループごとに保持する。
-	private readonly Dictionary<int, (int departureTime, long usageFee, List<(int x, int y)> points, double compactness)> _activeGroups = [];
+	private readonly Dictionary<int, (int departureTime, int value, long usageFee, List<(int x, int y)> points, double compactness)> _activeGroups = [];
 	// 到着ごとに全グループを走査せず、退去時刻が早い順に処理する。
 	private readonly PriorityQueue<int, int> _departureQueue = new();
 	private long _money;
@@ -959,13 +1101,167 @@ public class State
 	// Plan6のフォールバック用のコンパクト領域成長へ現在の占有盤面を渡す。
 	public List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch2(int p)
 	{
-		return Utils.FindPlacementByReverseBreadthFirstSearch2(_input.Row, _occupied, p);
+		return Utils.FindPlacementByReverseBreadthFirstSearch2(
+			_input.Row,
+			_occupied,
+			p,
+			_input.PondPrefixSum,
+			_input.GetRectangleCandidates(p));
 	}
 
 	public List<(int x, int y)> FindPlacementByBestFullSearch(
 		IReadOnlyList<(int x, int y)> shape)
 	{
 		return Utils.FindPlacementByBestFullSearch(_input.Row, _occupied, shape);
+	}
+
+	// 通常配置に失敗した場合だけ、最も早く退去する1組を再配置して空間を作る。
+	public bool TryMoveOneGroupForGuest(
+		IReadOnlyList<(int x, int y)> guestShape,
+		int guestSize,
+		out (int j, List<(int z, int w)> points) moveGroup,
+		out List<(int x, int y)> guestPoints)
+	{
+		moveGroup = default;
+		guestPoints = [];
+		if (_activeGroups.Count == 0) {
+			return false;
+		}
+
+		var candidate = _activeGroups.MinBy(pair => pair.Value.departureTime);
+		int groupId = candidate.Key;
+		var group = candidate.Value;
+		SetOccupied(group.points, false);
+
+		guestPoints = FindPlacementByBestFullSearch(guestShape);
+		if (guestPoints.Count != guestSize) {
+			guestPoints = FindPlacementByReverseBreadthFirstSearch2(guestSize);
+		}
+		if (guestPoints.Count != guestSize) {
+			SetOccupied(group.points, true);
+			guestPoints = [];
+			return false;
+		}
+
+		SetOccupied(guestPoints, true);
+		var (groupShape, _) = Utils.CreateNearSquareShape(group.points.Count);
+		var movedPoints = FindPlacementByBestFullSearch(groupShape);
+		if (movedPoints.Count != group.points.Count) {
+			movedPoints = FindPlacementByReverseBreadthFirstSearch2(group.points.Count);
+		}
+		SetOccupied(guestPoints, false);
+		if (movedPoints.Count != group.points.Count) {
+			SetOccupied(group.points, true);
+			guestPoints = [];
+			return false;
+		}
+
+		SetOccupied(movedPoints, true);
+		double movedCompactness = Math.Min(group.compactness, Utils.CalculateCompactness(movedPoints));
+		long movedUsageFee = CalculateUsageFee(group.value, movedCompactness);
+		long moveCost = Math.Max((long)Math.Floor(group.value * _input.R + 0.5), 1);
+		_money -= moveCost;
+		ComactnessSum += movedCompactness - group.compactness;
+		_activeGroups[groupId] = (group.departureTime, group.value, movedUsageFee, movedPoints, movedCompactness);
+		moveGroup = (groupId, movedPoints.Select(point => (point.x, point.y)).ToList());
+		return true;
+	}
+
+	// 全利用中グループを候補にし、新規客の受入による増分が最大の移動だけを確定する。
+	public bool TryMoveBestGroupForGuest(
+		IReadOnlyList<(int x, int y)> guestShape,
+		(int i, int s, int t, int p, int v) guest,
+		out (int j, List<(int z, int w)> points) moveGroup,
+		out List<(int x, int y)> guestPoints)
+	{
+		moveGroup = default;
+		guestPoints = [];
+		if (_activeGroups.Count == 0) {
+			return false;
+		}
+
+		long bestGain = long.MinValue;
+		int bestGroupId = -1;
+		List<(int x, int y)> bestMovedPoints = [];
+		List<(int x, int y)> bestGuestPoints = [];
+		var groupShapes = new Dictionary<int, List<(int x, int y)>>();
+		long minimumMoveCost = _activeGroups.Values.Min(group =>
+			Math.Max((long)Math.Floor(group.value * _input.R + 0.5), 1));
+		long maximumPossibleGain = guest.v - minimumMoveCost;
+
+		foreach (var candidate in _activeGroups) {
+			int groupId = candidate.Key;
+			var group = candidate.Value;
+			if (guest.p + group.points.Count > _grassCellCount - _occupiedCellCount + group.points.Count) {
+				continue;
+			}
+			SetOccupied(group.points, false);
+
+			var candidateGuestPoints = FindPlacementByBestFullSearch(guestShape);
+			if (candidateGuestPoints.Count != guest.p) {
+				candidateGuestPoints = FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+			if (candidateGuestPoints.Count == guest.p) {
+				SetOccupied(candidateGuestPoints, true);
+				if (groupShapes.TryGetValue(group.points.Count, out var groupShape) == false) {
+					(groupShape, _) = Utils.CreateNearSquareShape(group.points.Count);
+					groupShapes.Add(group.points.Count, groupShape);
+				}
+				var candidateMovedPoints = FindPlacementByBestFullSearch(groupShape);
+				if (candidateMovedPoints.Count != group.points.Count) {
+					candidateMovedPoints = FindPlacementByReverseBreadthFirstSearch2(group.points.Count);
+				}
+				SetOccupied(candidateGuestPoints, false);
+
+				if (candidateMovedPoints.Count == group.points.Count) {
+					double guestCompactness = Utils.CalculateCompactness(candidateGuestPoints);
+					double movedCompactness = Math.Min(
+						group.compactness,
+						Utils.CalculateCompactness(candidateMovedPoints));
+					long guestUsageFee = CalculateUsageFee(guest.v, guestCompactness);
+					long movedUsageFee = CalculateUsageFee(group.value, movedCompactness);
+					long moveCost = Math.Max((long)Math.Floor(group.value * _input.R + 0.5), 1);
+					long gain = guestUsageFee + movedUsageFee - group.usageFee - moveCost;
+					if (gain > bestGain) {
+						bestGain = gain;
+						bestGroupId = groupId;
+						bestMovedPoints = candidateMovedPoints.ToList();
+						bestGuestPoints = candidateGuestPoints.ToList();
+					}
+					if (bestGain >= maximumPossibleGain) {
+						SetOccupied(candidateGuestPoints, false);
+						SetOccupied(group.points, true);
+						break;
+					}
+				}
+			}
+
+			SetOccupied(group.points, true);
+		}
+
+		if (bestGroupId < 0) {
+			return false;
+		}
+
+		var bestGroup = _activeGroups[bestGroupId];
+		SetOccupied(bestGroup.points, false);
+		SetOccupied(bestMovedPoints, true);
+		var finalCompactness = Math.Min(
+			bestGroup.compactness,
+			Utils.CalculateCompactness(bestMovedPoints));
+		long finalUsageFee = CalculateUsageFee(bestGroup.value, finalCompactness);
+		long finalMoveCost = Math.Max((long)Math.Floor(bestGroup.value * _input.R + 0.5), 1);
+		_money -= finalMoveCost;
+		ComactnessSum += finalCompactness - bestGroup.compactness;
+		_activeGroups[bestGroupId] = (
+			bestGroup.departureTime,
+			bestGroup.value,
+			finalUsageFee,
+			bestMovedPoints,
+			finalCompactness);
+		moveGroup = (bestGroupId, bestMovedPoints.Select(point => (point.x, point.y)).ToList());
+		guestPoints = bestGuestPoints;
+		return true;
 	}
 
 	// Planが決めた配置結果を状態へ反映し、インタラクティブ出力を確定する。
@@ -987,14 +1283,19 @@ public class State
 	// 利用料は移動しない各Planでは配置時に確定するため、退去時用に保存しておく。
 	private void Accept(int groupId, int departureTime, int value, List<(int x, int y)> points, double compactness)
 	{
-		foreach (var (x, y) in points) {
-			_occupied[x, y] = true;
-		}
+		SetOccupied(points, true);
 		_occupiedCellCount += points.Count;
 
 		long usageFee = CalculateUsageFee(value, compactness);
-		_activeGroups.Add(groupId, (departureTime, usageFee, points, compactness));
+		_activeGroups.Add(groupId, (departureTime, value, usageFee, points, compactness));
 		_departureQueue.Enqueue(groupId, departureTime);
+	}
+
+	private void SetOccupied(IEnumerable<(int x, int y)> points, bool occupied)
+	{
+		foreach (var (x, y) in points) {
+			_occupied[x, y] = occupied;
+		}
 	}
 
 	private static long CalculateUsageFee(int value, double compactness)
@@ -1009,9 +1310,7 @@ public class State
 			&& departureTime < currentTime) {
 			_departureQueue.Dequeue();
 			var group = _activeGroups[groupId];
-			foreach (var (x, y) in group.points) {
-				_occupied[x, y] = false;
-			}
+			SetOccupied(group.points, false);
 			_occupiedCellCount -= group.points.Count;
 
 			_money += group.usageFee;
@@ -1036,6 +1335,7 @@ public class Information
 
 	public int PondCount { get; set; } = 0;
 	public int Accept { get; set; } = 0;
+	public int MoveCount { get; set; } = 0;
 	public double CompactnessAverage { get; set; } = 0;
 	public double ZAverage { get; set; } = 0;
 	public double Rate { get; set; } = 0;
@@ -1045,12 +1345,14 @@ public class Input
 {
 	private readonly IOManager _io;
 	private readonly bool _isLocal;
+	private readonly Dictionary<int, (int boxHeight, int boxWidth, int perimeter, int unusedArea, int imbalance)[]> _rectangleCandidates = [];
 
 	public int N { get; }
 	public int M { get; }
 	public int PondClusterCount { get; }
 	public double R { get; }
 	public string[] Row { get; }
+	public int[] PondPrefixSum { get; }
 
 	public long ScoreLimit { get; private set; }
 
@@ -1064,6 +1366,17 @@ public class Input
 		Row = io.ArrayString(N);
 		PondClusterCount = CountPondClusters();
 		ConvertSmallEnclosedGrassToPonds();
+		PondPrefixSum = Utils.CreatePondPrefixSum(Row);
+	}
+
+	public IReadOnlyList<(int boxHeight, int boxWidth, int perimeter, int unusedArea, int imbalance)>
+		GetRectangleCandidates(int p)
+	{
+		if (_rectangleCandidates.TryGetValue(p, out var candidates) == false) {
+			candidates = Utils.CreateRectangleCandidates(N, N, p);
+			_rectangleCandidates.Add(p, candidates);
+		}
+		return candidates;
 	}
 
 	private int CountPondClusters()
@@ -1160,8 +1473,9 @@ public class Input
 		return ret;
 	}
 
-	public void OutputMove(List<(int j, List<(int z, int w)> points)> moveGroups)
+	public void OutputMove(List<(int j, List<(int z, int w)> points)> moveGroups, Information info)
 	{
+		info.MoveCount += moveGroups.Count;
 		_io.WriteLine(moveGroups.Count);
 		foreach (var (j, points) in moveGroups) {
 			_io.WriteLine(j);
