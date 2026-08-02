@@ -18,6 +18,7 @@ public class Program
 		double sumC = 0;
 		double sumZ = 0;
 		double sumR = 0;
+		double sumO = 0;
 
 		HeuristicHelper.RunCases(
 			runCaseCount: 100,
@@ -38,16 +39,19 @@ public class Program
 						$"M={info.MoveCount:d4}",
 						$"A={info.Accept:d4}",
 						$"C={info.CompactnessAverage:f3}",
+						$"ZT={info.ZThresholdAverage:+0.000;-0.000}",
 						$"Z={info.ZAverage:f3}",
+						$"O={info.OccupyAverage:f3}",
 						$"score={info.Score:d10}",
-						$"rate={info.Rate:f3}",
+						$"rate={info.ScoreRate:f3}",
 						$"elapsed={info.Elapsed:d4}",
 					};
 
 					sumA += info.Accept;
 					sumC += info.CompactnessAverage;
 					sumZ += info.ZAverage;
-					sumR += info.Rate;
+					sumR += info.ScoreRate;
+					sumO += info.OccupyAverage;
 
 					Console.WriteLine(status.Join(" "));
 					Console.Out.Flush();
@@ -60,9 +64,11 @@ public class Program
 				double averageC = sumC / rc;
 				double averageZ = sumZ / rc;
 				double averageR = sumR / rc;
+				double averageO = sumO / rc;
 				Console.WriteLine($"accept average: {averageA:f3}");
 				Console.WriteLine($"compactness average: {averageC:f3}");
 				Console.WriteLine($"Z average: {averageZ:f6}");
+				Console.WriteLine($"occupy average: {averageO:f6}");
 				Console.WriteLine($"rate average: {averageR:f6}");
 			});
 	}
@@ -84,13 +90,15 @@ public class Program
 			}
 		}
 
-		var best = Plan10(isLocal, sw, rnd, input, info);
+		var best = Plan11(isLocal, sw, rnd, input, info);
 
 		info.Accept = best.AcceptedCount;
 		info.CompactnessAverage = best.ComactnessSum / best.AcceptedCount;
 		info.ZAverage /= best.ComactnessSum;
+		info.ZThresholdAverage /= input.M;
+		info.OccupyAverage /= input.M;
 		info.Score = best.Calculate();
-		info.Rate = (double)info.Score / input.ScoreLimit;
+		info.ScoreRate = (double)info.Score / input.ScoreLimit;
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
@@ -105,10 +113,20 @@ public class Program
 			state.ReleaseDepartedGroups(guest.s);
 			input.OutputMove([], info);
 
+			//const double Bottom10PercentZ = -1.025242;
+			//const double Bottom15PercentZ = -0.829147;
 			const double Bottom20PercentZ = -0.673297;
+			//const double Bottom25PercentZ = -0.539592;
+			//const double Bottom30PercentZ = -0.419520;
+			//const double Bottom35PercentZ = -0.308256;
+			//const double Bottom40PercentZ = -0.202678;
+			//const double Bottom45PercentZ = -0.100529;
+			//const double Bottom50PercentZ = 0.000000;
 			double z = Utils.CalculateValueZScore(guest);
-			if (z < Bottom20PercentZ) {
-				state.ProcessGuest(guest, false, []);
+			double zThreshold = Bottom20PercentZ;
+			info.ZThresholdAverage += zThreshold;
+			if (z < zThreshold) {
+				state.ProcessGuest(guest, false, [], info);
 				continue;
 			}
 
@@ -119,7 +137,7 @@ public class Program
 			}
 
 			bool canAccept = points.Count == guest.p;
-			state.ProcessGuest(guest, canAccept, points);
+			state.ProcessGuest(guest, canAccept, points, info);
 			if (canAccept) {
 				info.ZAverage += z;
 			}
@@ -141,14 +159,15 @@ public class Program
 
 			double z = Utils.CalculateValueZScore(guest);
 			double progress = (double)guestCount / input.M;
-			if (Utils.ShouldRejectDynamically(
+			double zThreshold = Utils.ShouldRejectDynamically(
 				guest,
-				z,
 				state.OccupiedRate,
 				progress,
 				input.PondClusterCount,
-				parameters)) {
-				state.ProcessGuest(guest, false, []);
+				parameters);
+			info.ZThresholdAverage += zThreshold;
+			if (z < zThreshold) {
+				state.ProcessGuest(guest, false, [], info);
 				continue;
 			}
 
@@ -159,7 +178,7 @@ public class Program
 			}
 
 			bool canAccept = points.Count == guest.p;
-			state.ProcessGuest(guest, canAccept, points);
+			state.ProcessGuest(guest, canAccept, points, info);
 			if (canAccept) {
 				info.ZAverage += z;
 			}
@@ -187,15 +206,16 @@ public class Program
 			double dynamicRate = progress >= parameters.DynamicRateStartProgress
 			? state.GetProjectedRate(arrivedValueSum)
 			: double.NaN;
-			if (Utils.ShouldRejectDynamically(
+			double zThreshold = Utils.ShouldRejectDynamically(
 				guest,
-				z,
 				state.OccupiedRate,
 				progress,
 				input.PondClusterCount,
 				parameters,
-				dynamicRate)) {
-				state.ProcessGuest(guest, false, []);
+				dynamicRate);
+			info.ZThresholdAverage += zThreshold;
+			if (z < zThreshold) {
+				state.ProcessGuest(guest, false, [], info);
 				continue;
 			}
 
@@ -206,7 +226,7 @@ public class Program
 			}
 
 			bool canAccept = points.Count == guest.p;
-			state.ProcessGuest(guest, canAccept, points);
+			state.ProcessGuest(guest, canAccept, points, info);
 			if (canAccept) {
 				info.ZAverage += z;
 			}
@@ -233,16 +253,17 @@ public class Program
 			double dynamicRate = progress >= parameters.DynamicRateStartProgress
 				? state.GetProjectedRate(arrivedValueSum)
 				: double.NaN;
-			if (Utils.ShouldRejectDynamically(
+			double zThreshold = Utils.ShouldRejectDynamically(
 				guest,
-				z,
 				state.OccupiedRate,
 				progress,
 				input.PondClusterCount,
 				parameters,
-				dynamicRate)) {
+				dynamicRate);
+			info.ZThresholdAverage += zThreshold;
+			if (z < zThreshold) {
 				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, []);
+				state.ProcessGuest(guest, false, [], info);
 				continue;
 			}
 
@@ -254,18 +275,18 @@ public class Program
 
 			if (points.Count == guest.p) {
 				input.OutputMove([], info);
-				state.ProcessGuest(guest, true, points);
+				state.ProcessGuest(guest, true, points, info);
 				info.ZAverage += z;
 				continue;
 			}
 
 			if (state.TryMoveOneGroupForGuest(shape, guest.p, out var moveGroup, out points)) {
 				input.OutputMove([moveGroup], info);
-				state.ProcessGuest(guest, true, points);
+				state.ProcessGuest(guest, true, points, info);
 				info.ZAverage += z;
 			} else {
 				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, []);
+				state.ProcessGuest(guest, false, [], info);
 			}
 		}
 		state.ReleaseDepartedGroups(int.MaxValue);
@@ -290,16 +311,17 @@ public class Program
 			double dynamicRate = progress >= parameters.DynamicRateStartProgress
 				? state.GetProjectedRate(arrivedValueSum)
 				: double.NaN;
-			if (Utils.ShouldRejectDynamically(
+			double zThreshold = Utils.ShouldRejectDynamically(
 				guest,
-				z,
 				state.OccupiedRate,
 				progress,
 				input.PondClusterCount,
 				parameters,
-				dynamicRate)) {
+				dynamicRate);
+			info.ZThresholdAverage += zThreshold;
+			if (z < zThreshold) {
 				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, []);
+				state.ProcessGuest(guest, false, [], info);
 				continue;
 			}
 
@@ -311,18 +333,76 @@ public class Program
 
 			if (points.Count == guest.p) {
 				input.OutputMove([], info);
-				state.ProcessGuest(guest, true, points);
+				state.ProcessGuest(guest, true, points, info);
 				info.ZAverage += z;
 				continue;
 			}
 
 			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
 				input.OutputMove([moveGroup], info);
-				state.ProcessGuest(guest, true, points);
+				state.ProcessGuest(guest, true, points, info);
 				info.ZAverage += z;
 			} else {
 				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, []);
+				state.ProcessGuest(guest, false, [], info);
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+
+		return state;
+	}
+
+	// Plan10の全利用中グループ再配置を維持し、Plan11専用のreject閾値を使用する。
+	static State Plan11(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		var parameters = Utils.LoadPlan7Parameters(isLocal, "plan11.parameters");
+		long arrivedValueSum = 0;
+
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			arrivedValueSum += guest.v;
+
+			double z = Utils.CalculateValueZScore(guest);
+			double progress = (double)guestCount / input.M;
+			double dynamicRate = progress >= parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
+			double zThreshold = Utils.CalculatePlan11RejectThreshold(
+				guest,
+				state.OccupiedRate,
+				progress,
+				input.PondClusterCount,
+				parameters,
+				dynamicRate);
+			info.ZThresholdAverage += zThreshold;
+			if (z < zThreshold) {
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+				continue;
+			}
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByBestFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+
+			if (points.Count == guest.p) {
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+				continue;
+			}
+
+			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
+				input.OutputMove([moveGroup], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+			} else {
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
 			}
 		}
 		state.ReleaseDepartedGroups(int.MaxValue);
@@ -363,12 +443,26 @@ public static class Utils
 		double FewPondClusterOccupiedStart,
 		double DynamicRateBonus,
 		double DynamicRateReference,
-		double DynamicRateStartProgress);
+		double DynamicRateStartProgress,
+		double HighRateLowOccupancyThreshold,
+		double HighRateLowOccupancyReference,
+		double HighRateLowOccupancyBonus);
 
 	// 空きが十分ある間は低価値グループも受け入れ、混雑するほど低価値グループを拒否する。
-	internal static bool ShouldRejectDynamically(
+	internal static double ShouldRejectDynamically(
 		(int i, int s, int t, int p, int v) guest,
-		double z,
+		double occupiedRate,
+		double progress,
+		int pondClusterCount,
+		Plan7Parameters parameters,
+		double dynamicRate = double.NaN)
+	{
+		return CalculateRejectThreshold(
+			guest, occupiedRate, progress, pondClusterCount, parameters, dynamicRate);
+	}
+
+	internal static double CalculateRejectThreshold(
+		(int i, int s, int t, int p, int v) guest,
 		double occupiedRate,
 		double progress,
 		int pondClusterCount,
@@ -405,20 +499,50 @@ public static class Utils
 				1.0);
 			minimumZ -= parameters.DynamicRateBonus * highDynamicRate * fewClusterRate;
 		}
-		return z < minimumZ;
+		return minimumZ;
 	}
 
-	internal static Plan7Parameters LoadPlan7Parameters(bool isLocal)
+	internal static double CalculatePlan11RejectThreshold(
+		(int i, int s, int t, int p, int v) guest,
+		double occupiedRate,
+		double progress,
+		int pondClusterCount,
+		Plan7Parameters parameters,
+		double dynamicRate)
+	{
+		double minimumZ = CalculateRejectThreshold(
+			guest, occupiedRate, progress, pondClusterCount, parameters, dynamicRate);
+		if (double.IsNaN(dynamicRate)) {
+			return minimumZ;
+		}
+
+		double highRate = Math.Clamp(
+			(dynamicRate - parameters.HighRateLowOccupancyThreshold)
+				/ (1.0 - parameters.HighRateLowOccupancyThreshold),
+			0.0,
+			1.0);
+		double lowOccupancy = Math.Clamp(
+			(parameters.HighRateLowOccupancyReference - occupiedRate)
+				/ parameters.HighRateLowOccupancyReference,
+			0.0,
+			1.0);
+		return minimumZ - parameters.HighRateLowOccupancyBonus * highRate * lowOccupancy;
+	}
+
+	internal static Plan7Parameters LoadPlan7Parameters(
+		bool isLocal,
+		string fileName = "plan7.parameters")
 	{
 		var parameters = new Plan7Parameters(
-			-0.75, 0.55, 0.30, 0.25, 0.35, 0.00, 0.00, 10.0, 0.0, 0.00, 0.50, 0.20);
+			-0.75, 0.55, 0.30, 0.25, 0.35, 0.00, 0.00, 10.0, 0.0, 0.00, 0.50, 0.20,
+			0.60, 0.50, 0.00);
 		if (isLocal == false) {
 			return parameters;
 		}
 
 		string path = Path.Combine(
 			@$"D:\kyopro\AtCoder\AHC069\tools\in\",
-			"plan7.parameters");
+			fileName);
 		if (File.Exists(path) == false) {
 			return parameters;
 		}
@@ -444,7 +568,10 @@ public static class Utils
 			GetValue(values, "FewPondClusterOccupiedStart", parameters.FewPondClusterOccupiedStart),
 			GetValue(values, "DynamicRateBonus", parameters.DynamicRateBonus),
 			GetValue(values, "DynamicRateReference", parameters.DynamicRateReference),
-			GetValue(values, "DynamicRateStartProgress", parameters.DynamicRateStartProgress));
+			GetValue(values, "DynamicRateStartProgress", parameters.DynamicRateStartProgress),
+			GetValue(values, "HighRateLowOccupancyThreshold", parameters.HighRateLowOccupancyThreshold),
+			GetValue(values, "HighRateLowOccupancyReference", parameters.HighRateLowOccupancyReference),
+			GetValue(values, "HighRateLowOccupancyBonus", parameters.HighRateLowOccupancyBonus));
 
 		static double GetValue(Dictionary<string, double> values, string key, double defaultValue)
 		{
@@ -1268,7 +1395,8 @@ public class State
 	public void ProcessGuest(
 		(int i, int s, int t, int p, int v) guest,
 		bool canAccept,
-		List<(int x, int y)> points)
+		List<(int x, int y)> points,
+		Information info)
 	{
 		if (canAccept) {
 			double compactness = Utils.CalculateCompactness(points);
@@ -1278,6 +1406,7 @@ public class State
 		}
 
 		_input.OutputReception(canAccept, points);
+		info.OccupyAverage += OccupiedRate;
 	}
 
 	// 利用料は移動しない各Planでは配置時に確定するため、退去時用に保存しておく。
@@ -1337,8 +1466,10 @@ public class Information
 	public int Accept { get; set; } = 0;
 	public int MoveCount { get; set; } = 0;
 	public double CompactnessAverage { get; set; } = 0;
+	public double ZThresholdAverage { get; set; } = 0;
 	public double ZAverage { get; set; } = 0;
-	public double Rate { get; set; } = 0;
+	public double OccupyAverage { get; set; } = 0;
+	public double ScoreRate { get; set; } = 0;
 }
 
 public class Input
