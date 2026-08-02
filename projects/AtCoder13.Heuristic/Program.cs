@@ -17,6 +17,7 @@ public class Program
 		double sumA = 0;
 		double sumC = 0;
 		double sumZ = 0;
+		double sumR = 0;
 
 		HeuristicHelper.RunCases(
 			runCaseCount: 100,
@@ -37,12 +38,14 @@ public class Program
 						$"C={info.CompactnessAverage:f3}",
 						$"Z={info.ZAverage:f3}",
 						$"score={info.Score:d10}",
+						$"rate={info.Rate:f3}",
 						$"elapsed={info.Elapsed:d4}",
 					};
 
 					sumA += info.Accept;
 					sumC += info.CompactnessAverage;
 					sumZ += info.ZAverage;
+					sumR += info.Rate;
 
 					Console.WriteLine(status.Join(" "));
 					Console.Out.Flush();
@@ -54,9 +57,11 @@ public class Program
 				double averageA = sumA / rc;
 				double averageC = sumC / rc;
 				double averageZ = sumZ / rc;
+				double averageR = sumR / rc;
 				Console.WriteLine($"accept average: {averageA:f3}");
 				Console.WriteLine($"compactness average: {averageC:f3}");
 				Console.WriteLine($"Z average: {averageZ:f6}");
+				Console.WriteLine($"rate average: {averageR:f6}");
 			});
 	}
 
@@ -77,12 +82,13 @@ public class Program
 			}
 		}
 
-		var best = Plan5(isLocal, sw, rnd, input, info);
+		var best = Plan6(isLocal, sw, rnd, input, info);
 
 		info.Accept = best.AcceptedCount;
 		info.CompactnessAverage = best.ComactnessSum / best.AcceptedCount;
 		info.ZAverage /= best.ComactnessSum;
 		info.Score = best.Calculate();
+		info.Rate = (double)info.Score / input.ScoreLimit;
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
@@ -223,6 +229,39 @@ public class Program
 			// 高コンパクトな定型形状を優先し、入らない場合だけ柔軟な領域成長を利用する。
 			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
 			var points = state.FindPlacementByFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+
+			bool canAccept = points.Count == guest.p;
+			state.ProcessGuest(guest, canAccept, points);
+			if (canAccept) {
+				info.ZAverage += z;
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+
+		return state;
+	}
+
+	// Plan5と同じ受理基準を使い、定型形状については全候補から空き領域を残しやすい位置を選ぶ。
+	static State Plan6(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			input.OutputMove([]);
+
+			const double Bottom20PercentZ = -0.673297;
+			double z = Utils.CalculateValueZScore(guest);
+			if (z < Bottom20PercentZ) {
+				state.ProcessGuest(guest, false, []);
+				continue;
+			}
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByBestFullSearch(shape);
 			if (points.Count != guest.p) {
 				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
 			}
@@ -714,6 +753,223 @@ public static class Utils
 		}
 
 		return [];
+	}
+
+	// 全ての配置可能位置を調べ、池・盤面外・既存占有領域に接する辺が多い候補を選ぶ。
+	// 使いにくい境界側を優先して消費することで、連続した空き領域を残す。
+	internal static List<(int x, int y)> FindPlacementByBestFullSearch(
+		string[] row,
+		bool[,] occupied,
+		IReadOnlyList<(int x, int y)> shape)
+	{
+		if (shape.Count == 0) {
+			return [];
+		}
+
+		int height = row.Length;
+		int width = row[0].Length;
+		int shapeHeight = 0;
+		int shapeWidth = 0;
+		bool isRowMajorRectanglePrefix = true;
+		for (int index = 0; index < shape.Count; ++index) {
+			var (x, y) = shape[index];
+			shapeHeight = Math.Max(shapeHeight, x + 1);
+			shapeWidth = Math.Max(shapeWidth, y + 1);
+		}
+		for (int index = 0; index < shape.Count; ++index) {
+			var (x, y) = shape[index];
+			if (x != index / shapeWidth || y != index % shapeWidth) {
+				isRowMajorRectanglePrefix = false;
+				break;
+			}
+		}
+
+		// CreateNearSquareShapeが返す行優先の矩形プレフィックスは高速経路で処理する。
+		// それ以外の形状も利用できるよう、下では汎用探索へフォールバックする。
+		if (isRowMajorRectanglePrefix) {
+			return FindPlacementByBestRectanglePrefixSearch(
+				row,
+				occupied,
+				shape.Count,
+				shapeHeight,
+				shapeWidth);
+		}
+
+		return FindPlacementByBestGenericFullSearch(row, occupied, shape, shapeHeight, shapeWidth);
+	}
+
+	private static List<(int x, int y)> FindPlacementByBestRectanglePrefixSearch(
+		string[] row,
+		bool[,] occupied,
+		int shapeCount,
+		int shapeHeight,
+		int shapeWidth)
+	{
+		int height = row.Length;
+		int width = row[0].Length;
+		int prefixWidth = width + 1;
+		var blockedPrefixSum = new int[(height + 1) * prefixWidth];
+		// 芝生以外または占有済みのマス数の二次元累積和。
+		// 各候補に対する配置可能性を矩形和二回で判定するために使う。
+		for (int x = 0; x < height; ++x) {
+			int rowSum = 0;
+			int previousRowOffset = x * prefixWidth;
+			int currentRowOffset = previousRowOffset + prefixWidth;
+			for (int y = 0; y < width; ++y) {
+				rowSum += row[x][y] != '.' || occupied[x, y] ? 1 : 0;
+				blockedPrefixSum[currentRowOffset + y + 1]
+					= blockedPrefixSum[previousRowOffset + y + 1] + rowSum;
+			}
+		}
+
+		int completeRowCount = shapeHeight - 1;
+		int lastRowWidth = shapeCount - completeRowCount * shapeWidth;
+		int bestBaseX = -1;
+		int bestBaseY = -1;
+		int bestBoundaryEdges = -1;
+		for (int baseX = 0; baseX + shapeHeight <= height; ++baseX) {
+			for (int baseY = 0; baseY + shapeWidth <= width; ++baseY) {
+				int topRowOffset = baseX * prefixWidth;
+				int completeBottomRowOffset = (baseX + completeRowCount) * prefixWidth;
+				int right = baseY + shapeWidth;
+				int blockedCount = blockedPrefixSum[completeBottomRowOffset + right]
+					- blockedPrefixSum[topRowOffset + right]
+					- blockedPrefixSum[completeBottomRowOffset + baseY]
+					+ blockedPrefixSum[topRowOffset + baseY];
+				int lastRowOffset = completeBottomRowOffset;
+				int lastRowBottomOffset = lastRowOffset + prefixWidth;
+				int lastRowRight = baseY + lastRowWidth;
+				blockedCount += blockedPrefixSum[lastRowBottomOffset + lastRowRight]
+					- blockedPrefixSum[lastRowOffset + lastRowRight]
+					- blockedPrefixSum[lastRowBottomOffset + baseY]
+					+ blockedPrefixSum[lastRowOffset + baseY];
+				if (blockedCount != 0) {
+					continue;
+				}
+
+				// 配置可能な候補だけについて、形状の外周が既存の障害物に接する辺数を評価する。
+				int boundaryEdges = CountRectanglePrefixBoundaryEdges(
+					row, occupied, baseX, baseY, shapeHeight, shapeWidth, lastRowWidth);
+				if (boundaryEdges > bestBoundaryEdges) {
+					bestBoundaryEdges = boundaryEdges;
+					bestBaseX = baseX;
+					bestBaseY = baseY;
+				}
+			}
+		}
+
+		if (bestBaseX < 0) {
+			return [];
+		}
+
+		var bestPlacement = new List<(int x, int y)>(shapeCount);
+		for (int index = 0; index < shapeCount; ++index) {
+			bestPlacement.Add((bestBaseX + index / shapeWidth, bestBaseY + index % shapeWidth));
+		}
+		return bestPlacement;
+	}
+
+	private static int CountRectanglePrefixBoundaryEdges(
+		string[] row,
+		bool[,] occupied,
+		int baseX,
+		int baseY,
+		int shapeHeight,
+		int shapeWidth,
+		int lastRowWidth)
+	{
+		int boundaryEdges = 0;
+		int lastX = baseX + shapeHeight - 1;
+		// 行優先の矩形プレフィックスでは、内部辺を除く外周辺だけを数えればよい。
+		// 最終行が短い場合は、その欠けた部分に面する直上行の下辺も外周になる。
+		for (int y = 0; y < shapeWidth; ++y) {
+			boundaryEdges += IsBlocked(row, occupied, baseX - 1, baseY + y) ? 1 : 0;
+		}
+		for (int y = 0; y < lastRowWidth; ++y) {
+			boundaryEdges += IsBlocked(row, occupied, lastX + 1, baseY + y) ? 1 : 0;
+		}
+		for (int x = 0; x < shapeHeight; ++x) {
+			boundaryEdges += IsBlocked(row, occupied, baseX + x, baseY - 1) ? 1 : 0;
+		}
+		for (int x = 0; x < shapeHeight - 1; ++x) {
+			boundaryEdges += IsBlocked(row, occupied, baseX + x, baseY + shapeWidth) ? 1 : 0;
+		}
+		boundaryEdges += IsBlocked(row, occupied, lastX, baseY + lastRowWidth) ? 1 : 0;
+		if (lastRowWidth < shapeWidth) {
+			for (int y = lastRowWidth; y < shapeWidth; ++y) {
+				boundaryEdges += IsBlocked(row, occupied, lastX, baseY + y) ? 1 : 0;
+			}
+		}
+		return boundaryEdges;
+	}
+
+	private static bool IsBlocked(string[] row, bool[,] occupied, int x, int y)
+	{
+		// 盤面外も問題文の「領域外との境界」として扱う。
+		return (uint)x >= (uint)row.Length
+			|| (uint)y >= (uint)row[0].Length
+			|| row[x][y] != '.'
+			|| occupied[x, y];
+	}
+
+	private static List<(int x, int y)> FindPlacementByBestGenericFullSearch(
+		string[] row,
+		bool[,] occupied,
+		IReadOnlyList<(int x, int y)> shape,
+		int shapeHeight,
+		int shapeWidth)
+	{
+		// 高速経路の前提を満たさない任意形状向けの、従来どおり全セルを調べる経路。
+		int height = row.Length;
+		int width = row[0].Length;
+		var shapeCells = new HashSet<(int x, int y)>(shape);
+		int bestBaseX = -1;
+		int bestBaseY = -1;
+		int bestBoundaryEdges = -1;
+		ReadOnlySpan<int> deltaX = [-1, 1, 0, 0];
+		ReadOnlySpan<int> deltaY = [0, 0, -1, 1];
+
+		for (int baseX = 0; baseX + shapeHeight <= height; ++baseX) {
+			for (int baseY = 0; baseY + shapeWidth <= width; ++baseY) {
+				bool canPlace = true;
+				foreach (var (offsetX, offsetY) in shape) {
+					if (row[baseX + offsetX][baseY + offsetY] != '.'
+						|| occupied[baseX + offsetX, baseY + offsetY]) {
+						canPlace = false;
+						break;
+					}
+				}
+				if (canPlace == false) {
+					continue;
+				}
+
+				int boundaryEdges = 0;
+				foreach (var (offsetX, offsetY) in shape) {
+					for (int direction = 0; direction < 4; ++direction) {
+						int nextOffsetX = offsetX + deltaX[direction];
+						int nextOffsetY = offsetY + deltaY[direction];
+						if (shapeCells.Contains((nextOffsetX, nextOffsetY)) == false
+							&& IsBlocked(row, occupied, baseX + nextOffsetX, baseY + nextOffsetY)) {
+							++boundaryEdges;
+						}
+					}
+				}
+				if (boundaryEdges > bestBoundaryEdges) {
+					bestBoundaryEdges = boundaryEdges;
+					bestBaseX = baseX;
+					bestBaseY = baseY;
+				}
+			}
+		}
+
+		if (bestBaseX < 0) {
+			return [];
+		}
+		var bestPlacement = new List<(int x, int y)>(shape.Count);
+		foreach (var (x, y) in shape) {
+			bestPlacement.Add((bestBaseX + x, bestBaseY + y));
+		}
+		return bestPlacement;
 	}
 
 	// 公式サンプルと比較するため、左上の最初の空き連結成分だけをBFSする。
@@ -1214,6 +1470,12 @@ public class State
 		return Utils.FindPlacementByFullSearch(_input.Row, _occupied, shape);
 	}
 
+	public List<(int x, int y)> FindPlacementByBestFullSearch(
+		IReadOnlyList<(int x, int y)> shape)
+	{
+		return Utils.FindPlacementByBestFullSearch(_input.Row, _occupied, shape);
+	}
+
 	// 小さいPでもスロット全体を予約扱いにし、同じスロットの同時利用を防ぐ。
 	public List<(int x, int y)> FindPlacementByFixedSlots(
 		IReadOnlyList<FixedSlot> slots,
@@ -1313,6 +1575,7 @@ public class Information
 	public int Accept { get; set; } = 0;
 	public double CompactnessAverage { get; set; } = 0;
 	public double ZAverage { get; set; } = 0;
+	public double Rate { get; set; } = 0;
 }
 
 public class Input
@@ -1324,6 +1587,8 @@ public class Input
 	public int M { get; }
 	public double R { get; }
 	public string[] Row { get; }
+
+	public long ScoreLimit { get; private set; }
 
 	public Input(IOManager io, bool isLocal)
 	{
@@ -1337,7 +1602,10 @@ public class Input
 
 	public (int i, int s, int t, int p, int v) InputGuest()
 	{
-		return _io.Int5();
+		(int i, int s, int t, int p, int v) ret = _io.Int5();
+		ScoreLimit += ret.v;
+
+		return ret;
 	}
 
 	public void OutputMove(List<(int j, List<(int z, int w)> points)> moveGroups)
