@@ -98,10 +98,7 @@ public class Program
 			}
 		}
 
-		const int activePlan = 12;
-		var best = activePlan == 10
-			? Plan12(isLocal, sw, rnd, input, info)
-			: Plan10(isLocal, sw, rnd, input, info);
+		var best = Plan10(isLocal, sw, rnd, input, info);
 
 		info.Theta = (int)(input.StayTimeSum / input.M);
 		info.AcceptLimit = input.CalculateAcceptLimit();
@@ -543,6 +540,17 @@ public static class Utils
 		string[] row,
 		bool[,] occupied,
 		IReadOnlyList<(int x, int y)> shape)
+		=> FindPlacementByBestFullSearch(
+			row, occupied, shape, 0, row.Length - 1, 0, row[0].Length - 1);
+
+	internal static List<(int x, int y)> FindPlacementByBestFullSearch(
+		string[] row,
+		bool[,] occupied,
+		IReadOnlyList<(int x, int y)> shape,
+		int minBaseX,
+		int maxBaseX,
+		int minBaseY,
+		int maxBaseY)
 	{
 		if (shape.Count == 0) {
 			return [];
@@ -574,10 +582,16 @@ public static class Utils
 				occupied,
 				shape.Count,
 				shapeHeight,
-				shapeWidth);
+				shapeWidth,
+				minBaseX,
+				maxBaseX,
+				minBaseY,
+				maxBaseY);
 		}
 
-		return FindPlacementByBestGenericFullSearch(row, occupied, shape, shapeHeight, shapeWidth);
+		return FindPlacementByBestGenericFullSearch(
+			row, occupied, shape, shapeHeight, shapeWidth,
+			minBaseX, maxBaseX, minBaseY, maxBaseY);
 	}
 
 	// Plan12用。配置後の空きセル同士の隣接辺数を局所的に最大化する。
@@ -686,7 +700,11 @@ public static class Utils
 		bool[,] occupied,
 		int shapeCount,
 		int shapeHeight,
-		int shapeWidth)
+		int shapeWidth,
+		int minBaseX,
+		int maxBaseX,
+		int minBaseY,
+		int maxBaseY)
 	{
 		int height = row.Length;
 		int width = row[0].Length;
@@ -710,8 +728,12 @@ public static class Utils
 		int bestBaseX = -1;
 		int bestBaseY = -1;
 		int bestBoundaryEdges = -1;
-		for (int baseX = 0; baseX + shapeHeight <= height; ++baseX) {
-			for (int baseY = 0; baseY + shapeWidth <= width; ++baseY) {
+		minBaseX = Math.Clamp(minBaseX, 0, height - shapeHeight);
+		maxBaseX = Math.Clamp(maxBaseX, 0, height - shapeHeight);
+		minBaseY = Math.Clamp(minBaseY, 0, width - shapeWidth);
+		maxBaseY = Math.Clamp(maxBaseY, 0, width - shapeWidth);
+		for (int baseX = minBaseX; baseX <= maxBaseX; ++baseX) {
+			for (int baseY = minBaseY; baseY <= maxBaseY; ++baseY) {
 				int topRowOffset = baseX * prefixWidth;
 				int completeBottomRowOffset = (baseX + completeRowCount) * prefixWidth;
 				int right = baseY + shapeWidth;
@@ -800,7 +822,11 @@ public static class Utils
 		bool[,] occupied,
 		IReadOnlyList<(int x, int y)> shape,
 		int shapeHeight,
-		int shapeWidth)
+		int shapeWidth,
+		int minBaseX,
+		int maxBaseX,
+		int minBaseY,
+		int maxBaseY)
 	{
 		// 高速経路の前提を満たさない任意形状向けの、従来どおり全セルを調べる経路。
 		int height = row.Length;
@@ -812,8 +838,12 @@ public static class Utils
 		ReadOnlySpan<int> deltaX = [-1, 1, 0, 0];
 		ReadOnlySpan<int> deltaY = [0, 0, -1, 1];
 
-		for (int baseX = 0; baseX + shapeHeight <= height; ++baseX) {
-			for (int baseY = 0; baseY + shapeWidth <= width; ++baseY) {
+		minBaseX = Math.Clamp(minBaseX, 0, height - shapeHeight);
+		maxBaseX = Math.Clamp(maxBaseX, 0, height - shapeHeight);
+		minBaseY = Math.Clamp(minBaseY, 0, width - shapeWidth);
+		maxBaseY = Math.Clamp(maxBaseY, 0, width - shapeWidth);
+		for (int baseX = minBaseX; baseX <= maxBaseX; ++baseX) {
+			for (int baseY = minBaseY; baseY <= maxBaseY; ++baseY) {
 				bool canPlace = true;
 				foreach (var (offsetX, offsetY) in shape) {
 					if (row[baseX + offsetX][baseY + offsetY] != '.'
@@ -932,7 +962,11 @@ public static class Utils
 		bool[,] occupied,
 		int p,
 		int[] pondPrefixSum,
-		IReadOnlyList<(int boxHeight, int boxWidth, int perimeter, int unusedArea, int imbalance)> rectangleCandidates)
+		IReadOnlyList<(int boxHeight, int boxWidth, int perimeter, int unusedArea, int imbalance)> rectangleCandidates,
+		int minBaseX = 0,
+		int maxBaseX = int.MaxValue,
+		int minBaseY = 0,
+		int maxBaseY = int.MaxValue)
 	{
 		int height = row.Length;
 		int width = row[0].Length;
@@ -953,24 +987,47 @@ public static class Utils
 			var positions = new List<(int top, int left, int occupiedCount, int pondCount)>();
 			(int top, int left, int occupiedCount, int pondCount) bestPosition = default;
 			bool hasBestPosition = false;
-			for (int top = height - rectangle.boxHeight; top >= 0; --top) {
-				for (int left = width - rectangle.boxWidth; left >= 0; --left) {
-					int bottom = top + rectangle.boxHeight;
-					int right = left + rectangle.boxWidth;
-					int bottomRowOffset = bottom * prefixWidth;
-					int topRowOffset = top * prefixWidth;
-					int occupiedCount = occupiedPrefixSum[bottomRowOffset + right]
-						- occupiedPrefixSum[topRowOffset + right]
-						- occupiedPrefixSum[bottomRowOffset + left]
-						+ occupiedPrefixSum[topRowOffset + left];
-					int pondCount = pondPrefixSum[bottomRowOffset + right]
-						- pondPrefixSum[topRowOffset + right]
-						- pondPrefixSum[bottomRowOffset + left]
-						+ pondPrefixSum[topRowOffset + left];
+			int boxHeight = rectangle.boxHeight;
+			int boxWidth = rectangle.boxWidth;
+			int rectangleArea = boxHeight * boxWidth;
+			int candidateMaxTop = Math.Min(
+				height - boxHeight,
+				maxBaseX);
+			int candidateMinTop = Math.Max(
+				0,
+				minBaseX - boxHeight + 1);
+			int candidateMaxLeft = Math.Min(
+				width - boxWidth,
+				maxBaseY);
+			int candidateMinLeft = Math.Max(
+				0,
+				minBaseY - boxWidth + 1);
+			for (int top = candidateMaxTop; top >= candidateMinTop; --top) {
+				int bottom = top + boxHeight;
+				int bottomRowOffset = bottom * prefixWidth;
+				int topRowOffset = top * prefixWidth;
+				int bottomRightIndex = bottomRowOffset + candidateMaxLeft + boxWidth;
+				int topRightIndex = topRowOffset + candidateMaxLeft + boxWidth;
+				int bottomLeftIndex = bottomRowOffset + candidateMaxLeft;
+				int topLeftIndex = topRowOffset + candidateMaxLeft;
+				for (int left = candidateMaxLeft; left >= candidateMinLeft; --left) {
+					int occupiedCount = occupiedPrefixSum[bottomRightIndex]
+						- occupiedPrefixSum[topRightIndex]
+						- occupiedPrefixSum[bottomLeftIndex]
+						+ occupiedPrefixSum[topLeftIndex];
+					int pondCount = pondPrefixSum[bottomRightIndex]
+						- pondPrefixSum[topRightIndex]
+						- pondPrefixSum[bottomLeftIndex]
+						+ pondPrefixSum[topLeftIndex];
 
-					if (rectangle.boxHeight * rectangle.boxWidth - occupiedCount - pondCount >= p) {
+					if (rectangleArea - occupiedCount - pondCount >= p) {
 						positions.Add((top, left, occupiedCount, pondCount));
 					}
+
+					--bottomRightIndex;
+					--topRightIndex;
+					--bottomLeftIndex;
+					--topLeftIndex;
 				}
 			}
 
@@ -1260,10 +1317,40 @@ public class State
 			_input.GetRectangleCandidates(p));
 	}
 
+	public List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch2(
+		int p,
+		int minBaseX,
+		int maxBaseX,
+		int minBaseY,
+		int maxBaseY)
+	{
+		return Utils.FindPlacementByReverseBreadthFirstSearch2(
+			_input.Row,
+			_occupied,
+			p,
+			_input.PondPrefixSum,
+			_input.GetRectangleCandidates(p),
+			minBaseX,
+			maxBaseX,
+			minBaseY,
+			maxBaseY);
+	}
+
 	public List<(int x, int y)> FindPlacementByBestFullSearch(
 		IReadOnlyList<(int x, int y)> shape)
 	{
 		return Utils.FindPlacementByBestFullSearch(_input.Row, _occupied, shape);
+	}
+
+	public List<(int x, int y)> FindPlacementByBestFullSearch(
+		IReadOnlyList<(int x, int y)> shape,
+		int minBaseX,
+		int maxBaseX,
+		int minBaseY,
+		int maxBaseY)
+	{
+		return Utils.FindPlacementByBestFullSearch(
+			_input.Row, _occupied, shape, minBaseX, maxBaseX, minBaseY, maxBaseY);
 	}
 
 	public List<(int x, int y)> FindPlacementByEffectiveSpaceSearch(
@@ -1354,9 +1441,21 @@ public class State
 			}
 			SetOccupied(group.points, false);
 
-			var candidateGuestPoints = FindPlacementByBestFullSearch(guestShape);
+			int groupMinX = group.points.Min(point => point.x);
+			int groupMaxX = group.points.Max(point => point.x);
+			int groupMinY = group.points.Min(point => point.y);
+			int groupMaxY = group.points.Max(point => point.y);
+			int guestShapeHeight = guestShape.Max(point => point.x) + 1;
+			int guestShapeWidth = guestShape.Max(point => point.y) + 1;
+			int minBaseX = groupMinX - guestShapeHeight + 1;
+			int maxBaseX = groupMaxX;
+			int minBaseY = groupMinY - guestShapeWidth + 1;
+			int maxBaseY = groupMaxY;
+			var candidateGuestPoints = FindPlacementByBestFullSearch(
+				guestShape, minBaseX, maxBaseX, minBaseY, maxBaseY);
 			if (candidateGuestPoints.Count != guest.p) {
-				candidateGuestPoints = FindPlacementByReverseBreadthFirstSearch2(guest.p);
+				candidateGuestPoints = FindPlacementByReverseBreadthFirstSearch2(
+					guest.p, groupMinX, groupMaxX, groupMinY, groupMaxY);
 			}
 			if (candidateGuestPoints.Count == guest.p) {
 				SetOccupied(candidateGuestPoints, true);
