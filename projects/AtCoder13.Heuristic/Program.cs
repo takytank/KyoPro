@@ -98,8 +98,8 @@ public class Program
 			}
 		}
 
-		const int activePlan = 10;
-		var best = activePlan == 12
+		const int activePlan = 12;
+		var best = activePlan == 10
 			? Plan12(isLocal, sw, rnd, input, info)
 			: Plan10(isLocal, sw, rnd, input, info);
 
@@ -184,7 +184,11 @@ public class Program
 	static State Plan10(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(isLocal, input);
-		var parameters = Utils.LoadPlan7Parameters(isLocal);
+		var parameters = Utils.LoadPlan7Parameters(
+			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // 確定パラメーター
+		if (isLocal) {
+			// パラメーター調整時はここでparametersを上書きする
+		}
 		long arrivedValueSum = 0;
 
 		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
@@ -247,7 +251,11 @@ public class Program
 	static State Plan11(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(isLocal, input);
-		var parameters = Utils.LoadPlan7Parameters(isLocal, "plan11.parameters");
+		var parameters = Utils.LoadPlan7Parameters(
+			new(-0.65, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // 確定パラメーター
+		if (isLocal) {
+			// パラメーター調整時はここでparametersを上書きする
+		}
 		long arrivedValueSum = 0;
 
 		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
@@ -305,7 +313,12 @@ public class Program
 	static State Plan12(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(isLocal, input);
-		var parameters = Utils.LoadPlan7Parameters(isLocal);
+		var parameters = Utils.LoadPlan7Parameters(
+			new(-0.65, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // 確定パラメーター
+		if (isLocal) {
+			// パラメーター調整時はここでparametersを上書きする
+		}
+
 		long arrivedValueSum = 0;
 
 		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
@@ -395,6 +408,11 @@ public static class Utils
 		double HighRateLowOccupancyReference,
 		double HighRateLowOccupancyBonus);
 
+	internal static Plan7Parameters GetDefaultParameters()
+		=> new(
+			-0.75, 0.55, 0.30, 0.25, 0.35, 0.00, 0.00, 10.0, 0.0, 0.00, 0.50, 0.20,
+			0.60, 0.50, 0.00);
+
 	// 空きが十分ある間は低価値グループも受け入れ、混雑するほど低価値グループを拒否する。
 	internal static double ShouldRejectDynamically(
 		(int i, int s, int t, int p, int v) guest,
@@ -477,54 +495,10 @@ public static class Utils
 	}
 
 	internal static Plan7Parameters LoadPlan7Parameters(
-		bool isLocal,
-		string fileName = "plan7.parameters")
-	{
-		var parameters = new Plan7Parameters(
-			-0.75, 0.55, 0.30, 0.25, 0.35, 0.00, 0.00, 10.0, 0.0, 0.00, 0.50, 0.20,
-			0.60, 0.50, 0.00);
-		if (isLocal == false) {
-			return parameters;
-		}
-
-		string path = Path.Combine(
-			@$"D:\kyopro\AtCoder\AHC069\tools\in\",
-			fileName);
-		if (File.Exists(path) == false) {
-			return parameters;
-		}
-
-		var values = new Dictionary<string, double>(StringComparer.OrdinalIgnoreCase);
-		foreach (string line in File.ReadLines(path)) {
-			string[] parts = line.Split('=', 2, StringSplitOptions.TrimEntries);
-			if (parts.Length == 2
-				&& double.TryParse(parts[1], NumberStyles.Float, CultureInfo.InvariantCulture, out double value)) {
-				values[parts[0]] = value;
-			}
-		}
-
-		return new Plan7Parameters(
-			GetValue(values, "BaseZ", parameters.BaseZ),
-			GetValue(values, "OccupiedCoefficient", parameters.OccupiedCoefficient),
-			GetValue(values, "SizeCoefficient", parameters.SizeCoefficient),
-			GetValue(values, "DurationCoefficient", parameters.DurationCoefficient),
-			GetValue(values, "LateRelaxation", parameters.LateRelaxation),
-			GetValue(values, "SmallShortBonus", parameters.SmallShortBonus),
-			GetValue(values, "FewPondClusterBonus", parameters.FewPondClusterBonus),
-			GetValue(values, "PondClusterReference", parameters.PondClusterReference),
-			GetValue(values, "FewPondClusterOccupiedStart", parameters.FewPondClusterOccupiedStart),
-			GetValue(values, "DynamicRateBonus", parameters.DynamicRateBonus),
-			GetValue(values, "DynamicRateReference", parameters.DynamicRateReference),
-			GetValue(values, "DynamicRateStartProgress", parameters.DynamicRateStartProgress),
-			GetValue(values, "HighRateLowOccupancyThreshold", parameters.HighRateLowOccupancyThreshold),
-			GetValue(values, "HighRateLowOccupancyReference", parameters.HighRateLowOccupancyReference),
-			GetValue(values, "HighRateLowOccupancyBonus", parameters.HighRateLowOccupancyBonus));
-
-		static double GetValue(Dictionary<string, double> values, string key, double defaultValue)
-		{
-			return values.TryGetValue(key, out double value) ? value : defaultValue;
-		}
-	}
+		Plan7Parameters? overrideParameters = null)
+		=> overrideParameters is not null
+			? overrideParameters
+			: GetDefaultParameters();
 
 	// 行優先で埋めた長方形候補から、周長が短く正方形に近い形を選ぶ。
 	internal static (List<(int x, int y)> points, double compactness) CreateNearSquareShape(int p)
