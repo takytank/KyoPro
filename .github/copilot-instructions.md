@@ -1,6 +1,6 @@
 # Copilot Instructions
 
-## プロジェクト ガイドライン
+## AtCoder Hueuristic Contest ルール
 
 I am currently participating in an AtCoder Heuristic Contest, and I will use this generative AI to assist in developing my solution.
 
@@ -14,6 +14,9 @@ You may run the solution program and report its execution results, logs, scores,
 
 Here, "solution program" refers to any program created or being created for the purpose of solving this contest problem, regardless of whether it was created by the user or by generative AI, and regardless of whether it is still in progress or already complete.
 
-## Build Configuration
-- Use Debug build for local testing.
-- Treat Release build as the version for production submission.
+## ローカルの開発ルール
+
+- Release ビルドはジャッジサーバーから標準入力を受け取るようになっているため、ローカルのテストケースファイルを用いた動作確認には Debug ビルドを使用する。
+- 標準ライブラリー、及び、ジャッジサーバーでも参照している以下の package を除き、Program.cs のコードで動作が完結するようにする。(Debug 時の入力ファイルは除く)
+    - ac-library-csharp
+	- MathNet.Numerics

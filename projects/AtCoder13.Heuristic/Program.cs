@@ -19,10 +19,11 @@ public class Program
 		double sumZ = 0;
 		double sumR = 0;
 		double sumO = 0;
+		double sumE = 0;
 
 		HeuristicHelper.RunCases(
-			runCaseCount: 100,
-			testCaseCount: 50,
+			localTestCaseRunCount: 100,
+			judgePreTestCaseCount: 50,
 			isParallel: false,
 			i => Run(i),
 			(locker, i, ret) => {
@@ -56,6 +57,7 @@ public class Program
 					sumZ += info.ZAverage;
 					sumR += info.ScoreRate;
 					sumO += info.OccupyAverage;
+					sumE += info.Elapsed;
 
 					Console.WriteLine(status.Join(" "));
 					Console.Out.Flush();
@@ -69,11 +71,13 @@ public class Program
 				double averageZ = sumZ / rc;
 				double averageR = sumR / rc;
 				double averageO = sumO / rc;
+				double averageE = sumE / rc;
 				Console.WriteLine($"accept average: {averageA:f3}");
 				Console.WriteLine($"compactness average: {averageC:f3}");
 				Console.WriteLine($"Z average: {averageZ:f6}");
 				Console.WriteLine($"occupy average: {averageO:f6}");
 				Console.WriteLine($"rate average: {averageR:f6}");
+				Console.WriteLine($"elapsed average: {averageE:f3}");
 			});
 	}
 
@@ -94,7 +98,10 @@ public class Program
 			}
 		}
 
-		var best = Plan11(isLocal, sw, rnd, input, info);
+		const int activePlan = 10;
+		var best = activePlan == 12
+			? Plan12(isLocal, sw, rnd, input, info)
+			: Plan10(isLocal, sw, rnd, input, info);
 
 		info.Theta = (int)(input.StayTimeSum / input.M);
 		info.AcceptLimit = input.CalculateAcceptLimit();
@@ -113,7 +120,17 @@ public class Program
 		info.ScoreRate = (double)info.Score / input.ScoreLimit;
 		info.Elapsed = sw.ElapsedMilliseconds;
 
+		bool doesEmulate = false;
+		if (isLocal && doesEmulate) {
+			Emulate(input);
+		}
+
 		return (input, info);
+	}
+
+	static void Emulate(Input input)
+	{
+		input.Emulate();
 	}
 
 	// Plan5と同じ受理基準を使い、定型形状については全候補から空き領域を残しやすい位置を選ぶ。
@@ -159,152 +176,9 @@ public class Program
 		return state;
 	}
 
-	// Plan6の配置探索を維持し、盤面混雑度に応じて低価値・大面積・長期滞在を選別する。
-	static State Plan7(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		var parameters = Utils.LoadPlan7Parameters(isLocal);
-		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
-			var guest = input.InputGuest();
-			state.ReleaseDepartedGroups(guest.s);
-			input.OutputMove([], info);
-
-			double z = Utils.CalculateValueZScore(guest);
-			double progress = (double)guestCount / input.M;
-			double zThreshold = Utils.ShouldRejectDynamically(
-				guest,
-				state.OccupiedRate,
-				progress,
-				input.PondClusterCount,
-				parameters);
-			info.ZThresholdAverage += zThreshold;
-			if (z < zThreshold) {
-				state.ProcessGuest(guest, false, [], info);
-				continue;
-			}
-
-			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
-			var points = state.FindPlacementByBestFullSearch(shape);
-			if (points.Count != guest.p) {
-				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
-			}
-
-			bool canAccept = points.Count == guest.p;
-			state.ProcessGuest(guest, canAccept, points, info);
-			if (canAccept) {
-				info.ZAverage += z;
-			}
-		}
-		state.ReleaseDepartedGroups(int.MaxValue);
-
-		return state;
-	}
-
-	// Plan7のreject判定に、処理済みゲストから得られる動的スコアレートを加える。
-	static State Plan8(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		var parameters = Utils.LoadPlan7Parameters(isLocal);
-		long arrivedValueSum = 0;
-
-		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
-			var guest = input.InputGuest();
-			state.ReleaseDepartedGroups(guest.s);
-			input.OutputMove([], info);
-			arrivedValueSum += guest.v;
-
-			double z = Utils.CalculateValueZScore(guest);
-			double progress = (double)guestCount / input.M;
-			double dynamicRate = progress >= parameters.DynamicRateStartProgress
-			? state.GetProjectedRate(arrivedValueSum)
-			: double.NaN;
-			double zThreshold = Utils.ShouldRejectDynamically(
-				guest,
-				state.OccupiedRate,
-				progress,
-				input.PondClusterCount,
-				parameters,
-				dynamicRate);
-			info.ZThresholdAverage += zThreshold;
-			if (z < zThreshold) {
-				state.ProcessGuest(guest, false, [], info);
-				continue;
-			}
-
-			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
-			var points = state.FindPlacementByBestFullSearch(shape);
-			if (points.Count != guest.p) {
-				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
-			}
-
-			bool canAccept = points.Count == guest.p;
-			state.ProcessGuest(guest, canAccept, points, info);
-			if (canAccept) {
-				info.ZAverage += z;
-			}
-		}
-		state.ReleaseDepartedGroups(int.MaxValue);
-
-		return state;
-	}
-
-	// Plan8の選別を維持し、通常配置に失敗したときだけ利用中グループ1組の再配置を試す。
-	static State Plan9(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		var parameters = Utils.LoadPlan7Parameters(isLocal);
-		long arrivedValueSum = 0;
-
-		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
-			var guest = input.InputGuest();
-			state.ReleaseDepartedGroups(guest.s);
-			arrivedValueSum += guest.v;
-
-			double z = Utils.CalculateValueZScore(guest);
-			double progress = (double)guestCount / input.M;
-			double dynamicRate = progress >= parameters.DynamicRateStartProgress
-				? state.GetProjectedRate(arrivedValueSum)
-				: double.NaN;
-			double zThreshold = Utils.ShouldRejectDynamically(
-				guest,
-				state.OccupiedRate,
-				progress,
-				input.PondClusterCount,
-				parameters,
-				dynamicRate);
-			info.ZThresholdAverage += zThreshold;
-			if (z < zThreshold) {
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-				continue;
-			}
-
-			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
-			var points = state.FindPlacementByBestFullSearch(shape);
-			if (points.Count != guest.p) {
-				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
-			}
-
-			if (points.Count == guest.p) {
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-				continue;
-			}
-
-			if (state.TryMoveOneGroupForGuest(shape, guest.p, out var moveGroup, out points)) {
-				input.OutputMove([moveGroup], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-			} else {
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-			}
-		}
-		state.ReleaseDepartedGroups(int.MaxValue);
-
-		return state;
-	}
+	// Plan7 : Plan6の配置探索を維持し、盤面混雑度に応じて低価値・大面積・長期滞在を選別する。
+	// Plan8 : Plan7のreject判定に、処理済みゲストから得られる動的スコアレートを加える。
+	// Plan9 : Plan8の選別を維持し、通常配置に失敗したときだけ利用中グループ1組の再配置を試す。
 
 	// Plan9の配置不能時に、全利用中グループを候補として最良の再配置を選ぶ。
 	static State Plan10(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
@@ -332,6 +206,7 @@ public class Program
 				dynamicRate);
 			info.ZThresholdAverage += zThreshold;
 			if (z < zThreshold) {
+				input.RecordDecision(guestCount, z, zThreshold, "threshold");
 				input.OutputMove([], info);
 				state.ProcessGuest(guest, false, [], info);
 				continue;
@@ -344,17 +219,21 @@ public class Program
 			}
 
 			if (points.Count == guest.p) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-normal");
 				input.OutputMove([], info);
 				state.ProcessGuest(guest, true, points, info);
 				info.ZAverage += z;
 				continue;
 			}
 
+			input.RecordDecision(guestCount, z, zThreshold, "normal-placement-failed");
 			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-move");
 				input.OutputMove([moveGroup], info);
 				state.ProcessGuest(guest, true, points, info);
 				info.ZAverage += z;
 			} else {
+				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
 				input.OutputMove([], info);
 				state.ProcessGuest(guest, false, [], info);
 			}
@@ -419,6 +298,62 @@ public class Program
 		}
 		state.ReleaseDepartedGroups(int.MaxValue);
 
+		return state;
+	}
+
+	// Plan10の選別・移動探索を維持し、通常配置だけを有効空き領域評価で選択する。
+	static State Plan12(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		var parameters = Utils.LoadPlan7Parameters(isLocal);
+		long arrivedValueSum = 0;
+
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			arrivedValueSum += guest.v;
+
+			double z = Utils.CalculateValueZScore(guest);
+			double progress = (double)guestCount / input.M;
+			double dynamicRate = progress >= parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
+			double zThreshold = Utils.ShouldRejectDynamically(
+				guest, state.OccupiedRate, progress, input.PondClusterCount, parameters, dynamicRate);
+			info.ZThresholdAverage += zThreshold;
+			if (z < zThreshold) {
+				input.RecordDecision(guestCount, z, zThreshold, "threshold");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+				continue;
+			}
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByEffectiveSpaceSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+			if (points.Count == guest.p) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-normal");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+				continue;
+			}
+
+			input.RecordDecision(guestCount, z, zThreshold, "normal-placement-failed");
+			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-move");
+				input.OutputMove([moveGroup], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+			} else {
+				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
 		return state;
 	}
 }
@@ -669,6 +604,107 @@ public static class Utils
 		}
 
 		return FindPlacementByBestGenericFullSearch(row, occupied, shape, shapeHeight, shapeWidth);
+	}
+
+	// Plan12用。配置後の空きセル同士の隣接辺数を局所的に最大化する。
+	internal static List<(int x, int y)> FindPlacementByEffectiveSpaceSearch(
+		string[] row,
+		bool[,] occupied,
+		IReadOnlyList<(int x, int y)> shape)
+	{
+		if (shape.Count == 0) {
+			return [];
+		}
+
+		int height = row.Length;
+		int width = row[0].Length;
+		int shapeHeight = shape.Max(point => point.x) + 1;
+		int shapeWidth = shape.Max(point => point.y) + 1;
+		var shapeCells = shape.ToHashSet();
+		var best = (freeAdjacency: -1, boundaryEdges: -1, baseX: -1, baseY: -1);
+		for (int baseX = 0; baseX + shapeHeight <= height; ++baseX) {
+			for (int baseY = 0; baseY + shapeWidth <= width; ++baseY) {
+				bool canPlace = true;
+				foreach (var (offsetX, offsetY) in shape) {
+					if (row[baseX + offsetX][baseY + offsetY] != '.' || occupied[baseX + offsetX, baseY + offsetY]) {
+						canPlace = false;
+						break;
+					}
+				}
+				if (canPlace == false) {
+					continue;
+				}
+
+				int boundaryEdges = 0;
+				foreach (var (offsetX, offsetY) in shape) {
+					foreach (var (dx, dy) in new[] { (-1, 0), (1, 0), (0, -1), (0, 1) }) {
+						if (shapeCells.Contains((offsetX + dx, offsetY + dy)) == false
+							&& IsBlocked(row, occupied, baseX + offsetX + dx, baseY + offsetY + dy)) {
+							++boundaryEdges;
+						}
+					}
+				}
+				int freeAdjacency = CountFreeAdjacencyAfterPlacement(
+					row, occupied, shapeCells, baseX, baseY);
+				if (freeAdjacency > best.freeAdjacency
+					|| freeAdjacency == best.freeAdjacency && boundaryEdges > best.boundaryEdges) {
+					best = (freeAdjacency, boundaryEdges, baseX, baseY);
+				}
+			}
+		}
+
+		if (best.baseX < 0) {
+			return [];
+		}
+
+		return shape.Select(point => (best.baseX + point.x, best.baseY + point.y)).ToList();
+	}
+
+	private static int CountFreeAdjacencyAfterPlacement(
+		string[] row,
+		bool[,] occupied,
+		IReadOnlySet<(int x, int y)> shapeCells,
+		int baseX,
+		int baseY)
+	{
+		int lostEdges = 0;
+		foreach (var (x, y) in shapeCells) {
+			foreach (var (dx, dy) in new[] { (-1, 0), (1, 0), (0, -1), (0, 1) }) {
+				int nx = baseX + x + dx;
+				int ny = baseY + y + dy;
+				if ((uint)nx >= (uint)row.Length || (uint)ny >= (uint)row[0].Length
+					|| row[nx][ny] != '.' || occupied[nx, ny]
+					|| shapeCells.Contains((x + dx, y + dy))) {
+					continue;
+				}
+				++lostEdges;
+			}
+		}
+
+		return -lostEdges;
+	}
+
+	private static int CountNearSquarePlacements(string[] row, bool[,] occupied, int personCount)
+	{
+		var (shape, _) = CreateNearSquareShape(personCount);
+		int shapeHeight = shape.Max(point => point.x) + 1;
+		int shapeWidth = shape.Max(point => point.y) + 1;
+		int count = 0;
+		for (int baseX = 0; baseX + shapeHeight <= row.Length; ++baseX) {
+			for (int baseY = 0; baseY + shapeWidth <= row[0].Length; ++baseY) {
+				bool canPlace = true;
+				foreach (var (x, y) in shape) {
+					if (row[baseX + x][baseY + y] != '.' || occupied[baseX + x, baseY + y]) {
+						canPlace = false;
+						break;
+					}
+				}
+				if (canPlace) {
+					++count;
+				}
+			}
+		}
+		return count;
 	}
 
 	private static List<(int x, int y)> FindPlacementByBestRectanglePrefixSearch(
@@ -1256,6 +1292,12 @@ public class State
 		return Utils.FindPlacementByBestFullSearch(_input.Row, _occupied, shape);
 	}
 
+	public List<(int x, int y)> FindPlacementByEffectiveSpaceSearch(
+		IReadOnlyList<(int x, int y)> shape)
+	{
+		return Utils.FindPlacementByEffectiveSpaceSearch(_input.Row, _occupied, shape);
+	}
+
 	// 通常配置に失敗した場合だけ、最も早く退去する1組を再配置して空間を作る。
 	public bool TryMoveOneGroupForGuest(
 		IReadOnlyList<(int x, int y)> guestShape,
@@ -1505,22 +1547,17 @@ public class Input
 	public string[] Row { get; }
 	public int[] PondPrefixSum { get; }
 
+	public (int s, int t, int p, int v)[] Guests { get; private set; }
+	public List<(int j, List<(int z, int w)> points)>[] Moves { get; private set; }
+	public (bool takes, List<(int x, int y)> points)[] Receptions { get; private set; }
+	public (double z, double threshold, string decision)[] Decisions { get; private set; }
+	private int _turn = 0;
+
 	public long ScoreLimit { get; private set; }
 	public long StayTimeSum { get; private set; }
 	public long PersonStayTimeSum { get; private set; }
 	public long PersonSum { get; private set; }
 	public int GrassCellCount => Row.Sum(row => row.Count(cell => cell == '.'));
-
-	public int CalculateAcceptLimit()
-	{
-		if (PersonStayTimeSum <= 0) {
-			return 0;
-		}
-
-		long capacity = (long)GrassCellCount * 100000;
-		long limit = capacity * M / PersonStayTimeSum;
-		return (int)Math.Clamp(limit, 0, M);
-	}
 
 	public Input(IOManager io, bool isLocal)
 	{
@@ -1533,6 +1570,475 @@ public class Input
 		PondClusterCount = CountPondClusters();
 		ConvertSmallEnclosedGrassToPonds();
 		PondPrefixSum = Utils.CreatePondPrefixSum(Row);
+
+		Guests = new (int s, int t, int p, int v)[M];
+		Moves = new List<(int j, List<(int z, int w)> points)>[M];
+		Receptions = new (bool takes, List<(int x, int y)> points)[M];
+		Decisions = new (double z, double threshold, string decision)[M];
+	}
+
+	public (int i, int s, int t, int p, int v) InputGuest()
+	{
+		(int i, int s, int t, int p, int v) ret = _io.Int5();
+		Guests[ret.i] = (ret.s, ret.t, ret.p, ret.v);
+
+		ScoreLimit += ret.v;
+		StayTimeSum += ret.t - ret.s;
+		PersonStayTimeSum += (long)ret.p * (ret.t - ret.s);
+		PersonSum += ret.p;
+
+		return ret;
+	}
+
+	public void OutputMove(List<(int j, List<(int z, int w)> points)> moveGroups, Information info)
+	{
+		Moves[_turn] = moveGroups;
+		info.MoveCount += moveGroups.Count;
+		_io.WriteLine(moveGroups.Count);
+		foreach (var (j, points) in moveGroups) {
+			_io.WriteLine(j);
+			foreach (var (z, w) in points) {
+				_io.WriteLine($"{z} {w}");
+			}
+		}
+	}
+
+	public void OutputReception(bool takes, List<(int x, int y)> points)
+	{
+		Receptions[_turn] = (takes, points);
+		if (takes) {
+			_io.WriteLine("Yes");
+			foreach (var (x, y) in points) {
+				_io.WriteLine($"{x} {y}");
+			}
+		} else {
+			_io.WriteLine("No");
+		}
+
+		_io.Flush();
+		++_turn;
+	}
+
+	public void RecordDecision(int turn, double z, double threshold, string decision)
+	{
+		Decisions[turn] = (z, threshold, decision);
+	}
+
+	public int CalculateAcceptLimit()
+	{
+		if (PersonStayTimeSum <= 0) {
+			return 0;
+		}
+
+		long capacity = (long)GrassCellCount * 100000;
+		long limit = capacity * M / PersonStayTimeSum;
+		return (int)Math.Clamp(limit, 0, M);
+	}
+
+	// 保存済みの入出力を公式の処理順に適用し、各ターンの空間利用状況を可視化する。
+	// 本番の探索ループからは呼び出さず、ローカル解析時だけ利用する。
+	public void Emulate()
+	{
+		var owner = new int[N, N];
+		for (int x = 0; x < N; ++x) {
+			for (int y = 0; y < N; ++y) {
+				owner[x, y] = -1;
+			}
+		}
+		var active = new Dictionary<int, List<(int x, int y)>>();
+		var reports = new List<string>(M);
+		var occupiedSnapshots = new List<HashSet<(int x, int y)>>(M);
+		var counterfactualCandidates = new List<(int turn, int departureTime, int p, int v, double z, double threshold, List<(int x, int y)> points)>();
+		int totalFreeGrass = 0;
+		int totalSmallComponents = 0;
+		int rejectedWithAlternative = 0;
+		int rejectedWithoutAlternative = 0;
+		var rejectionCounts = new Dictionary<string, int>();
+		int moveFailedCount = 0;
+		int moveFailedWithLargeComponent = 0;
+		int moveFailedUnlockedByOneGroup = 0;
+		var moveFailedReports = new List<string>();
+		var acceptedSpaceMetrics = new List<(int turn, int largest, int small, int freeAdjacency, int placements64, int placements96, int placements128)>();
+
+		for (int turn = 0; turn < M; ++turn) {
+			var guest = Guests[turn];
+			if (Moves[turn] is null || Receptions[turn].points is null) {
+				continue;
+			}
+
+			// 到着時刻より前に退去したグループの領域を解放する。
+			var departed = active
+				.Where(pair => Guests[pair.Key].t < guest.s)
+				.Select(pair => pair.Key)
+				.ToArray();
+			foreach (int groupId in departed) {
+				ClearOwner(owner, active[groupId], groupId);
+				active.Remove(groupId);
+			}
+
+			// 複数移動は全グループを先に空けてから同時配置する。
+			var movedGroups = Moves[turn];
+			foreach (var (groupId, _) in movedGroups) {
+				if (active.TryGetValue(groupId, out var oldPoints)) {
+					ClearOwner(owner, oldPoints, groupId);
+				}
+			}
+			foreach (var (groupId, newPoints) in movedGroups) {
+				if (active.ContainsKey(groupId) == false) {
+					reports.Add($"turn={turn:d4} INVALID move group={groupId}: not active");
+					continue;
+				}
+
+				if (CanOwn(owner, newPoints, groupId) == false) {
+					reports.Add($"turn={turn:d4} INVALID move group={groupId}: collision");
+					continue;
+				}
+
+				SetOwner(owner, newPoints, groupId);
+				active[groupId] = newPoints;
+			}
+
+			var reception = Receptions[turn];
+			if (reception.takes) {
+				if (CanOwn(owner, reception.points, turn) == false) {
+					reports.Add($"turn={turn:d4} INVALID reception group={turn}");
+				} else {
+					SetOwner(owner, reception.points, turn);
+					active[turn] = reception.points;
+				}
+			}
+
+			var freeComponents = FindFreeComponents(owner);
+			int freeGrass = freeComponents.Sum(component => component.Count);
+			int smallComponents = freeComponents.Count(component => component.Count < Math.Max(4, guest.p));
+			int largestComponent = freeComponents.Count == 0
+				? 0
+				: freeComponents.Max(component => component.Count);
+			totalFreeGrass += freeGrass;
+			totalSmallComponents += smallComponents;
+			if (reception.takes) {
+				var occupied = ToOccupied(owner);
+				acceptedSpaceMetrics.Add((
+					turn,
+					largestComponent,
+					freeComponents.Count(component => component.Count < 32),
+					CountFreeAdjacency(occupied),
+					CountNearSquarePlacements(occupied, 64),
+					CountNearSquarePlacements(occupied, 96),
+					CountNearSquarePlacements(occupied, 128)));
+			}
+
+			string alternative = "-";
+			if (reception.takes == false) {
+				var decision = Decisions[turn];
+				var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+				var alternativePoints = Utils.FindPlacementByBestFullSearch(Row, ToOccupied(owner), shape);
+				if (alternativePoints.Count == guest.p) {
+					++rejectedWithAlternative;
+					alternative = $"alternative=shape C={Utils.CalculateCompactness(alternativePoints):f3}";
+					if (decision.decision == "threshold") {
+						counterfactualCandidates.Add((
+							turn, guest.t, guest.p, guest.v, decision.z, decision.threshold,
+							alternativePoints));
+					}
+				} else {
+					++rejectedWithoutAlternative;
+				}
+
+				string rejection = string.IsNullOrEmpty(decision.decision)
+					? "unknown"
+					: decision.decision;
+				rejectionCounts[rejection] = rejectionCounts.GetValueOrDefault(rejection) + 1;
+				alternative += $" reason={rejection} z={decision.z:f3} threshold={decision.threshold:f3}";
+				if (rejection == "move-failed") {
+					++moveFailedCount;
+					var largeComponents = freeComponents.Where(component => component.Count >= guest.p).ToList();
+					if (largeComponents.Count > 0) {
+						++moveFailedWithLargeComponent;
+					}
+
+					var boundaryGroups = FindBoundaryGroups(owner, freeComponents);
+					var (diagnosticShape, _) = Utils.CreateNearSquareShape(guest.p);
+					var unlockingGroups = new List<int>();
+					foreach (int groupId in boundaryGroups) {
+						if (active.TryGetValue(groupId, out var groupPoints) == false) {
+							continue;
+						}
+
+						ClearOwner(owner, groupPoints, groupId);
+						var unlocked = Utils.FindPlacementByBestFullSearch(Row, ToOccupied(owner), diagnosticShape);
+						if (unlocked.Count != guest.p) {
+							unlocked = Utils.FindPlacementByReverseBreadthFirstSearch2(
+								Row, ToOccupied(owner), guest.p, PondPrefixSum, GetRectangleCandidates(guest.p));
+						}
+						SetOwner(owner, groupPoints, groupId);
+						if (unlocked.Count == guest.p) {
+							unlockingGroups.Add(groupId);
+						}
+					}
+
+					if (unlockingGroups.Count > 0) {
+						++moveFailedUnlockedByOneGroup;
+					}
+					moveFailedReports.Add(
+						$"turn={turn:d4} p={guest.p:d3} free={freeGrass:d4} largest={largestComponent:d4} "
+						+ $"components>=={largeComponents.Count}/{largeComponents.Sum(component => component.Count)} "
+						+ $"boundary={boundaryGroups.Count} unlock={unlockingGroups.Count} "
+						+ $"unlockSizes=[{string.Join(',', unlockingGroups.Select(groupId => active[groupId].Count))}]");
+				}
+			}
+
+			string placement = reception.takes
+				? DescribePlacement(reception.points)
+				: "placement=reject";
+			reports.Add(
+				$"turn={turn:d4} guestP={guest.p:d3} guestV={guest.v:d8} "
+				+ $"free={freeGrass:d4} largest={largestComponent:d4} small={smallComponents:d3} "
+				+ $"active={active.Count:d3} {placement} {alternative}");
+			occupiedSnapshots.Add(OccupiedCells(owner));
+		}
+
+		var moveFailedTurns = Enumerable.Range(0, M)
+			.Where(turn => Decisions[turn].decision == "move-failed")
+			.ToHashSet();
+		var followedByMoveFailed = acceptedSpaceMetrics
+			.Where(metric => Enumerable.Range(metric.turn + 1, Math.Min(50, M - metric.turn - 1))
+				.Any(moveFailedTurns.Contains))
+			.ToList();
+		var notFollowedByMoveFailed = acceptedSpaceMetrics
+			.Where(metric => Enumerable.Range(metric.turn + 1, Math.Min(50, M - metric.turn - 1))
+				.Any(moveFailedTurns.Contains) == false)
+			.ToList();
+
+		int nonInterferingCount = 0;
+		long nonInterferingValueSum = 0;
+		long nonInterferingPersonSum = 0;
+		foreach (var candidate in counterfactualCandidates) {
+			bool interferes = false;
+			for (int futureTurn = candidate.turn + 1; futureTurn < M; ++futureTurn) {
+				if (Guests[futureTurn].s >= candidate.departureTime) {
+					break;
+				}
+				if (Intersects(candidate.points, occupiedSnapshots[futureTurn])) {
+					interferes = true;
+					break;
+				}
+			}
+
+			if (interferes == false) {
+				++nonInterferingCount;
+				nonInterferingValueSum += candidate.v;
+				nonInterferingPersonSum += candidate.p;
+			}
+		}
+
+		Console.WriteLine("[Emulate] turn reports");
+		foreach (string report in reports) {
+			Console.WriteLine(report);
+		}
+		Console.WriteLine(
+			$"[Emulate] free average={(double)totalFreeGrass / M:f2} "
+			+ $"small components={totalSmallComponents} "
+			+ $"rejected with alternative={rejectedWithAlternative} "
+			+ $"without alternative={rejectedWithoutAlternative}");
+		Console.WriteLine("[Emulate] rejection reasons "
+			+ string.Join(" ", rejectionCounts.OrderBy(pair => pair.Key)
+				.Select(pair => $"{pair.Key}={pair.Value}")));
+		Console.WriteLine(
+			$"[Emulate] threshold alternative non-interfering={nonInterferingCount}/{counterfactualCandidates.Count} "
+			+ $"valueSum={nonInterferingValueSum} personSum={nonInterferingPersonSum}");
+		Console.WriteLine(
+			$"[Emulate] move-failed diagnostics count={moveFailedCount} "
+			+ $"large-component={moveFailedWithLargeComponent} "
+			+ $"unlocked-by-one-group={moveFailedUnlockedByOneGroup}");
+		foreach (string report in moveFailedReports) {
+			Console.WriteLine($"[Emulate] move-failed {report}");
+		}
+		PrintSpaceMetricAverage("followed-by-move-failed", followedByMoveFailed);
+		PrintSpaceMetricAverage("not-followed-by-move-failed", notFollowedByMoveFailed);
+
+		HashSet<(int x, int y)> OccupiedCells(int[,] currentOwner)
+		{
+			var cells = new HashSet<(int x, int y)>();
+			for (int x = 0; x < N; ++x) {
+				for (int y = 0; y < N; ++y) {
+					if (currentOwner[x, y] >= 0) {
+						cells.Add((x, y));
+					}
+				}
+			}
+			return cells;
+		}
+
+		bool Intersects(IReadOnlyList<(int x, int y)> points, HashSet<(int x, int y)> occupied)
+		{
+			return points.Any(occupied.Contains);
+		}
+
+		int CountFreeAdjacency(bool[,] occupied)
+		{
+			int count = 0;
+			for (int x = 0; x < N; ++x) {
+				for (int y = 0; y < N; ++y) {
+					if (Row[x][y] != '.' || occupied[x, y]) {
+						continue;
+					}
+					if (x + 1 < N && Row[x + 1][y] == '.' && occupied[x + 1, y] == false) {
+						++count;
+					}
+					if (y + 1 < N && Row[x][y + 1] == '.' && occupied[x, y + 1] == false) {
+						++count;
+					}
+				}
+			}
+			return count;
+		}
+
+		int CountNearSquarePlacements(bool[,] occupied, int personCount)
+		{
+			var (shape, _) = Utils.CreateNearSquareShape(personCount);
+			int shapeHeight = shape.Max(point => point.x) + 1;
+			int shapeWidth = shape.Max(point => point.y) + 1;
+			int count = 0;
+			for (int baseX = 0; baseX + shapeHeight <= N; ++baseX) {
+				for (int baseY = 0; baseY + shapeWidth <= N; ++baseY) {
+					if (shape.All(point => Row[baseX + point.x][baseY + point.y] == '.'
+						&& occupied[baseX + point.x, baseY + point.y] == false)) {
+						++count;
+					}
+				}
+			}
+			return count;
+		}
+
+		void PrintSpaceMetricAverage(
+			string label,
+			IReadOnlyList<(int turn, int largest, int small, int freeAdjacency, int placements64, int placements96, int placements128)> metrics)
+		{
+			if (metrics.Count == 0) {
+				Console.WriteLine($"[Emulate] placement-metrics {label}=0");
+				return;
+			}
+			Console.WriteLine(
+				$"[Emulate] placement-metrics {label} count={metrics.Count} "
+				+ $"largest={metrics.Average(metric => metric.largest):f1} "
+				+ $"small={metrics.Average(metric => metric.small):f1} "
+				+ $"adjacency={metrics.Average(metric => metric.freeAdjacency):f1} "
+				+ $"p64={metrics.Average(metric => metric.placements64):f1} "
+				+ $"p96={metrics.Average(metric => metric.placements96):f1} "
+				+ $"p128={metrics.Average(metric => metric.placements128):f1}");
+		}
+
+		HashSet<int> FindBoundaryGroups(int[,] currentOwner, IReadOnlyList<List<(int x, int y)>> components)
+		{
+			var groups = new HashSet<int>();
+			foreach (var component in components) {
+				foreach (var (x, y) in component) {
+					foreach (var (dx, dy) in new[] { (-1, 0), (1, 0), (0, -1), (0, 1) }) {
+						int nx = x + dx;
+						int ny = y + dy;
+						if ((uint)nx < (uint)N && (uint)ny < (uint)N && currentOwner[nx, ny] >= 0) {
+							groups.Add(currentOwner[nx, ny]);
+						}
+					}
+				}
+			}
+			return groups;
+		}
+
+		bool[,] ToOccupied(int[,] currentOwner)
+		{
+			var occupied = new bool[N, N];
+			for (int x = 0; x < N; ++x) {
+				for (int y = 0; y < N; ++y) {
+					occupied[x, y] = currentOwner[x, y] >= 0;
+				}
+			}
+
+			return occupied;
+		}
+
+		void SetOwner(int[,] currentOwner, IReadOnlyList<(int x, int y)> points, int groupId)
+		{
+			foreach (var (x, y) in points) {
+				currentOwner[x, y] = groupId;
+			}
+		}
+
+		void ClearOwner(int[,] currentOwner, IReadOnlyList<(int x, int y)> points, int groupId)
+		{
+			foreach (var (x, y) in points) {
+				if (currentOwner[x, y] == groupId) {
+					currentOwner[x, y] = -1;
+				}
+			}
+		}
+
+		bool CanOwn(int[,] currentOwner, IReadOnlyList<(int x, int y)> points, int groupId)
+		{
+			var seen = new HashSet<(int x, int y)>();
+			foreach (var (x, y) in points) {
+				if ((uint)x >= (uint)N || (uint)y >= (uint)N
+					|| Row[x][y] != '.'
+					|| seen.Add((x, y)) == false
+					|| currentOwner[x, y] >= 0 && currentOwner[x, y] != groupId) {
+					return false;
+				}
+			}
+
+			return true;
+		}
+
+		List<List<(int x, int y)>> FindFreeComponents(int[,] currentOwner)
+		{
+			var visited = new bool[N, N];
+			var components = new List<List<(int x, int y)>>();
+			for (int x = 0; x < N; ++x) {
+				for (int y = 0; y < N; ++y) {
+					if (visited[x, y] || Row[x][y] != '.' || currentOwner[x, y] >= 0) {
+						continue;
+					}
+
+					var component = new List<(int x, int y)>();
+					var queue = new Queue<(int x, int y)>();
+					visited[x, y] = true;
+					queue.Enqueue((x, y));
+					while (queue.Count > 0) {
+						var point = queue.Dequeue();
+						component.Add(point);
+						foreach (var (dx, dy) in new[] { (-1, 0), (1, 0), (0, -1), (0, 1) }) {
+							int nx = point.x + dx;
+							int ny = point.y + dy;
+							if ((uint)nx < (uint)N && (uint)ny < (uint)N
+								&& visited[nx, ny] == false
+								&& Row[nx][ny] == '.'
+								&& currentOwner[nx, ny] < 0) {
+								visited[nx, ny] = true;
+								queue.Enqueue((nx, ny));
+							}
+						}
+					}
+
+					components.Add(component);
+				}
+			}
+
+			return components;
+		}
+
+		string DescribePlacement(IReadOnlyList<(int x, int y)> points)
+		{
+			if (points.Count == 0) {
+				return "placement=empty";
+			}
+
+			int minX = points.Min(point => point.x);
+			int maxX = points.Max(point => point.x);
+			int minY = points.Min(point => point.y);
+			int maxY = points.Max(point => point.y);
+			return $"placement=C={Utils.CalculateCompactness(points):f3} "
+				+ $"box={maxX - minX + 1}x{maxY - minY + 1}";
+		}
 	}
 
 	public IReadOnlyList<(int boxHeight, int boxWidth, int perimeter, int unusedArea, int imbalance)>
@@ -1629,43 +2135,6 @@ public class Input
 		for (int x = 0; x < N; ++x) {
 			Row[x] = new string(temp[x]);
 		}
-	}
-
-	public (int i, int s, int t, int p, int v) InputGuest()
-	{
-		(int i, int s, int t, int p, int v) ret = _io.Int5();
-		ScoreLimit += ret.v;
-		StayTimeSum += ret.t - ret.s;
-		PersonStayTimeSum += (long)ret.p * (ret.t - ret.s);
-		PersonSum += ret.p;
-
-		return ret;
-	}
-
-	public void OutputMove(List<(int j, List<(int z, int w)> points)> moveGroups, Information info)
-	{
-		info.MoveCount += moveGroups.Count;
-		_io.WriteLine(moveGroups.Count);
-		foreach (var (j, points) in moveGroups) {
-			_io.WriteLine(j);
-			foreach (var (z, w) in points) {
-				_io.WriteLine($"{z} {w}");
-			}
-		}
-	}
-
-	public void OutputReception(bool takes, List<(int x, int y)> points)
-	{
-		if (takes) {
-			_io.WriteLine("Yes");
-			foreach (var (x, y) in points) {
-				_io.WriteLine($"{x} {y}");
-			}
-		} else {
-			_io.WriteLine("No");
-		}
-
-		_io.Flush();
 	}
 }
 
@@ -2250,8 +2719,8 @@ public class Array2D<T>(int h, int w)
 public class HeuristicHelper
 {
 	public static void RunCases<T>(
-		int runCaseCount,
-		double testCaseCount,
+		int localTestCaseRunCount,
+		double judgePreTestCaseCount,
 		bool isParallel,
 		Func<int, T> run,
 		Func<object, int, T, (long score, int loop, int up)> outputCaseInformation,
@@ -2267,11 +2736,11 @@ public class HeuristicHelper
 		long scoreMax = long.MinValue;
 		int errorCount = 0;
 		if (isParallel) {
-			Parallel.For(0, runCaseCount, i => {
+			Parallel.For(0, localTestCaseRunCount, i => {
 				RunCases(i);
 			});
 		} else {
-			for (int i = 0; i < runCaseCount; i++) {
+			for (int i = 0; i < localTestCaseRunCount; i++) {
 				RunCases(i);
 			}
 		}
@@ -2299,20 +2768,21 @@ public class HeuristicHelper
 			}
 		}
 
-		scoreSum = (long)(scoreSum / (runCaseCount / testCaseCount));
-		scoreLogSum /= runCaseCount / testCaseCount;
+		// 本番環境への提出時とスコアのオーダーが揃うように、プレテストのケース数換算のスコアにする。
+		scoreSum = (long)(scoreSum / (localTestCaseRunCount / judgePreTestCaseCount));
+		scoreLogSum /= localTestCaseRunCount / judgePreTestCaseCount;
 		Console.WriteLine("");
 
 		Console.WriteLine("");
 		Console.WriteLine($"sum: {scoreSum}");
-		Console.WriteLine($"ave: {scoreSum / testCaseCount}");
+		Console.WriteLine($"ave: {scoreSum / judgePreTestCaseCount}");
 		Console.WriteLine($"min: {scoreMin}");
 		Console.WriteLine($"max: {scoreMax}");
-		Console.WriteLine($"log: {scoreLogSum / testCaseCount}");
-		Console.WriteLine($"loop ave.: {loopSum / (double)runCaseCount:f3}");
-		Console.WriteLine($"up ave.: {upSum / (double)runCaseCount:f3}");
+		Console.WriteLine($"log: {scoreLogSum / judgePreTestCaseCount}");
+		Console.WriteLine($"loop ave.: {loopSum / (double)localTestCaseRunCount:f3}");
+		Console.WriteLine($"up ave.: {upSum / (double)localTestCaseRunCount:f3}");
 
-		addOutput?.Invoke(testCaseCount, runCaseCount);
+		addOutput?.Invoke(judgePreTestCaseCount, localTestCaseRunCount);
 
 		Console.WriteLine($"error : {errorCount}");
 
