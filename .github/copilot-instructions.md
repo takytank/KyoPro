@@ -16,6 +16,7 @@ Here, "solution program" refers to any program created or being created for the 
 
 ## ローカルの開発ルール
 
+- ソースコードの文字エンコードは UTF-8(BOM) とする。
 - Release ビルドはジャッジサーバーから標準入力を受け取るようになっているため、ローカルのテストケースファイルを用いた動作確認には Debug ビルドを使用する。
 - 標準ライブラリー、及び、ジャッジサーバーでも参照している以下の package を除き、Program.cs のコードで動作が完結するようにする。(Debug 時の入力ファイルは除く)
     - ac-library-csharp

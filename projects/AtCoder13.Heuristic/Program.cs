@@ -1,4 +1,4 @@
-using System.Collections;
+ï»¿using System.Collections;
 using System.Data;
 using System.Diagnostics;
 using System.Globalization;
@@ -124,22 +124,22 @@ public class Program
 		input.Emulate();
 	}
 
-	// Plan6 : Plan5‚Æ“¯‚¶ó—Šî€‚ğg‚¢A’èŒ^Œ`ó‚É‚Â‚¢‚Ä‚Í‘SŒó•â‚©‚ç‹ó‚«—Ìˆæ‚ğc‚µ‚â‚·‚¢ˆÊ’u‚ğ‘I‚ÔB
-	// Plan7 : Plan6‚Ì”z’u’Tõ‚ğˆÛ‚µA”Õ–Ê¬G“x‚É‰‚¶‚Ä’á‰¿’lE‘å–ÊÏE’·Šú‘Øİ‚ğ‘I•Ê‚·‚éB
-	// Plan8 : Plan7‚Ìreject”»’è‚ÉAˆ—Ï‚İƒQƒXƒg‚©‚ç“¾‚ç‚ê‚é“®“IƒXƒRƒAƒŒ[ƒg‚ğ‰Á‚¦‚éB
-	// Plan9 : Plan8‚Ì‘I•Ê‚ğˆÛ‚µA’Êí”z’u‚É¸”s‚µ‚½‚Æ‚«‚¾‚¯—˜—p’†ƒOƒ‹[ƒv1‘g‚ÌÄ”z’u‚ğ‚·B
-	// Plan10 : Plan9‚Ì”z’u•s”\‚ÉA‘S—˜—p’†ƒOƒ‹[ƒv‚ğŒó•â‚Æ‚µ‚ÄÅ—Ç‚ÌÄ”z’u‚ğ‘I‚ÔB
-	// Plan11 : Plan10‚Ì‘S—˜—p’†ƒOƒ‹[ƒvÄ”z’u‚ğˆÛ‚µAPlan11ê—p‚Ìrejectè‡’l‚ğg—p‚·‚éB
-	// Plan12 : Plan10‚Ì‘I•ÊEˆÚ“®’Tõ‚ğˆÛ‚µA‹q‚Ì‘Ş‹—\‘ª‚İ‚Å‹ó‚«ƒXƒy[ƒX‚ğŒvZ‚·‚é
+	// Plan6 : Plan5ã¨åŒã˜å—ç†åŸºæº–ã‚’ä½¿ã„ã€å®šå‹å½¢çŠ¶ã«ã¤ã„ã¦ã¯å…¨å€™è£œã‹ã‚‰ç©ºãé ˜åŸŸã‚’æ®‹ã—ã‚„ã™ã„ä½ç½®ã‚’é¸ã¶ã€‚
+	// Plan7 : Plan6ã®é…ç½®æ¢ç´¢ã‚’ç¶­æŒã—ã€ç›¤é¢æ··é›‘åº¦ã«å¿œã˜ã¦ä½ä¾¡å€¤ãƒ»å¤§é¢ç©ãƒ»é•·æœŸæ»åœ¨ã‚’é¸åˆ¥ã™ã‚‹ã€‚
+	// Plan8 : Plan7ã®rejectåˆ¤å®šã«ã€å‡¦ç†æ¸ˆã¿ã‚²ã‚¹ãƒˆã‹ã‚‰å¾—ã‚‰ã‚Œã‚‹å‹•çš„ã‚¹ã‚³ã‚¢ãƒ¬ãƒ¼ãƒˆã‚’åŠ ãˆã‚‹ã€‚
+	// Plan9 : Plan8ã®é¸åˆ¥ã‚’ç¶­æŒã—ã€é€šå¸¸é…ç½®ã«å¤±æ•—ã—ãŸã¨ãã ã‘åˆ©ç”¨ä¸­ã‚°ãƒ«ãƒ¼ãƒ—1çµ„ã®å†é…ç½®ã‚’è©¦ã™ã€‚
+	// Plan10 : Plan9ã®é…ç½®ä¸èƒ½æ™‚ã«ã€å…¨åˆ©ç”¨ä¸­ã‚°ãƒ«ãƒ¼ãƒ—ã‚’å€™è£œã¨ã—ã¦æœ€è‰¯ã®å†é…ç½®ã‚’é¸ã¶ã€‚
+	// Plan11 : Plan10ã®å…¨åˆ©ç”¨ä¸­ã‚°ãƒ«ãƒ¼ãƒ—å†é…ç½®ã‚’ç¶­æŒã—ã€Plan11å°‚ç”¨ã®rejecté–¾å€¤ã‚’ä½¿ç”¨ã™ã‚‹ã€‚
+	// Plan12 : Plan10ã®é¸åˆ¥ãƒ»ç§»å‹•æ¢ç´¢ã‚’ç¶­æŒã—ã€å®¢ã®é€€å»äºˆæ¸¬è¾¼ã¿ã§ç©ºãã‚¹ãƒšãƒ¼ã‚¹ã‚’è¨ˆç®—ã™ã‚‹
 
-	// Plan12‚Ìó—EˆÚ“®•ûj‚ğˆÛ‚µAÅŒã‚É”CˆÓ˜AŒ‹Œ`ó‚ğ‹–‚·Š®‘SƒtƒH[ƒ‹ƒoƒbƒN‚ğg‚¤B
+	// Plan12ã®å—ç†ãƒ»ç§»å‹•æ–¹é‡ã‚’ç¶­æŒã—ã€æœ€å¾Œã«ä»»æ„é€£çµå½¢çŠ¶ã‚’è¨±ã™å®Œå…¨ãƒ•ã‚©ãƒ¼ãƒ«ãƒãƒƒã‚¯ã‚’ä½¿ã†ã€‚
 	static State Plan13(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(isLocal, input, enableCompleteFallback: true);
 		var parameters = Utils.LoadPlan7Parameters(
-			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // Šm’èƒpƒ‰ƒ[ƒ^[
+			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // ç¢ºå®šãƒ‘ãƒ©ãƒ¡ãƒ¼ã‚¿ãƒ¼
 		if (isLocal) {
-			// ƒpƒ‰ƒ[ƒ^[’²®‚Í‚±‚±‚Åparameters‚ğã‘‚«‚·‚é
+			// ãƒ‘ãƒ©ãƒ¡ãƒ¼ã‚¿ãƒ¼èª¿æ•´æ™‚ã¯ã“ã“ã§parametersã‚’ä¸Šæ›¸ãã™ã‚‹
 		}
 
 		long arrivedValueSum = 0;
@@ -193,12 +193,12 @@ public class Program
 		return state;
 	}
 
-	// Plan12‚Ì”z’uEˆÚ“®•ûj‚ğˆÛ‚µAZ‚µ‚«‚¢’l‚ğƒZƒ‹ŠÔ‰e‰¿Ši‚É‚æ‚éó—”»’è‚Ö’u‚«Š·‚¦‚éB
+	// Plan12ã®é…ç½®ãƒ»ç§»å‹•æ–¹é‡ã‚’ç¶­æŒã—ã€Zã—ãã„å€¤ã‚’ã‚»ãƒ«æ™‚é–“å½±ä¾¡æ ¼ã«ã‚ˆã‚‹å—ç†åˆ¤å®šã¸ç½®ãæ›ãˆã‚‹ã€‚
 	static State Plan14(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(isLocal, input);
 		var parameters = Utils.LoadPlan7Parameters(
-			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // Plan12‚ÌŠm’èƒpƒ‰ƒ[ƒ^[
+			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // Plan12ã®ç¢ºå®šãƒ‘ãƒ©ãƒ¡ãƒ¼ã‚¿ãƒ¼
 		long arrivedValueSum = 0;
 		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
 			var guest = input.InputGuest();
@@ -258,9 +258,9 @@ public class Program
 		return state;
 	}
 
-	// Plan15 : Plan12‚Ì‘Ş‹—\‘ªè—L—¦‚ÉAPlan11‚Ì‚“®“IƒŒ[ƒgE’áè—L—¦‚ÌŠÉ˜a‚ğ‘g‚İ‡‚í‚¹‚éB
+	// Plan15 : Plan12ã®é€€å»äºˆæ¸¬å æœ‰ç‡ã«ã€Plan11ã®é«˜å‹•çš„ãƒ¬ãƒ¼ãƒˆãƒ»ä½å æœ‰ç‡æ™‚ã®ç·©å’Œã‚’çµ„ã¿åˆã‚ã›ã‚‹ã€‚
 
-	// Plan15‚Ì’áThetaŒü‚¯ŠÉ˜a‚ğˆÛ‚µA‚Theta‚Å‚ÍPlan12‚Ì‚µ‚«‚¢’l‚Ö–ß‚·B
+	// Plan15ã®ä½Thetaå‘ã‘ç·©å’Œã‚’ç¶­æŒã—ã€é«˜Thetaã§ã¯Plan12ã®ã—ãã„å€¤ã¸æˆ»ã™ã€‚
 	static State Plan16(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(isLocal, input);
@@ -341,13 +341,93 @@ public class Program
 		return state;
 	}
 
+	// Plan17: Plan16 ã« Plan13 ã¨åŒæ§˜ã®æœ€å¾Œã«ä»»æ„é€£çµå½¢çŠ¶ã‚’è¨±ã™å®Œå…¨ãƒ•ã‚©ãƒ¼ãƒ«ãƒãƒƒã‚¯ã‚’ä½¿ã†ã€‚
+	static State Plan17(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input, enableCompleteFallback: true);
+		var plan12Parameters = Utils.LoadPlan7Parameters(
+			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
+		var plan15Parameters = Utils.LoadPlan7Parameters(
+			new(-0.65, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
+		long arrivedValueSum = 0;
+
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			arrivedValueSum += guest.v;
+
+			double z = Utils.CalculateValueZScore(guest);
+			double progress = (double)guestCount / input.M;
+			double plan12DynamicRate = progress >= plan12Parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
+			double plan15DynamicRate = progress >= plan15Parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
+			double projectedOccupiedRate = state.GetProjectedOccupiedRate(
+				guest.s,
+				Plan12ProjectedOccupancyHorizon);
+			double plan12Threshold = Utils.ShouldRejectDynamically(
+				guest,
+				projectedOccupiedRate,
+				progress,
+				input.PondClusterCount,
+				plan12Parameters,
+				plan12DynamicRate);
+			double plan15Threshold = Utils.CalculatePlan11RejectThreshold(
+				guest,
+				projectedOccupiedRate,
+				progress,
+				input.PondClusterCount,
+				plan15Parameters,
+				plan15DynamicRate);
+			double averageStayTime = (double)input.StayTimeSum / (guestCount + 1);
+			double plan15Weight = Math.Clamp((6500.0 - averageStayTime) / 3000.0, 0.0, 1.0);
+			double zThreshold = plan12Threshold
+				+ (plan15Threshold - plan12Threshold) * plan15Weight;
+			info.ZThresholdAverage += zThreshold;
+			if (z < zThreshold) {
+				input.RecordDecision(guestCount, z, zThreshold, "threshold");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+				continue;
+			}
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByBestFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+			if (points.Count == guest.p) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-normal");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+				continue;
+			}
+
+			input.RecordDecision(guestCount, z, zThreshold, "normal-placement-failed");
+			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-move");
+				input.OutputMove([moveGroup], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+			} else {
+				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+		return state;
+	}
 }
 
-// ”z’uŒ`ó‚Ì¶¬E’TõE•]‰¿‚ğW–ñ‚µAŠePlan‚Íí—ª‚Ì‘g‚İ‡‚í‚¹‚¾‚¯‚ğ’S“–‚·‚éB
+// é…ç½®å½¢çŠ¶ã®ç”Ÿæˆãƒ»æ¢ç´¢ãƒ»è©•ä¾¡ã‚’é›†ç´„ã—ã€å„Planã¯æˆ¦ç•¥ã®çµ„ã¿åˆã‚ã›ã ã‘ã‚’æ‹…å½“ã™ã‚‹ã€‚
 public static class Utils
 {
-	// “ü—Í¶¬‚ÉŠî–{x•¥Šz‚ÖŠ|‚¯‚ç‚ê‚½ 2^Z ‚ğ‹tZ‚·‚éB
-	// V‚Í®”‚ÖŠÛ‚ß‚ç‚ê‚Ä‚¢‚é‚½‚ßŒµ–§’l‚Å‚Í‚È‚¢‚ªA‰ºˆÊ”»’è‚É‚Í\•ª‚È¸“x‚ª‚ ‚éB
+	// å…¥åŠ›ç”Ÿæˆæ™‚ã«åŸºæœ¬æ”¯æ‰•é¡ã¸æ›ã‘ã‚‰ã‚ŒãŸ 2^Z ã‚’é€†ç®—ã™ã‚‹ã€‚
+	// Vã¯æ•´æ•°ã¸ä¸¸ã‚ã‚‰ã‚Œã¦ã„ã‚‹ãŸã‚å³å¯†å€¤ã§ã¯ãªã„ãŒã€ä¸‹ä½åˆ¤å®šã«ã¯ååˆ†ãªç²¾åº¦ãŒã‚ã‚‹ã€‚
 	internal static double CalculateValueFactor(
 		(int i, int s, int t, int p, int v) guest)
 	{
@@ -356,7 +436,7 @@ public static class Utils
 		return guest.v / baseValue;
 	}
 
-	// Z`N(0, 0.8) ‚É‘Š“–‚·‚é’l‚ğ‹tZ‚·‚éB
+	// Zï½N(0, 0.8) ã«ç›¸å½“ã™ã‚‹å€¤ã‚’é€†ç®—ã™ã‚‹ã€‚
 	internal static double CalculateValueZScore(
 		(int i, int s, int t, int p, int v) guest)
 	{
@@ -385,7 +465,7 @@ public static class Utils
 			-0.75, 0.55, 0.30, 0.25, 0.35, 0.00, 0.00, 10.0, 0.0, 0.00, 0.50, 0.20,
 			0.60, 0.50, 0.00);
 
-	// ‹ó‚«‚ª\•ª‚ ‚éŠÔ‚Í’á‰¿’lƒOƒ‹[ƒv‚àó‚¯“ü‚êA¬G‚·‚é‚Ù‚Ç’á‰¿’lƒOƒ‹[ƒv‚ğ‹‘”Û‚·‚éB
+	// ç©ºããŒååˆ†ã‚ã‚‹é–“ã¯ä½ä¾¡å€¤ã‚°ãƒ«ãƒ¼ãƒ—ã‚‚å—ã‘å…¥ã‚Œã€æ··é›‘ã™ã‚‹ã»ã©ä½ä¾¡å€¤ã‚°ãƒ«ãƒ¼ãƒ—ã‚’æ‹’å¦ã™ã‚‹ã€‚
 	internal static double ShouldRejectDynamically(
 		(int i, int s, int t, int p, int v) guest,
 		double occupiedRate,
@@ -472,7 +552,7 @@ public static class Utils
 			? overrideParameters
 			: GetDefaultParameters();
 
-	// s—Dæ‚Å–„‚ß‚½’·•ûŒ`Œó•â‚©‚çAü’·‚ª’Z‚­³•ûŒ`‚É‹ß‚¢Œ`‚ğ‘I‚ÔB
+	// è¡Œå„ªå…ˆã§åŸ‹ã‚ãŸé•·æ–¹å½¢å€™è£œã‹ã‚‰ã€å‘¨é•·ãŒçŸ­ãæ­£æ–¹å½¢ã«è¿‘ã„å½¢ã‚’é¸ã¶ã€‚
 	internal static (List<(int x, int y)> points, double compactness) CreateNearSquareShape(int p)
 	{
 		ArgumentOutOfRangeException.ThrowIfNegativeOrZero(p);
@@ -509,8 +589,8 @@ public static class Utils
 	}
 
 
-	// ‘S‚Ä‚Ì”z’u‰Â”\ˆÊ’u‚ğ’²‚×A’rE”Õ–ÊŠOEŠù‘¶è—L—Ìˆæ‚ÉÚ‚·‚é•Ó‚ª‘½‚¢Œó•â‚ğ‘I‚ÔB
-	// g‚¢‚É‚­‚¢‹«ŠE‘¤‚ğ—Dæ‚µ‚ÄÁ”ï‚·‚é‚±‚Æ‚ÅA˜A‘±‚µ‚½‹ó‚«—Ìˆæ‚ğc‚·B
+	// å…¨ã¦ã®é…ç½®å¯èƒ½ä½ç½®ã‚’èª¿ã¹ã€æ± ãƒ»ç›¤é¢å¤–ãƒ»æ—¢å­˜å æœ‰é ˜åŸŸã«æ¥ã™ã‚‹è¾ºãŒå¤šã„å€™è£œã‚’é¸ã¶ã€‚
+	// ä½¿ã„ã«ãã„å¢ƒç•Œå´ã‚’å„ªå…ˆã—ã¦æ¶ˆè²»ã™ã‚‹ã“ã¨ã§ã€é€£ç¶šã—ãŸç©ºãé ˜åŸŸã‚’æ®‹ã™ã€‚
 	internal static List<(int x, int y)> FindPlacementByBestFullSearch(
 		string[] row,
 		bool[,] occupied,
@@ -549,8 +629,8 @@ public static class Utils
 			}
 		}
 
-		// CreateNearSquareShape‚ª•Ô‚·s—Dæ‚Ì‹éŒ`ƒvƒŒƒtƒBƒbƒNƒX‚Í‚‘¬Œo˜H‚Åˆ—‚·‚éB
-		// ‚»‚êˆÈŠO‚ÌŒ`ó‚à—˜—p‚Å‚«‚é‚æ‚¤A‰º‚Å‚Í”Ä—p’Tõ‚ÖƒtƒH[ƒ‹ƒoƒbƒN‚·‚éB
+		// CreateNearSquareShapeãŒè¿”ã™è¡Œå„ªå…ˆã®çŸ©å½¢ãƒ—ãƒ¬ãƒ•ã‚£ãƒƒã‚¯ã‚¹ã¯é«˜é€ŸçµŒè·¯ã§å‡¦ç†ã™ã‚‹ã€‚
+		// ãã‚Œä»¥å¤–ã®å½¢çŠ¶ã‚‚åˆ©ç”¨ã§ãã‚‹ã‚ˆã†ã€ä¸‹ã§ã¯æ±ç”¨æ¢ç´¢ã¸ãƒ•ã‚©ãƒ¼ãƒ«ãƒãƒƒã‚¯ã™ã‚‹ã€‚
 		if (isRowMajorRectanglePrefix) {
 			return FindPlacementByBestRectanglePrefixSearch(
 				row,
@@ -569,7 +649,7 @@ public static class Utils
 			minBaseX, maxBaseX, minBaseY, maxBaseY);
 	}
 
-	// Plan12—pB”z’uŒã‚Ì‹ó‚«ƒZƒ‹“¯m‚Ì—×Ú•Ó”‚ğ‹ÇŠ“I‚ÉÅ‘å‰»‚·‚éB
+	// Plan12ç”¨ã€‚é…ç½®å¾Œã®ç©ºãã‚»ãƒ«åŒå£«ã®éš£æ¥è¾ºæ•°ã‚’å±€æ‰€çš„ã«æœ€å¤§åŒ–ã™ã‚‹ã€‚
 	internal static List<(int x, int y)> FindPlacementByEffectiveSpaceSearch(
 		string[] row,
 		bool[,] occupied,
@@ -685,8 +765,8 @@ public static class Utils
 		int width = row[0].Length;
 		int prefixWidth = width + 1;
 		var blockedPrefixSum = new int[(height + 1) * prefixWidth];
-		// Å¶ˆÈŠO‚Ü‚½‚Íè—LÏ‚İ‚Ìƒ}ƒX”‚Ì“ñŸŒ³—İÏ˜aB
-		// ŠeŒó•â‚É‘Î‚·‚é”z’u‰Â”\«‚ğ‹éŒ`˜a“ñ‰ñ‚Å”»’è‚·‚é‚½‚ß‚Ég‚¤B
+		// èŠç”Ÿä»¥å¤–ã¾ãŸã¯å æœ‰æ¸ˆã¿ã®ãƒã‚¹æ•°ã®äºŒæ¬¡å…ƒç´¯ç©å’Œã€‚
+		// å„å€™è£œã«å¯¾ã™ã‚‹é…ç½®å¯èƒ½æ€§ã‚’çŸ©å½¢å’ŒäºŒå›ã§åˆ¤å®šã™ã‚‹ãŸã‚ã«ä½¿ã†ã€‚
 		for (int x = 0; x < height; ++x) {
 			int rowSum = 0;
 			int previousRowOffset = x * prefixWidth;
@@ -727,7 +807,7 @@ public static class Utils
 					continue;
 				}
 
-				// ”z’u‰Â”\‚ÈŒó•â‚¾‚¯‚É‚Â‚¢‚ÄAŒ`ó‚ÌŠOü‚ªŠù‘¶‚ÌáŠQ•¨‚ÉÚ‚·‚é•Ó”‚ğ•]‰¿‚·‚éB
+				// é…ç½®å¯èƒ½ãªå€™è£œã ã‘ã«ã¤ã„ã¦ã€å½¢çŠ¶ã®å¤–å‘¨ãŒæ—¢å­˜ã®éšœå®³ç‰©ã«æ¥ã™ã‚‹è¾ºæ•°ã‚’è©•ä¾¡ã™ã‚‹ã€‚
 				int boundaryEdges = CountRectanglePrefixBoundaryEdges(
 					row, occupied, baseX, baseY, shapeHeight, shapeWidth, lastRowWidth);
 				if (boundaryEdges > bestBoundaryEdges) {
@@ -760,8 +840,8 @@ public static class Utils
 	{
 		int boundaryEdges = 0;
 		int lastX = baseX + shapeHeight - 1;
-		// s—Dæ‚Ì‹éŒ`ƒvƒŒƒtƒBƒbƒNƒX‚Å‚ÍA“à•”•Ó‚ğœ‚­ŠOü•Ó‚¾‚¯‚ğ”‚¦‚ê‚Î‚æ‚¢B
-		// ÅIs‚ª’Z‚¢ê‡‚ÍA‚»‚ÌŒ‡‚¯‚½•”•ª‚É–Ê‚·‚é’¼ãs‚Ì‰º•Ó‚àŠOü‚É‚È‚éB
+		// è¡Œå„ªå…ˆã®çŸ©å½¢ãƒ—ãƒ¬ãƒ•ã‚£ãƒƒã‚¯ã‚¹ã§ã¯ã€å†…éƒ¨è¾ºã‚’é™¤ãå¤–å‘¨è¾ºã ã‘ã‚’æ•°ãˆã‚Œã°ã‚ˆã„ã€‚
+		// æœ€çµ‚è¡ŒãŒçŸ­ã„å ´åˆã¯ã€ãã®æ¬ ã‘ãŸéƒ¨åˆ†ã«é¢ã™ã‚‹ç›´ä¸Šè¡Œã®ä¸‹è¾ºã‚‚å¤–å‘¨ã«ãªã‚‹ã€‚
 		for (int y = 0; y < shapeWidth; ++y) {
 			boundaryEdges += IsBlocked(row, occupied, baseX - 1, baseY + y) ? 1 : 0;
 		}
@@ -785,7 +865,7 @@ public static class Utils
 
 	private static bool IsBlocked(string[] row, bool[,] occupied, int x, int y)
 	{
-		// ”Õ–ÊŠO‚à–â‘è•¶‚Ìu—ÌˆæŠO‚Æ‚Ì‹«ŠEv‚Æ‚µ‚Äˆµ‚¤B
+		// ç›¤é¢å¤–ã‚‚å•é¡Œæ–‡ã®ã€Œé ˜åŸŸå¤–ã¨ã®å¢ƒç•Œã€ã¨ã—ã¦æ‰±ã†ã€‚
 		return (uint)x >= (uint)row.Length
 			|| (uint)y >= (uint)row[0].Length
 			|| row[x][y] != '.'
@@ -803,7 +883,7 @@ public static class Utils
 		int minBaseY,
 		int maxBaseY)
 	{
-		// ‚‘¬Œo˜H‚Ì‘O’ñ‚ğ–‚½‚³‚È‚¢”CˆÓŒ`óŒü‚¯‚ÌA]—ˆ‚Ç‚¨‚è‘SƒZƒ‹‚ğ’²‚×‚éŒo˜HB
+		// é«˜é€ŸçµŒè·¯ã®å‰æã‚’æº€ãŸã•ãªã„ä»»æ„å½¢çŠ¶å‘ã‘ã®ã€å¾“æ¥ã©ãŠã‚Šå…¨ã‚»ãƒ«ã‚’èª¿ã¹ã‚‹çµŒè·¯ã€‚
 		int height = row.Length;
 		int width = row[0].Length;
 		var shapeCells = new HashSet<(int x, int y)>(shape);
@@ -860,7 +940,7 @@ public static class Utils
 		return bestPlacement;
 	}
 
-	// P‚ğû—e‚·‚é–Ú•W‹éŒ`‚ğæ‚ÉŒÅ’è‚µA‹É’[‚É×’·‚¢Œ`‚ğì‚ç‚¸‚É‹éŒ`“à‚ÅPƒ}ƒX‚ğ‘I‚ÔB
+	// Pã‚’åå®¹ã™ã‚‹ç›®æ¨™çŸ©å½¢ã‚’å…ˆã«å›ºå®šã—ã€æ¥µç«¯ã«ç´°é•·ã„å½¢ã‚’ä½œã‚‰ãšã«çŸ©å½¢å†…ã§Pãƒã‚¹ã‚’é¸ã¶ã€‚
 	internal static List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch2(
 		string[] row,
 		bool[,] occupied,
@@ -876,7 +956,7 @@ public static class Utils
 			rectangleCandidates);
 	}
 
-	// Œ`ó§–ñ‚ğİ‚¯‚¸APƒ}ƒXˆÈã‚Ì‹ó‚«˜AŒ‹¬•ª‚©‚ç•K‚¸˜AŒ‹—Ìˆæ‚ğØ‚èo‚·ÅIƒtƒH[ƒ‹ƒoƒbƒNB
+	// å½¢çŠ¶åˆ¶ç´„ã‚’è¨­ã‘ãšã€Pãƒã‚¹ä»¥ä¸Šã®ç©ºãé€£çµæˆåˆ†ã‹ã‚‰å¿…ãšé€£çµé ˜åŸŸã‚’åˆ‡ã‚Šå‡ºã™æœ€çµ‚ãƒ•ã‚©ãƒ¼ãƒ«ãƒãƒƒã‚¯ã€‚
 	internal static List<(int x, int y)> FindPlacementByAnyConnectedComponent(
 		string[] row,
 		bool[,] occupied,
@@ -988,7 +1068,7 @@ public static class Utils
 			}
 		}
 
-		// ‹éŒ`©‘Ì‚Ìü’·‚ğÅ—Dæ‚É‚µA“¯’l‚È‚ç–³‘Ê–ÊÏ‚Æc‰¡·‚ª¬‚³‚¢‚à‚Ì‚©‚ç‚·B
+		// çŸ©å½¢è‡ªä½“ã®å‘¨é•·ã‚’æœ€å„ªå…ˆã«ã—ã€åŒå€¤ãªã‚‰ç„¡é§„é¢ç©ã¨ç¸¦æ¨ªå·®ãŒå°ã•ã„ã‚‚ã®ã‹ã‚‰è©¦ã™ã€‚
 		rectangleCandidates.Sort((left, right) => {
 			int compare = left.perimeter.CompareTo(right.perimeter);
 			if (compare != 0) {
@@ -1073,7 +1153,7 @@ public static class Utils
 				}
 			}
 
-			// ‘¼ƒOƒ‹[ƒv‚ğˆÍ‚¤Œ`‚Í‘Ş‹Œã‚ÌŒŠ‚ğ¶‚Ş‚½‚ßA’r‚æ‚è‚àè—Lƒ}ƒX‚ğ‹­‚­”ğ‚¯‚éB
+			// ä»–ã‚°ãƒ«ãƒ¼ãƒ—ã‚’å›²ã†å½¢ã¯é€€å»å¾Œã®ç©´ã‚’ç”Ÿã‚€ãŸã‚ã€æ± ã‚ˆã‚Šã‚‚å æœ‰ãƒã‚¹ã‚’å¼·ãé¿ã‘ã‚‹ã€‚
 			positions.Sort((left, right) => {
 				int compare = left.occupiedCount.CompareTo(right.occupiedCount);
 				if (compare != 0) {
@@ -1132,7 +1212,7 @@ public static class Utils
 		}
 	}
 
-	// –Ú•W‹éŒ`“à‚Ì‹ó‚«˜AŒ‹¬•ª‚ğˆê“x‚¸‚Â—ñ‹“‚µAPƒ}ƒXˆÈã‚ ‚é¬•ª‚¾‚¯‚ğ—Ìˆæ¬’·‚Ö“n‚·B
+	// ç›®æ¨™çŸ©å½¢å†…ã®ç©ºãé€£çµæˆåˆ†ã‚’ä¸€åº¦ãšã¤åˆ—æŒ™ã—ã€Pãƒã‚¹ä»¥ä¸Šã‚ã‚‹æˆåˆ†ã ã‘ã‚’é ˜åŸŸæˆé•·ã¸æ¸¡ã™ã€‚
 	private static List<(int x, int y)> FindCompactRegionInRectangle(
 		string[] row,
 		bool[,] occupied,
@@ -1187,7 +1267,7 @@ public static class Utils
 				}
 
 				if (component.Count >= p) {
-					// ’†‰›•t‹ß‚©‚ç¬’·‚³‚¹‚é‚ÆA‹éŒ`‚Ì•Ğ‘¤‚¾‚¯‚ğg‚¤×’·‚¢Ú“ª«‚É‚È‚è‚É‚­‚¢B
+					// ä¸­å¤®ä»˜è¿‘ã‹ã‚‰æˆé•·ã•ã›ã‚‹ã¨ã€çŸ©å½¢ã®ç‰‡å´ã ã‘ã‚’ä½¿ã†ç´°é•·ã„æ¥é ­è¾ã«ãªã‚Šã«ãã„ã€‚
 					int centerX2 = 2 * top + boxHeight - 1;
 					int centerY2 = 2 * left + boxWidth - 1;
 					var seed = component.MinBy(point => (
@@ -1202,7 +1282,7 @@ public static class Utils
 		return [];
 	}
 
-	// ‘I‘ğÏ‚İ—Ìˆæ‚ÉÚ‚·‚éŒó•â‚ğ–ˆ‰ñÄ•]‰¿‚µA‹ÇŠ“I‚Èü’·‘‰Á‚ª¬‚³‚¢‡‚É’Ç‰Á‚·‚éB
+	// é¸æŠæ¸ˆã¿é ˜åŸŸã«æ¥ã™ã‚‹å€™è£œã‚’æ¯å›å†è©•ä¾¡ã—ã€å±€æ‰€çš„ãªå‘¨é•·å¢—åŠ ãŒå°ã•ã„é †ã«è¿½åŠ ã™ã‚‹ã€‚
 	private static List<(int x, int y)> GrowCompactRegion(
 		IReadOnlyCollection<(int x, int y)> component,
 		int startX,
@@ -1247,7 +1327,7 @@ public static class Utils
 				int boxHeight = nextMaxX - nextMinX + 1;
 				int boxWidth = nextMaxY - nextMinY + 1;
 
-				// —×Ú•Ó‚ª1–{‘‚¦‚é‚²‚Æ‚É’Ç‰ÁŒã‚Ìü’·‚Í2Œ¸‚é‚½‚ßA—×Ú”‚ğÅ—Dæ‚·‚éB
+				// éš£æ¥è¾ºãŒ1æœ¬å¢—ãˆã‚‹ã”ã¨ã«è¿½åŠ å¾Œã®å‘¨é•·ã¯2æ¸›ã‚‹ãŸã‚ã€éš£æ¥æ•°ã‚’æœ€å„ªå…ˆã™ã‚‹ã€‚
 				var priority = (
 					neighborPriority: -selectedNeighbors,
 					areaIncrease: boxHeight * boxWidth - currentArea,
@@ -1261,7 +1341,7 @@ public static class Utils
 				}
 			}
 
-			// component‘S‘Ì‚ª˜AŒ‹‚ÅPƒ}ƒXˆÈã‚ ‚é‚½‚ßAPƒ}ƒX‘I‚Ô‚Ü‚Å‚Ífrontier‚ª‹ó‚É‚È‚ç‚È‚¢B
+			// componentå…¨ä½“ãŒé€£çµã§Pãƒã‚¹ä»¥ä¸Šã‚ã‚‹ãŸã‚ã€Pãƒã‚¹é¸ã¶ã¾ã§ã¯frontierãŒç©ºã«ãªã‚‰ãªã„ã€‚
 			frontier.Remove(bestIndex);
 			selected[bestIndex] = true;
 			int bestX = bestIndex / width;
@@ -1295,7 +1375,7 @@ public static class Utils
 		}
 	}
 
-	// —ÌˆæŠO‚Æ‚Ì‹«ŠE‚ğ”‚¦A–â‘è’è‹`‚Ç‚¨‚è 4*sqrt(P)/L ‚ğŒvZ‚·‚éB
+	// é ˜åŸŸå¤–ã¨ã®å¢ƒç•Œã‚’æ•°ãˆã€å•é¡Œå®šç¾©ã©ãŠã‚Š 4*sqrt(P)/L ã‚’è¨ˆç®—ã™ã‚‹ã€‚
 	internal static double CalculateCompactness(IReadOnlyCollection<(int x, int y)> points)
 	{
 		var cells = points.ToHashSet();
@@ -1311,7 +1391,7 @@ public static class Utils
 	}
 }
 
-// Œ»İ‚Ìè—Ló‘ÔE—˜—p’†ƒOƒ‹[ƒvEŠ‹à‚ğŠÇ—‚·‚éB’Tõ•ûj‚Ì‘I‘ğ‚ÍPlan‘¤‚Ås‚¤B
+// ç¾åœ¨ã®å æœ‰çŠ¶æ…‹ãƒ»åˆ©ç”¨ä¸­ã‚°ãƒ«ãƒ¼ãƒ—ãƒ»æ‰€æŒé‡‘ã‚’ç®¡ç†ã™ã‚‹ã€‚æ¢ç´¢æ–¹é‡ã®é¸æŠã¯Planå´ã§è¡Œã†ã€‚
 public class State
 {
 	private const int TimeBucketWidth = 500;
@@ -1319,13 +1399,13 @@ public class State
 	private readonly bool _isLocal;
 	private readonly Input _input;
 	private readonly bool _enableCompleteFallback;
-	// true‚Ìƒ}ƒX‚ÍŒ»İ‚¢‚¸‚ê‚©‚Ì—˜—p’†ƒOƒ‹[ƒv‚ªè—L‚µ‚Ä‚¢‚éB
+	// trueã®ãƒã‚¹ã¯ç¾åœ¨ã„ãšã‚Œã‹ã®åˆ©ç”¨ä¸­ã‚°ãƒ«ãƒ¼ãƒ—ãŒå æœ‰ã—ã¦ã„ã‚‹ã€‚
 	private readonly bool[,] _occupied;
 	private readonly int _grassCellCount;
 	private int _occupiedCellCount;
-	// ‘Ş‹‚Ì‰ğ•ú‚Æ—˜—p—¿‰ÁZ‚É•K—v‚Èî•ñ‚¾‚¯‚ğAó‚¯“ü‚êÏ‚İƒOƒ‹[ƒv‚²‚Æ‚É•Û‚·‚éB
+	// é€€å»æ™‚ã®è§£æ”¾ã¨åˆ©ç”¨æ–™åŠ ç®—ã«å¿…è¦ãªæƒ…å ±ã ã‘ã‚’ã€å—ã‘å…¥ã‚Œæ¸ˆã¿ã‚°ãƒ«ãƒ¼ãƒ—ã”ã¨ã«ä¿æŒã™ã‚‹ã€‚
 	private readonly Dictionary<int, (int departureTime, int value, long usageFee, List<(int x, int y)> points, double compactness)> _activeGroups = [];
-	// “’…‚²‚Æ‚É‘SƒOƒ‹[ƒv‚ğ‘–¸‚¹‚¸A‘Ş‹‚ª‘‚¢‡‚Éˆ—‚·‚éB
+	// åˆ°ç€ã”ã¨ã«å…¨ã‚°ãƒ«ãƒ¼ãƒ—ã‚’èµ°æŸ»ã›ãšã€é€€å»æ™‚åˆ»ãŒæ—©ã„é †ã«å‡¦ç†ã™ã‚‹ã€‚
 	private readonly PriorityQueue<int, int> _departureQueue = new();
 	private readonly int[] _scheduledCellLoad = new int[TimeBucketCount];
 	private long _arrivedValueSum;
@@ -1358,7 +1438,7 @@ public class State
 		? 0.0
 		: (double)_arrivedValueSum / _arrivedCellTimeSum;
 
-	// Œó•â‚ªè‚ß‚éŠeŠÔ‹æŠÔ‚É‚Â‚¢‚ÄA¬G“x‚ª‚‚¢‚Ù‚Ç”ñüŒ`‚Éã‚ª‚éƒZƒ‹ŠÔ‰¿Ši‚ğÏ•ª‚·‚éB
+	// å€™è£œãŒå ã‚ã‚‹å„æ™‚é–“åŒºé–“ã«ã¤ã„ã¦ã€æ··é›‘åº¦ãŒé«˜ã„ã»ã©éç·šå½¢ã«ä¸ŠãŒã‚‹ã‚»ãƒ«æ™‚é–“ä¾¡æ ¼ã‚’ç©åˆ†ã™ã‚‹ã€‚
 	public double CalculateCellTimeOpportunityCost(int arrivalTime, int departureTime, int personCount)
 	{
 		double baseDensity = ObservedValueDensity > 0.0 ? ObservedValueDensity : 0.5;
@@ -1427,7 +1507,7 @@ public class State
 			(double)(_occupiedCellCount - projectedReleasedCellCount) / _grassCellCount);
 	}
 
-	// Plan6‚ÌƒtƒH[ƒ‹ƒoƒbƒN—p‚ÌƒRƒ“ƒpƒNƒg—Ìˆæ¬’·‚ÖŒ»İ‚Ìè—L”Õ–Ê‚ğ“n‚·B
+	// Plan6ã®ãƒ•ã‚©ãƒ¼ãƒ«ãƒãƒƒã‚¯ç”¨ã®ã‚³ãƒ³ãƒ‘ã‚¯ãƒˆé ˜åŸŸæˆé•·ã¸ç¾åœ¨ã®å æœ‰ç›¤é¢ã‚’æ¸¡ã™ã€‚
 	public List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch2(int p)
 	{
 		var points = Utils.FindPlacementByReverseBreadthFirstSearch2(
@@ -1486,7 +1566,7 @@ public class State
 		return Utils.FindPlacementByEffectiveSpaceSearch(_input.Row, _occupied, shape);
 	}
 
-	// ’Êí”z’u‚É¸”s‚µ‚½ê‡‚¾‚¯AÅ‚à‘‚­‘Ş‹‚·‚é1‘g‚ğÄ”z’u‚µ‚Ä‹óŠÔ‚ğì‚éB
+	// é€šå¸¸é…ç½®ã«å¤±æ•—ã—ãŸå ´åˆã ã‘ã€æœ€ã‚‚æ—©ãé€€å»ã™ã‚‹1çµ„ã‚’å†é…ç½®ã—ã¦ç©ºé–“ã‚’ä½œã‚‹ã€‚
 	public bool TryMoveOneGroupForGuest(
 		IReadOnlyList<(int x, int y)> guestShape,
 		int guestSize,
@@ -1538,7 +1618,7 @@ public class State
 		return true;
 	}
 
-	// ‘S—˜—p’†ƒOƒ‹[ƒv‚ğŒó•â‚É‚µAV‹K‹q‚Ìó“ü‚É‚æ‚é‘•ª‚ªÅ‘å‚ÌˆÚ“®‚¾‚¯‚ğŠm’è‚·‚éB
+	// å…¨åˆ©ç”¨ä¸­ã‚°ãƒ«ãƒ¼ãƒ—ã‚’å€™è£œã«ã—ã€æ–°è¦å®¢ã®å—å…¥ã«ã‚ˆã‚‹å¢—åˆ†ãŒæœ€å¤§ã®ç§»å‹•ã ã‘ã‚’ç¢ºå®šã™ã‚‹ã€‚
 	public bool TryMoveBestGroupForGuest(
 		IReadOnlyList<(int x, int y)> guestShape,
 		(int i, int s, int t, int p, int v) guest,
@@ -1647,7 +1727,7 @@ public class State
 		return true;
 	}
 
-	// Plan‚ªŒˆ‚ß‚½”z’uŒ‹‰Ê‚ğó‘Ô‚Ö”½‰f‚µAƒCƒ“ƒ^ƒ‰ƒNƒeƒBƒuo—Í‚ğŠm’è‚·‚éB
+	// PlanãŒæ±ºã‚ãŸé…ç½®çµæœã‚’çŠ¶æ…‹ã¸åæ˜ ã—ã€ã‚¤ãƒ³ã‚¿ãƒ©ã‚¯ãƒ†ã‚£ãƒ–å‡ºåŠ›ã‚’ç¢ºå®šã™ã‚‹ã€‚
 	public void ProcessGuest(
 		(int i, int s, int t, int p, int v) guest,
 		bool canAccept,
@@ -1667,7 +1747,7 @@ public class State
 		info.OccupyAverage += OccupiedRate;
 	}
 
-	// —˜—p—¿‚ÍˆÚ“®‚µ‚È‚¢ŠePlan‚Å‚Í”z’u‚ÉŠm’è‚·‚é‚½‚ßA‘Ş‹—p‚É•Û‘¶‚µ‚Ä‚¨‚­B
+	// åˆ©ç”¨æ–™ã¯ç§»å‹•ã—ãªã„å„Planã§ã¯é…ç½®æ™‚ã«ç¢ºå®šã™ã‚‹ãŸã‚ã€é€€å»æ™‚ç”¨ã«ä¿å­˜ã—ã¦ãŠãã€‚
 	private void Accept(
 		int groupId,
 		int arrivalTime,
@@ -1701,7 +1781,7 @@ public class State
 		return (long)Math.Floor(value * compactness + 0.5);
 	}
 
-	// –â‘è‚Ì‡˜‚É]‚¢AT_j < currentTime ‚ÌƒOƒ‹[ƒv‚ğ‰ğ•ú‚µ‚Ä—˜—p—¿‚ğ‰ÁZ‚·‚éB
+	// å•é¡Œã®æ™‚åˆ»é †åºã«å¾“ã„ã€T_j < currentTime ã®ã‚°ãƒ«ãƒ¼ãƒ—ã‚’è§£æ”¾ã—ã¦åˆ©ç”¨æ–™ã‚’åŠ ç®—ã™ã‚‹ã€‚
 	public void ReleaseDepartedGroups(int currentTime)
 	{
 		while (_departureQueue.TryPeek(out int groupId, out int departureTime)
@@ -1716,7 +1796,7 @@ public class State
 		}
 	}
 
-	// ÅI‘Ş‹ˆ—‚ÍŠePlan‚ªÏ‚Ü‚¹‚é‚½‚ßA‚±‚±‚Å‚ÍŒ»İ‚Ìâ‘ÎƒXƒRƒA‚¾‚¯‚ğ•Ô‚·B
+	// æœ€çµ‚é€€å»å‡¦ç†ã¯å„PlanãŒæ¸ˆã¾ã›ã‚‹ãŸã‚ã€ã“ã“ã§ã¯ç¾åœ¨ã®çµ¶å¯¾ã‚¹ã‚³ã‚¢ã ã‘ã‚’è¿”ã™ã€‚
 	public long Calculate()
 	{
 		return Math.Max(0, _money);
@@ -1844,8 +1924,8 @@ public class Input
 		return (int)Math.Clamp(limit, 0, M);
 	}
 
-	// •Û‘¶Ï‚İ‚Ì“üo—Í‚ğŒö®‚Ìˆ—‡‚É“K—p‚µAŠeƒ^[ƒ“‚Ì‹óŠÔ—˜—pó‹µ‚ğ‰Â‹‰»‚·‚éB
-	// –{”Ô‚Ì’Tõƒ‹[ƒv‚©‚ç‚ÍŒÄ‚Ño‚³‚¸Aƒ[ƒJƒ‹‰ğÍ‚¾‚¯—˜—p‚·‚éB
+	// ä¿å­˜æ¸ˆã¿ã®å…¥å‡ºåŠ›ã‚’å…¬å¼ã®å‡¦ç†é †ã«é©ç”¨ã—ã€å„ã‚¿ãƒ¼ãƒ³ã®ç©ºé–“åˆ©ç”¨çŠ¶æ³ã‚’å¯è¦–åŒ–ã™ã‚‹ã€‚
+	// æœ¬ç•ªã®æ¢ç´¢ãƒ«ãƒ¼ãƒ—ã‹ã‚‰ã¯å‘¼ã³å‡ºã•ãšã€ãƒ­ãƒ¼ã‚«ãƒ«è§£ææ™‚ã ã‘åˆ©ç”¨ã™ã‚‹ã€‚
 	public void Emulate()
 	{
 		var owner = new int[N, N];
@@ -1875,7 +1955,7 @@ public class Input
 				continue;
 			}
 
-			// “’…‚æ‚è‘O‚É‘Ş‹‚µ‚½ƒOƒ‹[ƒv‚Ì—Ìˆæ‚ğ‰ğ•ú‚·‚éB
+			// åˆ°ç€æ™‚åˆ»ã‚ˆã‚Šå‰ã«é€€å»ã—ãŸã‚°ãƒ«ãƒ¼ãƒ—ã®é ˜åŸŸã‚’è§£æ”¾ã™ã‚‹ã€‚
 			var departed = active
 				.Where(pair => Guests[pair.Key].t < guest.s)
 				.Select(pair => pair.Key)
@@ -1885,7 +1965,7 @@ public class Input
 				active.Remove(groupId);
 			}
 
-			// •¡”ˆÚ“®‚Í‘SƒOƒ‹[ƒv‚ğæ‚É‹ó‚¯‚Ä‚©‚ç“¯”z’u‚·‚éB
+			// è¤‡æ•°ç§»å‹•ã¯å…¨ã‚°ãƒ«ãƒ¼ãƒ—ã‚’å…ˆã«ç©ºã‘ã¦ã‹ã‚‰åŒæ™‚é…ç½®ã™ã‚‹ã€‚
 			var movedGroups = Moves[turn];
 			foreach (var (groupId, _) in movedGroups) {
 				if (active.TryGetValue(groupId, out var oldPoints)) {
@@ -2349,46 +2429,46 @@ public class Input
 
 public class Deque<T> : IEnumerable<T>
 {
-	/// <summary>ƒŠƒ“ƒOƒoƒbƒtƒ@‚ÌƒTƒCƒY</summary>
+	/// <summary>ãƒªãƒ³ã‚°ãƒãƒƒãƒ•ã‚¡ã®ã‚µã‚¤ã‚º</summary>
 	private int _capacity;
-	/// <summary>—¼’[ƒLƒ…[‚ÌÀ‘Ì‚Å‚ ‚éƒŠƒ“ƒOƒoƒbƒtƒ@</summary>
+	/// <summary>ä¸¡ç«¯ã‚­ãƒ¥ãƒ¼ã®å®Ÿä½“ã§ã‚ã‚‹ãƒªãƒ³ã‚°ãƒãƒƒãƒ•ã‚¡</summary>
 	private T[] _ringBuffer;
-	/// <summary>ƒLƒ…[‚Ìæ“ª‚ÌƒCƒ“ƒfƒbƒNƒX</summary>
+	/// <summary>ã‚­ãƒ¥ãƒ¼ã®å…ˆé ­ã®ã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹</summary>
 	/// <remarks>
-	/// ƒLƒ…[‚ÉŠi”[‚³‚ê‚Ä‚¢‚é—v‘f‚ğ•Â‹æŠÔ[front, back]‚Ì”ÍˆÍ‚Å‚ÂB
-	/// •Â‹æŠÔ‚Ì‚½‚ßA’†g‚ª‹ó‚Ì‚Æ‚«‚Íback‚ªfront-1‚ÌˆÊ’u‚É‚ ‚éB
+	/// ã‚­ãƒ¥ãƒ¼ã«æ ¼ç´ã•ã‚Œã¦ã„ã‚‹è¦ç´ ã‚’é–‰åŒºé–“[front, back]ã®ç¯„å›²ã§æŒã¤ã€‚
+	/// é–‰åŒºé–“ã®ãŸã‚ã€ä¸­èº«ãŒç©ºã®ã¨ãã¯backãŒfront-1ã®ä½ç½®ã«ã‚ã‚‹ã€‚
 	/// </remarks>
 	private int _front;
-	/// <summary>ƒLƒ…[‚Ì––”ö‚ÌƒCƒ“ƒfƒbƒNƒX</summary>
+	/// <summary>ã‚­ãƒ¥ãƒ¼ã®æœ«å°¾ã®ã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹</summary>
 	private int _back;
 
-	/// <summary>Ši”[‚³‚ê‚Ä‚¢‚é—v‘f”</summary>
+	/// <summary>æ ¼ç´ã•ã‚Œã¦ã„ã‚‹è¦ç´ æ•°</summary>
 	public int Count { get; private set; } = 0;
-	/// <summary>ƒLƒ…[‚Ìæ“ª‚Ì—v‘f</summary>
+	/// <summary>ã‚­ãƒ¥ãƒ¼ã®å…ˆé ­ã®è¦ç´ </summary>
 	public T Front => _ringBuffer[_front];
-	/// <summary>ƒLƒ…[‚Ì––”ö‚Ì—v‘f</summary>
+	/// <summary>ã‚­ãƒ¥ãƒ¼ã®æœ«å°¾ã®è¦ç´ </summary>
 	public T Back => _ringBuffer[_back];
 
-	/// <summary>ƒ‰ƒ“ƒ_ƒ€ƒAƒNƒZƒX</summary>
+	/// <summary>ãƒ©ãƒ³ãƒ€ãƒ ã‚¢ã‚¯ã‚»ã‚¹</summary>
 	/// <remarks>
-	/// ”ÍˆÍƒ`ƒFƒbƒN‚ÍÈ‚¢‚Ä‚ ‚é‚Ì‚Å’ˆÓB
+	/// ç¯„å›²ãƒã‚§ãƒƒã‚¯ã¯çœã„ã¦ã‚ã‚‹ã®ã§æ³¨æ„ã€‚
 	/// </remarks>
 	public T this[int index]
 	{
 		get
 		{
 			index += _front;
-			// ƒoƒbƒtƒ@‚ÌI’[‚ğ’´‚¦‚½ê‡‚Íæ“ª‚É–ß‚é
+			// ãƒãƒƒãƒ•ã‚¡ã®çµ‚ç«¯ã‚’è¶…ãˆãŸå ´åˆã¯å…ˆé ­ã«æˆ»ã‚‹
 			return _ringBuffer[index < _capacity ? index : index - _capacity];
 		}
 	}
 
-	/// <summary>Šù’è‚ÌƒTƒCƒY‚ÅƒCƒ“ƒXƒ^ƒ“ƒX‚ğ¶¬</summary>
+	/// <summary>æ—¢å®šã®ã‚µã‚¤ã‚ºã§ã‚¤ãƒ³ã‚¹ã‚¿ãƒ³ã‚¹ã‚’ç”Ÿæˆ</summary>
 	public Deque() : this(1024) { }
 	/// <summary>
-	/// w’è‚µ‚½ƒTƒCƒY‚ÅƒCƒ“ƒXƒ^ƒ“ƒX‚ğ¶¬
+	/// æŒ‡å®šã—ãŸã‚µã‚¤ã‚ºã§ã‚¤ãƒ³ã‚¹ã‚¿ãƒ³ã‚¹ã‚’ç”Ÿæˆ
 	/// </summary>
-	/// <param name="capacity">ƒŠƒ“ƒOƒoƒbƒtƒ@‚ÌƒTƒCƒY</param>
+	/// <param name="capacity">ãƒªãƒ³ã‚°ãƒãƒƒãƒ•ã‚¡ã®ã‚µã‚¤ã‚º</param>
 	public Deque(int capacity)
 	{
 		if (capacity <= 0) {
@@ -2401,31 +2481,31 @@ public class Deque<T> : IEnumerable<T>
 	}
 
 	/// <summary>
-	/// ƒLƒ…[‚Ì’†g‚ğ‹ó‚É‚·‚é O(1)
+	/// ã‚­ãƒ¥ãƒ¼ã®ä¸­èº«ã‚’ç©ºã«ã™ã‚‹ O(1)
 	/// </summary>
 	public void Clear()
 	{
 		_front = 0;
 		_back = _capacity - 1;
 		Count = 0;
-		// ƒoƒbƒtƒ@‚ÌƒNƒŠƒA‚Í‚µ‚È‚¢B
-		// Ä“xƒoƒbƒtƒ@‚ÉƒAƒNƒZƒX‚³‚ê‚éÛ‚É‚ÍV‚µ‚¢’l‚Éã‘‚«‚³‚ê‚é‚Ì‚Å–â‘è–³‚¢B
+		// ãƒãƒƒãƒ•ã‚¡ã®ã‚¯ãƒªã‚¢ã¯ã—ãªã„ã€‚
+		// å†åº¦ãƒãƒƒãƒ•ã‚¡ã«ã‚¢ã‚¯ã‚»ã‚¹ã•ã‚Œã‚‹éš›ã«ã¯æ–°ã—ã„å€¤ã«ä¸Šæ›¸ãã•ã‚Œã‚‹ã®ã§å•é¡Œç„¡ã„ã€‚
 	}
 
 	/// <summary>
-	/// ƒLƒ…[‚Ìæ“ª‚É—v‘f‚ğ’Ç‰Á‚·‚é amortized O(1)
+	/// ã‚­ãƒ¥ãƒ¼ã®å…ˆé ­ã«è¦ç´ ã‚’è¿½åŠ ã™ã‚‹ amortized O(1)
 	/// </summary>
-	/// <param name="item">’Ç‰Á‚·‚é—v‘f</param>
+	/// <param name="item">è¿½åŠ ã™ã‚‹è¦ç´ </param>
 	public void PushFront(T item)
 	{
-		// ƒŠƒ“ƒOƒoƒbƒtƒ@‚ªˆê”t‚Ìê‡Aƒoƒbƒtƒ@ƒTƒCƒY‚ğ”{‚ÉŠg’£‚·‚éB
-		// ‚±‚Ì•”•ª‚ª‚È‚ç‚µO(1)B
+		// ãƒªãƒ³ã‚°ãƒãƒƒãƒ•ã‚¡ãŒä¸€æ¯ã®å ´åˆã€ãƒãƒƒãƒ•ã‚¡ã‚µã‚¤ã‚ºã‚’å€ã«æ‹¡å¼µã™ã‚‹ã€‚
+		// ã“ã®éƒ¨åˆ†ãŒãªã‚‰ã—O(1)ã€‚
 		if (Count == _capacity) {
 			Extend(_capacity * 2);
 		}
 
-		// —v‘f‚ªŠi”[‚³‚ê‚Ä‚¢‚é‹æŠÔ‚ğ‘O•ûŒü‚ÉŠg’£B
-		// ƒoƒbƒtƒ@‚Ìæ“ª‚ğ’´‚¦‚½ê‡‚Í––”ö‚É’Ç‰Á‚·‚éB
+		// è¦ç´ ãŒæ ¼ç´ã•ã‚Œã¦ã„ã‚‹åŒºé–“ã‚’å‰æ–¹å‘ã«æ‹¡å¼µã€‚
+		// ãƒãƒƒãƒ•ã‚¡ã®å…ˆé ­ã‚’è¶…ãˆãŸå ´åˆã¯æœ«å°¾ã«è¿½åŠ ã™ã‚‹ã€‚
 		--_front;
 		if (_front < 0) {
 			_front += _capacity;
@@ -2436,19 +2516,19 @@ public class Deque<T> : IEnumerable<T>
 	}
 
 	/// <summary>
-	/// ƒLƒ…[‚Ì––”ö‚É—v‘f‚ğ’Ç‰Á‚·‚é amortized O(1)
+	/// ã‚­ãƒ¥ãƒ¼ã®æœ«å°¾ã«è¦ç´ ã‚’è¿½åŠ ã™ã‚‹ amortized O(1)
 	/// </summary>
-	/// <param name="item">’Ç‰Á‚·‚é—v‘f</param>
+	/// <param name="item">è¿½åŠ ã™ã‚‹è¦ç´ </param>
 	public void PushBack(T item)
 	{
-		// ƒŠƒ“ƒOƒoƒbƒtƒ@‚ªˆê”t‚Ìê‡Aƒoƒbƒtƒ@ƒTƒCƒY‚ğ”{‚ÉŠg’£‚·‚éB
-		// ‚±‚Ì•”•ª‚ª‚È‚ç‚µO(1)B
+		// ãƒªãƒ³ã‚°ãƒãƒƒãƒ•ã‚¡ãŒä¸€æ¯ã®å ´åˆã€ãƒãƒƒãƒ•ã‚¡ã‚µã‚¤ã‚ºã‚’å€ã«æ‹¡å¼µã™ã‚‹ã€‚
+		// ã“ã®éƒ¨åˆ†ãŒãªã‚‰ã—O(1)ã€‚
 		if (Count == _capacity) {
 			Extend(_capacity * 2);
 		}
 
-		// —v‘f‚ªŠi”[‚³‚ê‚Ä‚¢‚é‹æŠÔ‚ğŒã‚ë•ûŒü‚ÉŠg’£B
-		// ƒoƒbƒtƒ@‚Ì––”ö‚ğ’´‚¦‚½ê‡‚Íæ“ª‚É’Ç‰Á‚·‚éB
+		// è¦ç´ ãŒæ ¼ç´ã•ã‚Œã¦ã„ã‚‹åŒºé–“ã‚’å¾Œã‚æ–¹å‘ã«æ‹¡å¼µã€‚
+		// ãƒãƒƒãƒ•ã‚¡ã®æœ«å°¾ã‚’è¶…ãˆãŸå ´åˆã¯å…ˆé ­ã«è¿½åŠ ã™ã‚‹ã€‚
 		++_back;
 		if (_back >= _capacity) {
 			_back -= _capacity;
@@ -2459,20 +2539,20 @@ public class Deque<T> : IEnumerable<T>
 	}
 
 	/// <summary>
-	/// ƒLƒ…[‚Ìæ“ª‚©‚ç—v‘f‚ğæ‚èo‚· O(1)
+	/// ã‚­ãƒ¥ãƒ¼ã®å…ˆé ­ã‹ã‚‰è¦ç´ ã‚’å–ã‚Šå‡ºã™ O(1)
 	/// </summary>
-	/// <returns>æ‚èo‚µ‚½—v‘f</returns>
+	/// <returns>å–ã‚Šå‡ºã—ãŸè¦ç´ </returns>
 	public T PopFront()
 	{
 		if (Count == 0) {
-			// —áŠO‚ğ“Š‚°‚é‚×‚«H
+			// ä¾‹å¤–ã‚’æŠ•ã’ã‚‹ã¹ãï¼Ÿ
 			return default(T);
 		}
 
 		T ret = _ringBuffer[_front];
 		--Count;
-		// —v‘f‚ªŠi”[‚³‚ê‚Ä‚¢‚é‹æŠÔ‚Ìæ“ª‚ğk¬B
-		// ƒoƒbƒtƒ@‚Ì––”ö‚ğ’´‚¦‚½ê‡‚Íæ“ª‚ğw‚·‚æ‚¤‚É‚·‚éB
+		// è¦ç´ ãŒæ ¼ç´ã•ã‚Œã¦ã„ã‚‹åŒºé–“ã®å…ˆé ­ã‚’ç¸®å°ã€‚
+		// ãƒãƒƒãƒ•ã‚¡ã®æœ«å°¾ã‚’è¶…ãˆãŸå ´åˆã¯å…ˆé ­ã‚’æŒ‡ã™ã‚ˆã†ã«ã™ã‚‹ã€‚
 		++_front;
 		if (_front >= _capacity) {
 			_front -= _capacity;
@@ -2482,20 +2562,20 @@ public class Deque<T> : IEnumerable<T>
 	}
 
 	/// <summary>
-	/// ƒLƒ…[‚Ì––”ö‚©‚ç—v‘f‚ğæ‚èo‚· O(1)
+	/// ã‚­ãƒ¥ãƒ¼ã®æœ«å°¾ã‹ã‚‰è¦ç´ ã‚’å–ã‚Šå‡ºã™ O(1)
 	/// </summary>
-	/// <returns>æ‚èo‚µ‚½—v‘f</returns>
+	/// <returns>å–ã‚Šå‡ºã—ãŸè¦ç´ </returns>
 	public T PopBack()
 	{
 		if (Count == 0) {
-			// —áŠO‚ğ“Š‚°‚é‚×‚«H
+			// ä¾‹å¤–ã‚’æŠ•ã’ã‚‹ã¹ãï¼Ÿ
 			return default(T);
 		}
 
 		T ret = _ringBuffer[_back];
 		--Count;
-		// —v‘f‚ªŠi”[‚³‚ê‚Ä‚¢‚é‹æŠÔ‚Ì––”ö‚ğk¬B
-		// ƒoƒbƒtƒ@‚Ìæ“ª‚ğ’´‚¦‚½ê‡‚Í––”ö‚ğw‚·‚æ‚¤‚É‚·‚éB
+		// è¦ç´ ãŒæ ¼ç´ã•ã‚Œã¦ã„ã‚‹åŒºé–“ã®æœ«å°¾ã‚’ç¸®å°ã€‚
+		// ãƒãƒƒãƒ•ã‚¡ã®å…ˆé ­ã‚’è¶…ãˆãŸå ´åˆã¯æœ«å°¾ã‚’æŒ‡ã™ã‚ˆã†ã«ã™ã‚‹ã€‚
 		--_back;
 		if (_back < 0) {
 			_back += _capacity;
@@ -2505,24 +2585,24 @@ public class Deque<T> : IEnumerable<T>
 	}
 
 	/// <summary>
-	/// ƒoƒbƒtƒ@ƒTƒCƒY‚ğ”{‚ÉŠg’£
+	/// ãƒãƒƒãƒ•ã‚¡ã‚µã‚¤ã‚ºã‚’å€ã«æ‹¡å¼µ
 	/// </summary>
 	/// <remarks>
-	/// ‚±‚Ìˆ—©‘Ì‚ÍO(N)‚©‚©‚é‚Ì‚Å‚ ‚é‚ªA
-	/// ŒÄ‚Î‚ê‚éƒ^ƒCƒCƒ“ƒO‚ªƒTƒCƒYN‚Ìƒoƒbƒtƒ@[‚ª–„‚Ü‚Á‚½‚Æ‚«‚È‚Ì‚ÅA
-	/// ÀÛ‚Ég‚í‚ê‚éƒP[ƒX‚Å‚ÌŒvZ—Ê‚Í‚È‚ç‚µO(1)‚Æ‚È‚éB
+	/// ã“ã®å‡¦ç†è‡ªä½“ã¯O(N)ã‹ã‹ã‚‹ã®ã§ã‚ã‚‹ãŒã€
+	/// å‘¼ã°ã‚Œã‚‹ã‚¿ã‚¤ã‚¤ãƒ³ã‚°ãŒã‚µã‚¤ã‚ºNã®ãƒãƒƒãƒ•ã‚¡ãƒ¼ãŒåŸ‹ã¾ã£ãŸã¨ããªã®ã§ã€
+	/// å®Ÿéš›ã«ä½¿ã‚ã‚Œã‚‹ã‚±ãƒ¼ã‚¹ã§ã®è¨ˆç®—é‡ã¯ãªã‚‰ã—O(1)ã¨ãªã‚‹ã€‚
 	/// </remarks>
-	/// <param name="newSize">Šg’£Œã‚ÌƒTƒCƒY</param>
+	/// <param name="newSize">æ‹¡å¼µå¾Œã®ã‚µã‚¤ã‚º</param>
 	[MethodImpl(MethodImplOptions.AggressiveInlining)]
 	private void Extend(int newSize)
 	{
 		var newBuffer = new T[newSize];
 		if (Count > 0) {
 			if (_front <= _back) {
-				// ‚±‚±‚É‚­‚é‚Ì‚ÍÀ¿front‚ª0‚Åback‚ª^1‚Ì‚Æ‚«‚¾‚¯B
+				// ã“ã“ã«ãã‚‹ã®ã¯å®Ÿè³ªfrontãŒ0ã§backãŒ^1ã®ã¨ãã ã‘ã€‚
 				Array.Copy(_ringBuffer, _front, newBuffer, 0, Count);
 			} else {
-				// [front, ––”ö] ‚Æ [æ“ª, back] ‚Ì2‰ñ‚É•ª‚¯‚ÄƒRƒs[‚·‚é•K—v‚ª‚ ‚éB
+				// [front, æœ«å°¾] ã¨ [å…ˆé ­, back] ã®2å›ã«åˆ†ã‘ã¦ã‚³ãƒ”ãƒ¼ã™ã‚‹å¿…è¦ãŒã‚ã‚‹ã€‚
 				int prevLength = _ringBuffer.Length - _front;
 				Array.Copy(_ringBuffer, _front, newBuffer, 0, prevLength);
 				Array.Copy(_ringBuffer, 0, newBuffer, prevLength, _back + 1);
@@ -2731,7 +2811,7 @@ public static class RotationExtensions
 
 		int ci = cur.ToIndex4();
 		int ti = tag.ToIndex4();
-		// ^”½‘Î‚Ìê‡‚Í‚Æ‚è‚ ‚¦‚¸‚Ç‚Á‚¿‚Å‚à‚¢‚¢
+		// çœŸåå¯¾ã®å ´åˆã¯ã¨ã‚Šã‚ãˆãšã©ã£ã¡ã§ã‚‚ã„ã„
 		if (Math.Abs(ci - ti) == 2) {
 			return Rotation.L;
 		}
@@ -2746,24 +2826,24 @@ public static class RotationExtensions
 }
 
 /// <summary>
-/// ˆÚ“®Œo˜H•œŒ³—p‚ÌƒNƒ‰ƒX
+/// ç§»å‹•çµŒè·¯å¾©å…ƒç”¨ã®ã‚¯ãƒ©ã‚¹
 /// </summary>
-/// <typeparam name="T">ˆÚ“®î•ñ‚ÌŒ^</typeparam>
+/// <typeparam name="T">ç§»å‹•æƒ…å ±ã®å‹</typeparam>
 public class Trace<T>
 {
-	/// <summary>ˆÚ“®î•ñƒƒO</summary>
+	/// <summary>ç§»å‹•æƒ…å ±ãƒ­ã‚°</summary>
 	/// <remarks>
-	/// ID‚Í‚±‚ÌƒtƒB[ƒ‹ƒh‚ÌƒCƒ“ƒfƒbƒNƒX‚É‘Î‰‚µ‚Ä‚¢‚éB
-	/// ˆÚ“®Œ³‚ÌID‚ğ•Û‚·‚é‚±‚Æ‚É‚æ‚Á‚ÄA”CˆÓ‚ÌˆÊ’u‚©‚çŠJnˆÊ’u‚É’H‚é‚±‚Æ‚ª‰Â”\B
+	/// IDã¯ã“ã®ãƒ•ã‚£ãƒ¼ãƒ«ãƒ‰ã®ã‚¤ãƒ³ãƒ‡ãƒƒã‚¯ã‚¹ã«å¯¾å¿œã—ã¦ã„ã‚‹ã€‚
+	/// ç§»å‹•å…ƒã®IDã‚’ä¿æŒã™ã‚‹ã“ã¨ã«ã‚ˆã£ã¦ã€ä»»æ„ã®ä½ç½®ã‹ã‚‰é–‹å§‹ä½ç½®ã«è¾¿ã‚‹ã“ã¨ãŒå¯èƒ½ã€‚
 	/// </remarks>
 	private readonly List<(T move, int prevID)> _log = [(default, -1)];
 
 	/// <summary>
-	/// ˆÚ“®î•ñ‚Ì’Ç‰Á
+	/// ç§»å‹•æƒ…å ±ã®è¿½åŠ 
 	/// </summary>
-	/// <param name="move">‚Ç‚¤‚¢‚¤ˆÚ“®‚ğs‚Á‚½‚©‚Ìî•ñ</param>
-	/// <param name="prevID">ˆÚ“®Œ³‚ÌID</param>
-	/// <returns>ˆÚ“®æ‚ÌID</returns>
+	/// <param name="move">ã©ã†ã„ã†ç§»å‹•ã‚’è¡Œã£ãŸã‹ã®æƒ…å ±</param>
+	/// <param name="prevID">ç§»å‹•å…ƒã®ID</param>
+	/// <returns>ç§»å‹•å…ˆã®ID</returns>
 	public int Add(T move, int prevID)
 	{
 		_log.Add((move, prevID));
@@ -2771,12 +2851,12 @@ public class Trace<T>
 	}
 
 	/// <summary>
-	/// ˆÚ“®ŠJnˆÊ’u‚©‚çw’è‚µ‚½ID‚É‘Î‰‚·‚éˆÊ’u‚Ü‚Å‚ÌˆÚ“®î•ñ‚ğ•œŒ³‚·‚é
+	/// ç§»å‹•é–‹å§‹ä½ç½®ã‹ã‚‰æŒ‡å®šã—ãŸIDã«å¯¾å¿œã™ã‚‹ä½ç½®ã¾ã§ã®ç§»å‹•æƒ…å ±ã‚’å¾©å…ƒã™ã‚‹
 	/// </summary>
-	/// <param name="id">ˆÚ“®æ‚ÌˆÊ’u‚É‘Î‰‚·‚éID</param>
+	/// <param name="id">ç§»å‹•å…ˆã®ä½ç½®ã«å¯¾å¿œã™ã‚‹ID</param>
 	/// <returns>
-	/// •œŒ³‚µ‚½ˆÚ“®î•ñB
-	/// stack‚Ìã‚©‚ç‡”Ô‚Ég—p‚·‚é–‚Åid‚Åw’è‚µ‚½ˆÊ’u‚É’H‚è’…‚¯‚éB</returns>
+	/// å¾©å…ƒã—ãŸç§»å‹•æƒ…å ±ã€‚
+	/// stackã®ä¸Šã‹ã‚‰é †ç•ªã«ä½¿ç”¨ã™ã‚‹äº‹ã§idã§æŒ‡å®šã—ãŸä½ç½®ã«è¾¿ã‚Šç€ã‘ã‚‹ã€‚</returns>
 	public Stack<T> GetRouteTo(int id)
 	{
 		var route = new Stack<T>();
@@ -2977,7 +3057,7 @@ public class HeuristicHelper
 			}
 		}
 
-		// –{”ÔŠÂ‹«‚Ö‚Ì’ño‚ÆƒXƒRƒA‚ÌƒI[ƒ_[‚ª‘µ‚¤‚æ‚¤‚ÉAƒvƒŒƒeƒXƒg‚ÌƒP[ƒX”Š·Z‚ÌƒXƒRƒA‚É‚·‚éB
+		// æœ¬ç•ªç’°å¢ƒã¸ã®æå‡ºæ™‚ã¨ã‚¹ã‚³ã‚¢ã®ã‚ªãƒ¼ãƒ€ãƒ¼ãŒæƒã†ã‚ˆã†ã«ã€ãƒ—ãƒ¬ãƒ†ã‚¹ãƒˆã®ã‚±ãƒ¼ã‚¹æ•°æ›ç®—ã®ã‚¹ã‚³ã‚¢ã«ã™ã‚‹ã€‚
 		scoreSum = (long)(scoreSum / (localTestCaseRunCount / judgePreTestCaseCount));
 		scoreLogSum /= localTestCaseRunCount / judgePreTestCaseCount;
 		Console.WriteLine("");
@@ -3529,9 +3609,9 @@ public class IOManager : IDisposable
 
 	public IOManager(string inFilePath = "", string outFilePath = "")
 	{
-		// Console.Readline ‚ğ‚·‚é‚Æ UTF-16 ‚Ì string Œ^‚Å“Ç‚İ‚Ü‚ê‚é‚ªA
-		// ‹£ƒvƒ‚Ì“ü—Í‚ÍŠî–{“I‚É ASCII ‚Ì”ÍˆÍ‚È‚Ì‚ÅAƒƒ‚ƒŠ‚àŠÔ‚à”{H‚Á‚Ä‚µ‚Ü‚¤B
-		// byte[] ‚Å“ü—Í‚µ‚Äè“®‚Å•ÏŠ·o—ˆ‚é‚æ‚¤‚ÉATextReader ‚Å‚Í‚È‚­ Stream ‚ğg‚¤B
+		// Console.Readline ã‚’ã™ã‚‹ã¨ UTF-16 ã® string å‹ã§èª­ã¿è¾¼ã¾ã‚Œã‚‹ãŒã€
+		// ç«¶ãƒ—ãƒ­ã®å…¥åŠ›ã¯åŸºæœ¬çš„ã« ASCII ã®ç¯„å›²ãªã®ã§ã€ãƒ¡ãƒ¢ãƒªã‚‚æ™‚é–“ã‚‚å€é£Ÿã£ã¦ã—ã¾ã†ã€‚
+		// byte[] ã§å…¥åŠ›ã—ã¦æ‰‹å‹•ã§å¤‰æ›å‡ºæ¥ã‚‹ã‚ˆã†ã«ã€TextReader ã§ã¯ãªã Stream ã‚’ä½¿ã†ã€‚
 		if (string.IsNullOrWhiteSpace(inFilePath)) {
 			_isStdIn = true;
 			_reader = Console.OpenStandardInput();
@@ -3539,12 +3619,12 @@ public class IOManager : IDisposable
 			_reader = new FileStream(inFilePath, FileMode.Open);
 		}
 
-		// Console.WriteLine ‚à“¯—l‚Å‚ ‚é‚Ì‚¾‚ªA¡‚Ì‚Æ‚±‚ëo—Í‘¬“x‚ª–â‘è‚É‚È‚Á‚½‚±‚Æ‚ª‚È‚­A
-		// ƒtƒ@ƒCƒ‹o—Í‚ÌƒGƒ“ƒR[ƒhˆ—‚Ì•û‚ª–Ê“|‚»‚¤‚È‚Ì‚Å TextWriter ‚ğg‚¤B
+		// Console.WriteLine ã‚‚åŒæ§˜ã§ã‚ã‚‹ã®ã ãŒã€ä»Šã®ã¨ã“ã‚å‡ºåŠ›é€Ÿåº¦ãŒå•é¡Œã«ãªã£ãŸã“ã¨ãŒãªãã€
+		// ãƒ•ã‚¡ã‚¤ãƒ«å‡ºåŠ›æ™‚ã®ã‚¨ãƒ³ã‚³ãƒ¼ãƒ‰å‡¦ç†ã®æ–¹ãŒé¢å€’ãã†ãªã®ã§ TextWriter ã‚’ä½¿ã†ã€‚
 		string outPath = GetOutFilePath(inFilePath, outFilePath);
 		if (string.IsNullOrWhiteSpace(outPath)) {
-			// –ˆ‰ñ flush ‚·‚é‚ÆA10^6 ‰ño—Í‚µ‚½‚Æ‚«‚É TLE ‚µ‚Ä‚µ‚Ü‚¤B
-			// ©“® flush ‚Í–³Œø‚É‚µ‚Ä‚¨‚«ADispose ‚É flush ‚·‚é‚æ‚¤‚É‚·‚éB
+			// æ¯å› flush ã™ã‚‹ã¨ã€10^6 å›å‡ºåŠ›ã—ãŸã¨ãã« TLE ã—ã¦ã—ã¾ã†ã€‚
+			// è‡ªå‹• flush ã¯ç„¡åŠ¹ã«ã—ã¦ãŠãã€Dispose æ™‚ã« flush ã™ã‚‹ã‚ˆã†ã«ã™ã‚‹ã€‚
 			Console.SetOut(new StreamWriter(Console.OpenStandardOutput()) {
 				AutoFlush = false
 			});
@@ -3559,7 +3639,7 @@ public class IOManager : IDisposable
 	public void Dispose()
 	{
 		_writer.Flush();
-		// Console.In ‚â Console.Out ‚Í Dispose ‚µ‚Ä‚Í‚¢‚¯‚È‚¢B
+		// Console.In ã‚„ Console.Out ã¯ Dispose ã—ã¦ã¯ã„ã‘ãªã„ã€‚
 		if (_isStdIn == false) {
 			_reader.Dispose();
 		}
@@ -3568,7 +3648,7 @@ public class IOManager : IDisposable
 			_writer.Dispose();
 		}
 
-		// Dispose ƒpƒ^[ƒ“‚Í–Ê“|‚È‚Ì‚ÅƒTƒ{‚èB
+		// Dispose ãƒ‘ã‚¿ãƒ¼ãƒ³ã¯é¢å€’ãªã®ã§ã‚µãƒœã‚Šã€‚
 		GC.SuppressFinalize(this);
 	}
 
@@ -3588,7 +3668,7 @@ public class IOManager : IDisposable
 	{
 		var array = new T[count];
 		for (int i = 0; i < count; ++i) {
-			// ƒLƒƒƒvƒ`ƒƒ[‚ğ”ğ‚¯‚é‚½‚ß‚É©g‚ğˆø”‚Æ‚µ‚Ä“n‚·B
+			// ã‚­ãƒ£ãƒ—ãƒãƒ£ãƒ¼ã‚’é¿ã‘ã‚‹ãŸã‚ã«è‡ªèº«ã‚’å¼•æ•°ã¨ã—ã¦æ¸¡ã™ã€‚
 			array[i] = read(this);
 		}
 
@@ -3601,7 +3681,7 @@ public class IOManager : IDisposable
 		var array = new T[height, width];
 		for (int i = 0; i < height; ++i) {
 			for (int j = 0; j < width; ++j) {
-				// ƒLƒƒƒvƒ`ƒƒ[‚ğ”ğ‚¯‚é‚½‚ß‚É©g‚ğˆø”‚Æ‚µ‚Ä“n‚·B
+				// ã‚­ãƒ£ãƒ—ãƒãƒ£ãƒ¼ã‚’é¿ã‘ã‚‹ãŸã‚ã«è‡ªèº«ã‚’å¼•æ•°ã¨ã—ã¦æ¸¡ã™ã€‚
 				array[i, j] = read(this);
 			}
 		}
@@ -3675,7 +3755,7 @@ public class IOManager : IDisposable
 		long ret = 0;
 		byte b;
 		bool negative = false;
-		// ‹ó”’‚»‚Ì‘¼‚Ì“Ç‚İ”ò‚Î‚µB+‚à“Ç‚İ”ò‚Î‚µ‚Ä‚µ‚Ü‚Á‚Ä–â‘è–³‚¢B
+		// ç©ºç™½ãã®ä»–ã®èª­ã¿é£›ã°ã—ã€‚+ã‚‚èª­ã¿é£›ã°ã—ã¦ã—ã¾ã£ã¦å•é¡Œç„¡ã„ã€‚
 		do {
 			b = Read();
 		} while (b != '-' && (b < '0' || '9' < b));
@@ -3685,7 +3765,7 @@ public class IOManager : IDisposable
 			b = Read();
 		}
 
-		// ‰º‚ÉˆêŒ…‚¸‚Â‰Á‚¦‚Ä‚¢‚­B
+		// ä¸‹ã«ä¸€æ¡ãšã¤åŠ ãˆã¦ã„ãã€‚
 		for (; true; b = Read()) {
 			if (b < '0' || '9' < b) {
 				return negative ? -ret : ret;
@@ -3914,13 +3994,13 @@ public class IOManager : IDisposable
 		string directoryName = Path.GetFileName(directory);
 		string parentDirectory = Path.GetDirectoryName(directory);
 		if (directoryName.Contains(@"in")) {
-			// AHC‚Å”z•z‚³‚ê‚é tools ‚Ì in ƒtƒHƒ‹ƒ_[‚Ì‰¡‚É out ƒtƒHƒ‹ƒ_[‚ğì‚éB
-			// masters‚ÌinA‚É‚à‘Î‰o—ˆ‚é‚æ‚¤‚ÉReplace‚·‚éB
+			// AHCã§é…å¸ƒã•ã‚Œã‚‹ tools ã® in ãƒ•ã‚©ãƒ«ãƒ€ãƒ¼ã®æ¨ªã« out ãƒ•ã‚©ãƒ«ãƒ€ãƒ¼ã‚’ä½œã‚‹ã€‚
+			// mastersã®inAã«ã‚‚å¯¾å¿œå‡ºæ¥ã‚‹ã‚ˆã†ã«Replaceã™ã‚‹ã€‚
 			directoryName = directoryName.Replace("in", "out");
 			directory = Path.Combine(parentDirectory, directoryName);
 		} else {
-			// ƒrƒWƒ…ƒAƒ‰ƒCƒU[‚ÌˆêŠ‡“Ç‚İ‚İ‚ÍA1234.txt –”‚Í xxx_1234.txt ‚Ì‚æ‚¤‚ÈŒ`®‚É‘Î‰‚µ‚Ä‚¢‚éB
-			// “ü—Í‚Æ“¯‚¶ƒtƒHƒ‹ƒ_[‚Ìê‡‚ÍAo—Íƒtƒ@ƒCƒ‹‚Å‚ ‚é‚±‚Æ‚ª•ª‚©‚é‚æ‚¤‚É‚µ‚Ä‚¨‚­B
+			// ãƒ“ã‚¸ãƒ¥ã‚¢ãƒ©ã‚¤ã‚¶ãƒ¼ã®ä¸€æ‹¬èª­ã¿è¾¼ã¿ã¯ã€1234.txt åˆã¯ xxx_1234.txt ã®ã‚ˆã†ãªå½¢å¼ã«å¯¾å¿œã—ã¦ã„ã‚‹ã€‚
+			// å…¥åŠ›ã¨åŒã˜ãƒ•ã‚©ãƒ«ãƒ€ãƒ¼ã®å ´åˆã¯ã€å‡ºåŠ›ãƒ•ã‚¡ã‚¤ãƒ«ã§ã‚ã‚‹ã“ã¨ãŒåˆ†ã‹ã‚‹ã‚ˆã†ã«ã—ã¦ãŠãã€‚
 			title = "out_" + title;
 		}
 
