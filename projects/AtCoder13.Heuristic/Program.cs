@@ -98,7 +98,7 @@ public class Program
 			}
 		}
 
-		var best = Plan16(isLocal, sw, rnd, input, info);
+		var best = Plan18(isLocal, sw, rnd, input, info);
 
 		info.Theta = (int)(input.StayTimeSum / input.M);
 		info.AcceptLimit = input.CalculateAcceptLimit();
@@ -385,6 +385,91 @@ public class Program
 			double plan15Weight = Math.Clamp((6500.0 - averageStayTime) / 3000.0, 0.0, 1.0);
 			double zThreshold = plan12Threshold
 				+ (plan15Threshold - plan12Threshold) * plan15Weight;
+			info.ZThresholdAverage += zThreshold;
+			if (z < zThreshold) {
+				input.RecordDecision(guestCount, z, zThreshold, "threshold");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+				continue;
+			}
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByBestFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+			if (points.Count == guest.p) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-normal");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+				continue;
+			}
+
+			input.RecordDecision(guestCount, z, zThreshold, "normal-placement-failed");
+			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-move");
+				input.OutputMove([moveGroup], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+			} else {
+				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+		return state;
+	}
+
+	// Plan16を基本とし、Pond・Cluster・動的Thetaが条件を満たす場合だけ完全フォールバックを使う。
+	static State Plan18(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		var plan12Parameters = Utils.LoadPlan7Parameters(
+			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
+		var plan15Parameters = Utils.LoadPlan7Parameters(
+			new(-0.65, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
+		long arrivedValueSum = 0;
+
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			arrivedValueSum += guest.v;
+			double averageStayTime = (double)input.StayTimeSum / (guestCount + 1);
+			state.SetCompleteFallbackEnabled(
+				info.PondCount >= 600
+				&& input.PondClusterCount >= 30
+				&& averageStayTime <= 5500.0);
+
+			double z = Utils.CalculateValueZScore(guest);
+			double progress = (double)guestCount / input.M;
+			double plan12DynamicRate = progress >= plan12Parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
+			double plan15DynamicRate = progress >= plan15Parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
+			double projectedOccupiedRate = state.GetProjectedOccupiedRate(
+				guest.s,
+				Plan12ProjectedOccupancyHorizon);
+			double plan12Threshold = Utils.ShouldRejectDynamically(
+				guest,
+				projectedOccupiedRate,
+				progress,
+				input.PondClusterCount,
+				plan12Parameters,
+				plan12DynamicRate);
+			double plan15Threshold = Utils.CalculatePlan11RejectThreshold(
+				guest,
+				projectedOccupiedRate,
+				progress,
+				input.PondClusterCount,
+				plan15Parameters,
+				plan15DynamicRate);
+			double plan15Weight = Math.Clamp((6500.0 - averageStayTime) / 3000.0, 0.0, 1.0);
+			double zThreshold = plan12Threshold
+			+ (plan15Threshold - plan12Threshold) * plan15Weight;
 			info.ZThresholdAverage += zThreshold;
 			if (z < zThreshold) {
 				input.RecordDecision(guestCount, z, zThreshold, "threshold");
@@ -1398,7 +1483,7 @@ public class State
 	private const int TimeBucketCount = 100000 / TimeBucketWidth;
 	private readonly bool _isLocal;
 	private readonly Input _input;
-	private readonly bool _enableCompleteFallback;
+	private bool _enableCompleteFallback;
 	// trueのマスは現在いずれかの利用中グループが占有している。
 	private readonly bool[,] _occupied;
 	private readonly int _grassCellCount;
@@ -1505,6 +1590,11 @@ public class State
 		return Math.Max(
 			0.0,
 			(double)(_occupiedCellCount - projectedReleasedCellCount) / _grassCellCount);
+	}
+
+	public void SetCompleteFallbackEnabled(bool enabled)
+	{
+		_enableCompleteFallback = enabled;
 	}
 
 	// Plan6のフォールバック用のコンパクト領域成長へ現在の占有盤面を渡す。
@@ -4011,34 +4101,3 @@ public class IOManager : IDisposable
 		return Path.Combine(directory, title + ext);
 	}
 }
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
-
