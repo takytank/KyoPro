@@ -47,8 +47,6 @@ public class Program
 						$"ZT={info.ZThresholdAverage:+0.000;-0.000}",
 						$"Z={info.ZAverage:f3}",
 						$"O={info.OccupyAverage:f3}",
-						$"SR={info.AcceptedSizeRatio:f3}",
-						$"VR={info.AcceptedValueRatio:f3}",
 						$"score={info.Score:d10}",
 						$"rate={info.ScoreRate:f3}",
 						$"elapsed={info.Elapsed:d4}",
@@ -105,12 +103,6 @@ public class Program
 		info.Theta = (int)(input.StayTimeSum / input.M);
 		info.AcceptLimit = input.CalculateAcceptLimit();
 		info.Accept = best.AcceptedCount;
-		info.AcceptedSizeRatio = best.AcceptedCount == 0 || input.PersonSum == 0
-			? 0.0
-			: (double)best.AcceptedPersonSum * input.M / best.AcceptedCount / input.PersonSum;
-		info.AcceptedValueRatio = best.AcceptedCount == 0 || input.ScoreLimit == 0
-			? 0.0
-			: (double)best.AcceptedValueSum * input.M / best.AcceptedCount / input.ScoreLimit;
 		info.CompactnessAverage = best.ComactnessSum / best.AcceptedCount;
 		info.ZAverage /= best.ComactnessSum;
 		info.ZThresholdAverage /= input.M;
@@ -132,246 +124,13 @@ public class Program
 		input.Emulate();
 	}
 
-	// Plan5と同じ受理基準を使い、定型形状については全候補から空き領域を残しやすい位置を選ぶ。
-	static State Plan6(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
-			var guest = input.InputGuest();
-			state.ReleaseDepartedGroups(guest.s);
-			input.OutputMove([], info);
-
-			//const double Bottom10PercentZ = -1.025242;
-			//const double Bottom15PercentZ = -0.829147;
-			const double Bottom20PercentZ = -0.673297;
-			//const double Bottom25PercentZ = -0.539592;
-			//const double Bottom30PercentZ = -0.419520;
-			//const double Bottom35PercentZ = -0.308256;
-			//const double Bottom40PercentZ = -0.202678;
-			//const double Bottom45PercentZ = -0.100529;
-			//const double Bottom50PercentZ = 0.000000;
-			double z = Utils.CalculateValueZScore(guest);
-			double zThreshold = Bottom20PercentZ;
-			info.ZThresholdAverage += zThreshold;
-			if (z < zThreshold) {
-				state.ProcessGuest(guest, false, [], info);
-				continue;
-			}
-
-			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
-			var points = state.FindPlacementByBestFullSearch(shape);
-			if (points.Count != guest.p) {
-				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
-			}
-
-			bool canAccept = points.Count == guest.p;
-			state.ProcessGuest(guest, canAccept, points, info);
-			if (canAccept) {
-				info.ZAverage += z;
-			}
-		}
-		state.ReleaseDepartedGroups(int.MaxValue);
-
-		return state;
-	}
-
+	// Plan6 : Plan5と同じ受理基準を使い、定型形状については全候補から空き領域を残しやすい位置を選ぶ。
 	// Plan7 : Plan6の配置探索を維持し、盤面混雑度に応じて低価値・大面積・長期滞在を選別する。
 	// Plan8 : Plan7のreject判定に、処理済みゲストから得られる動的スコアレートを加える。
 	// Plan9 : Plan8の選別を維持し、通常配置に失敗したときだけ利用中グループ1組の再配置を試す。
-
-	// Plan9の配置不能時に、全利用中グループを候補として最良の再配置を選ぶ。
-	static State Plan10(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		var parameters = Utils.LoadPlan7Parameters(
-			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // 確定パラメーター
-		if (isLocal) {
-			// パラメーター調整時はここでparametersを上書きする
-		}
-		long arrivedValueSum = 0;
-
-		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
-			var guest = input.InputGuest();
-			state.ReleaseDepartedGroups(guest.s);
-			arrivedValueSum += guest.v;
-
-			double z = Utils.CalculateValueZScore(guest);
-			double progress = (double)guestCount / input.M;
-			double dynamicRate = progress >= parameters.DynamicRateStartProgress
-				? state.GetProjectedRate(arrivedValueSum)
-				: double.NaN;
-			double zThreshold = Utils.ShouldRejectDynamically(
-				guest,
-				state.OccupiedRate,
-				progress,
-				input.PondClusterCount,
-				parameters,
-				dynamicRate);
-			info.ZThresholdAverage += zThreshold;
-			if (z < zThreshold) {
-				input.RecordDecision(guestCount, z, zThreshold, "threshold");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-				continue;
-			}
-
-			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
-			var points = state.FindPlacementByBestFullSearch(shape);
-			if (points.Count != guest.p) {
-				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
-			}
-
-			if (points.Count == guest.p) {
-				input.RecordDecision(guestCount, z, zThreshold, "accepted-normal");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-				continue;
-			}
-
-			input.RecordDecision(guestCount, z, zThreshold, "normal-placement-failed");
-			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
-				input.RecordDecision(guestCount, z, zThreshold, "accepted-move");
-				input.OutputMove([moveGroup], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-			} else {
-				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-			}
-		}
-		state.ReleaseDepartedGroups(int.MaxValue);
-
-		return state;
-	}
-
-	// Plan10の全利用中グループ再配置を維持し、Plan11専用のreject閾値を使用する。
-	static State Plan11(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		var parameters = Utils.LoadPlan7Parameters(
-			new(-0.65, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // 確定パラメーター
-		if (isLocal) {
-			// パラメーター調整時はここでparametersを上書きする
-		}
-		long arrivedValueSum = 0;
-
-		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
-			var guest = input.InputGuest();
-			state.ReleaseDepartedGroups(guest.s);
-			arrivedValueSum += guest.v;
-
-			double z = Utils.CalculateValueZScore(guest);
-			double progress = (double)guestCount / input.M;
-			double dynamicRate = progress >= parameters.DynamicRateStartProgress
-				? state.GetProjectedRate(arrivedValueSum)
-				: double.NaN;
-			double zThreshold = Utils.CalculatePlan11RejectThreshold(
-				guest,
-				state.OccupiedRate,
-				progress,
-				input.PondClusterCount,
-				parameters,
-				dynamicRate);
-			info.ZThresholdAverage += zThreshold;
-			if (z < zThreshold) {
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-				continue;
-			}
-
-			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
-			var points = state.FindPlacementByBestFullSearch(shape);
-			if (points.Count != guest.p) {
-				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
-			}
-
-			if (points.Count == guest.p) {
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-				continue;
-			}
-
-			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
-				input.OutputMove([moveGroup], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-			} else {
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-			}
-		}
-		state.ReleaseDepartedGroups(int.MaxValue);
-
-		return state;
-	}
-
-	// Plan10の選別・移動探索を維持し、客の退去予測込みで空きスペースを計算する
-	static State Plan12(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		var parameters = Utils.LoadPlan7Parameters(
-			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // 確定パラメーター
-		if (isLocal) {
-			// パラメーター調整時はここでparametersを上書きする
-		}
-
-		long arrivedValueSum = 0;
-
-		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
-			var guest = input.InputGuest();
-			state.ReleaseDepartedGroups(guest.s);
-			arrivedValueSum += guest.v;
-
-			double z = Utils.CalculateValueZScore(guest);
-			double progress = (double)guestCount / input.M;
-			double dynamicRate = progress >= parameters.DynamicRateStartProgress
-				? state.GetProjectedRate(arrivedValueSum)
-				: double.NaN;
-			double projectedOccupiedRate = state.GetProjectedOccupiedRate(
-				guest.s,
-				Plan12ProjectedOccupancyHorizon);
-			double zThreshold = Utils.ShouldRejectDynamically(
-				guest, projectedOccupiedRate, progress, input.PondClusterCount, parameters, dynamicRate);
-			info.ZThresholdAverage += zThreshold;
-			if (z < zThreshold) {
-				input.RecordDecision(guestCount, z, zThreshold, "threshold");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-				continue;
-			}
-
-			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
-			//var points = state.FindPlacementByEffectiveSpaceSearch(shape);
-			var points = state.FindPlacementByBestFullSearch(shape);
-			if (points.Count != guest.p) {
-				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
-			}
-			if (points.Count == guest.p) {
-				input.RecordDecision(guestCount, z, zThreshold, "accepted-normal");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-				continue;
-			}
-
-			input.RecordDecision(guestCount, z, zThreshold, "normal-placement-failed");
-			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
-				input.RecordDecision(guestCount, z, zThreshold, "accepted-move");
-				input.OutputMove([moveGroup], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-			} else {
-				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-			}
-		}
-		state.ReleaseDepartedGroups(int.MaxValue);
-		return state;
-	}
+	// Plan10 : Plan9の配置不能時に、全利用中グループを候補として最良の再配置を選ぶ。
+	// Plan11 : Plan10の全利用中グループ再配置を維持し、Plan11専用のreject閾値を使用する。
+	// Plan12 : Plan10の選別・移動探索を維持し、客の退去予測込みで空きスペースを計算する
 
 	// Plan12の受理・移動方針を維持し、最後に任意連結形状を許す完全フォールバックを使う。
 	static State Plan13(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
@@ -499,65 +258,7 @@ public class Program
 		return state;
 	}
 
-	// Plan12の退去予測占有率に、Plan11の高動的レート・低占有率時の緩和を組み合わせる。
-	static State Plan15(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		var parameters = Utils.LoadPlan7Parameters(
-			new(-0.65, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // Plan11のBaseZとPlan12の予測占有率を併用
-		long arrivedValueSum = 0;
-
-		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
-			var guest = input.InputGuest();
-			state.ReleaseDepartedGroups(guest.s);
-			arrivedValueSum += guest.v;
-
-			double z = Utils.CalculateValueZScore(guest);
-			double progress = (double)guestCount / input.M;
-			double dynamicRate = progress >= parameters.DynamicRateStartProgress
-				? state.GetProjectedRate(arrivedValueSum)
-				: double.NaN;
-			double projectedOccupiedRate = state.GetProjectedOccupiedRate(
-				guest.s,
-				Plan12ProjectedOccupancyHorizon);
-			double zThreshold = Utils.CalculatePlan11RejectThreshold(
-				guest, projectedOccupiedRate, progress, input.PondClusterCount, parameters, dynamicRate);
-			info.ZThresholdAverage += zThreshold;
-			if (z < zThreshold) {
-				input.RecordDecision(guestCount, z, zThreshold, "threshold");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-				continue;
-			}
-
-			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
-			var points = state.FindPlacementByBestFullSearch(shape);
-			if (points.Count != guest.p) {
-				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
-			}
-			if (points.Count == guest.p) {
-				input.RecordDecision(guestCount, z, zThreshold, "accepted-normal");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-				continue;
-			}
-
-			input.RecordDecision(guestCount, z, zThreshold, "normal-placement-failed");
-			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
-				input.RecordDecision(guestCount, z, zThreshold, "accepted-move");
-				input.OutputMove([moveGroup], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-			} else {
-				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-			}
-		}
-		state.ReleaseDepartedGroups(int.MaxValue);
-		return state;
-	}
+	// Plan15 : Plan12の退去予測占有率に、Plan11の高動的レート・低占有率時の緩和を組み合わせる。
 
 	// Plan15の低Theta向け緩和を維持し、高ThetaではPlan12のしきい値へ戻す。
 	static State Plan16(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
@@ -1328,8 +1029,6 @@ public static class Utils
 
 		foreach (var rectangle in rectangleCandidates) {
 			var positions = new List<(int top, int left, int occupiedCount, int pondCount)>();
-			(int top, int left, int occupiedCount, int pondCount) bestPosition = default;
-			bool hasBestPosition = false;
 			int boxHeight = rectangle.boxHeight;
 			int boxWidth = rectangle.boxWidth;
 			int rectangleArea = boxHeight * boxWidth;
@@ -2042,8 +1741,6 @@ public class Information
 	public double ZAverage { get; set; } = 0;
 	public double OccupyAverage { get; set; } = 0;
 	public double ScoreRate { get; set; } = 0;
-	public double AcceptedSizeRatio { get; set; } = 0;
-	public double AcceptedValueRatio { get; set; } = 0;
 }
 
 public class Input
