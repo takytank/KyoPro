@@ -20,3 +20,5 @@ Here, "solution program" refers to any program created or being created for the 
 - 標準ライブラリー、及び、ジャッジサーバーでも参照している以下の package を除き、Program.cs のコードで動作が完結するようにする。(Debug 時の入力ファイルは除く)
     - ac-library-csharp
 	- MathNet.Numerics
+	
+- 問題に対する新しい施策の関数 (Plan) を実装するときは、既存の施策の動作が変わらないようにする。

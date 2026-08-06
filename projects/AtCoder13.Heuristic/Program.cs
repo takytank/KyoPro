@@ -98,7 +98,7 @@ public class Program
 			}
 		}
 
-		var best = Plan10(isLocal, sw, rnd, input, info);
+		var best = Plan12(isLocal, sw, rnd, input, info);
 
 		info.Theta = (int)(input.StayTimeSum / input.M);
 		info.AcceptLimit = input.CalculateAcceptLimit();
@@ -306,12 +306,12 @@ public class Program
 		return state;
 	}
 
-	// Plan10の選別・移動探索を維持し、通常配置だけを有効空き領域評価で選択する。
+	// Plan10の選別・移動探索を維持し、客の退去予測込みで空きスペースを計算する
 	static State Plan12(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(isLocal, input);
 		var parameters = Utils.LoadPlan7Parameters(
-			new(-0.65, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // 確定パラメーター
+			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // 確定パラメーター
 		if (isLocal) {
 			// パラメーター調整時はここでparametersを上書きする
 		}
@@ -328,8 +328,9 @@ public class Program
 			double dynamicRate = progress >= parameters.DynamicRateStartProgress
 				? state.GetProjectedRate(arrivedValueSum)
 				: double.NaN;
+			double projectedOccupiedRate = state.GetProjectedOccupiedRate(guest.s);
 			double zThreshold = Utils.ShouldRejectDynamically(
-				guest, state.OccupiedRate, progress, input.PondClusterCount, parameters, dynamicRate);
+				guest, projectedOccupiedRate, progress, input.PondClusterCount, parameters, dynamicRate);
 			info.ZThresholdAverage += zThreshold;
 			if (z < zThreshold) {
 				input.RecordDecision(guestCount, z, zThreshold, "threshold");
@@ -339,7 +340,8 @@ public class Program
 			}
 
 			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
-			var points = state.FindPlacementByEffectiveSpaceSearch(shape);
+			//var points = state.FindPlacementByEffectiveSpaceSearch(shape);
+			var points = state.FindPlacementByBestFullSearch(shape);
 			if (points.Count != guest.p) {
 				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
 			}
@@ -359,6 +361,132 @@ public class Program
 				info.ZAverage += z;
 			} else {
 				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+		return state;
+	}
+
+	// Plan12の受理・移動方針を維持し、最後に任意連結形状を許す完全フォールバックを使う。
+	static State Plan13(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input, enableCompleteFallback: true);
+		var parameters = Utils.LoadPlan7Parameters(
+			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // 確定パラメーター
+		if (isLocal) {
+			// パラメーター調整時はここでparametersを上書きする
+		}
+
+		long arrivedValueSum = 0;
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			arrivedValueSum += guest.v;
+
+			double z = Utils.CalculateValueZScore(guest);
+			double progress = (double)guestCount / input.M;
+			double dynamicRate = progress >= parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
+			double projectedOccupiedRate = state.GetProjectedOccupiedRate(guest.s);
+			double zThreshold = Utils.ShouldRejectDynamically(
+				guest, projectedOccupiedRate, progress, input.PondClusterCount, parameters, dynamicRate);
+			info.ZThresholdAverage += zThreshold;
+			if (z < zThreshold) {
+				input.RecordDecision(guestCount, z, zThreshold, "threshold");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+				continue;
+			}
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByBestFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+			if (points.Count == guest.p) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-normal");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+				continue;
+			}
+
+			input.RecordDecision(guestCount, z, zThreshold, "normal-placement-failed");
+			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-move");
+				input.OutputMove([moveGroup], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+			} else {
+				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+		return state;
+	}
+
+	// Plan12の配置・移動方針を維持し、Zしきい値をセル時間影価格による受理判定へ置き換える。
+	static State Plan14(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		var parameters = Utils.LoadPlan7Parameters(
+			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // Plan12の確定パラメーター
+		long arrivedValueSum = 0;
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			state.RegisterArrivedGuest(guest);
+			arrivedValueSum += guest.v;
+
+			double z = Utils.CalculateValueZScore(guest);
+			var (shape, expectedCompactness) = Utils.CreateNearSquareShape(guest.p);
+			double progress = (double)guestCount / input.M;
+			double dynamicRate = progress >= parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
+			double plan12Threshold = Utils.ShouldRejectDynamically(
+				guest,
+				state.GetProjectedOccupiedRate(guest.s),
+				progress,
+				input.PondClusterCount,
+				parameters,
+				dynamicRate);
+			double averageLoadRate = state.GetAverageScheduledLoadRate(guest.s, guest.t);
+			double zThreshold = Math.Max(-0.4, plan12Threshold - 0.30 * (1.0 - averageLoadRate));
+			bool isWorthAccepting = state.IsWorthAcceptingByCellTime(guest, expectedCompactness);
+			info.ZThresholdAverage += zThreshold;
+			if (isWorthAccepting == false || z < zThreshold) {
+				input.RecordDecision(guestCount, z, zThreshold, isWorthAccepting ? "quality-threshold" : "shadow-price");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+				continue;
+			}
+
+			var points = state.FindPlacementByBestFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+			if (points.Count == guest.p) {
+				input.RecordDecision(guestCount, z, 0.0, "accepted-normal");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+				continue;
+			}
+
+			input.RecordDecision(guestCount, z, 0.0, "normal-placement-failed");
+			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
+				input.RecordDecision(guestCount, z, 0.0, "accepted-move");
+				input.OutputMove([moveGroup], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+			} else {
+				input.RecordDecision(guestCount, z, 0.0, "move-failed");
 				input.OutputMove([], info);
 				state.ProcessGuest(guest, false, [], info);
 			}
@@ -901,6 +1029,75 @@ public static class Utils
 			rectangleCandidates);
 	}
 
+	// 形状制約を設けず、Pマス以上の空き連結成分から必ず連結領域を切り出す最終フォールバック。
+	internal static List<(int x, int y)> FindPlacementByAnyConnectedComponent(
+		string[] row,
+		bool[,] occupied,
+		int p)
+	{
+		int height = row.Length;
+		int width = row[0].Length;
+		var visited = new bool[height, width];
+		var queue = new (int x, int y)[height * width];
+		List<(int x, int y)> bestPoints = [];
+		double bestCompactness = -1.0;
+		ReadOnlySpan<int> deltaX = [-1, 1, 0, 0];
+		ReadOnlySpan<int> deltaY = [0, 0, -1, 1];
+
+		for (int startX = 0; startX < height; ++startX) {
+			for (int startY = 0; startY < width; ++startY) {
+				if (visited[startX, startY] || row[startX][startY] != '.' || occupied[startX, startY]) {
+					continue;
+				}
+
+				var component = new List<(int x, int y)>();
+				int queueHead = 0;
+				int queueTail = 0;
+				visited[startX, startY] = true;
+				queue[queueTail++] = (startX, startY);
+				while (queueHead < queueTail) {
+					var (x, y) = queue[queueHead++];
+					component.Add((x, y));
+					for (int direction = 0; direction < 4; ++direction) {
+						int nextX = x + deltaX[direction];
+						int nextY = y + deltaY[direction];
+						if ((uint)nextX >= (uint)height
+							|| (uint)nextY >= (uint)width
+							|| visited[nextX, nextY]
+							|| row[nextX][nextY] != '.'
+							|| occupied[nextX, nextY]) {
+							continue;
+						}
+
+						visited[nextX, nextY] = true;
+						queue[queueTail++] = (nextX, nextY);
+					}
+				}
+
+				if (component.Count < p) {
+					continue;
+				}
+
+				int minX = component.Min(point => point.x);
+				int maxX = component.Max(point => point.x);
+				int minY = component.Min(point => point.y);
+				int maxY = component.Max(point => point.y);
+				var seed = component.MinBy(point => (
+					Math.Abs(2 * point.x - minX - maxX) + Math.Abs(2 * point.y - minY - maxY),
+					-point.x,
+					-point.y));
+				var points = GrowCompactRegion(component, seed.x, seed.y, height, width, p);
+				double compactness = CalculateCompactness(points);
+				if (compactness > bestCompactness) {
+					bestCompactness = compactness;
+					bestPoints = points;
+				}
+			}
+		}
+
+		return bestPoints;
+	}
+
 	internal static int[] CreatePondPrefixSum(string[] row)
 	{
 		int height = row.Length;
@@ -1272,8 +1469,11 @@ public static class Utils
 // 現在の占有状態・利用中グループ・所持金を管理する。探索方針の選択はPlan側で行う。
 public class State
 {
+	private const int TimeBucketWidth = 500;
+	private const int TimeBucketCount = 100000 / TimeBucketWidth;
 	private readonly bool _isLocal;
 	private readonly Input _input;
+	private readonly bool _enableCompleteFallback;
 	// trueのマスは現在いずれかの利用中グループが占有している。
 	private readonly bool[,] _occupied;
 	private readonly int _grassCellCount;
@@ -1282,6 +1482,9 @@ public class State
 	private readonly Dictionary<int, (int departureTime, int value, long usageFee, List<(int x, int y)> points, double compactness)> _activeGroups = [];
 	// 到着ごとに全グループを走査せず、退去時刻が早い順に処理する。
 	private readonly PriorityQueue<int, int> _departureQueue = new();
+	private readonly int[] _scheduledCellLoad = new int[TimeBucketCount];
+	private long _arrivedValueSum;
+	private long _arrivedCellTimeSum;
 	private long _money;
 
 	public int AcceptedCount { get; private set; } = 0;
@@ -1291,12 +1494,70 @@ public class State
 	public double OccupiedRate => (double)_occupiedCellCount / _grassCellCount;
 	public long ProjectedScore => _money + _activeGroups.Values.Sum(group => group.usageFee);
 
-	public State(bool isLocal, Input input)
+	public State(bool isLocal, Input input, bool enableCompleteFallback = false)
 	{
 		_isLocal = isLocal;
 		_input = input;
+		_enableCompleteFallback = enableCompleteFallback;
 		_occupied = new bool[input.N, input.N];
 		_grassCellCount = input.Row.Sum(row => row.Count(cell => cell == '.'));
+	}
+
+	public void RegisterArrivedGuest((int i, int s, int t, int p, int v) guest)
+	{
+		_arrivedValueSum += guest.v;
+		_arrivedCellTimeSum += (long)guest.p * (guest.t - guest.s);
+	}
+
+	public double ObservedValueDensity => _arrivedCellTimeSum == 0
+		? 0.0
+		: (double)_arrivedValueSum / _arrivedCellTimeSum;
+
+	// 候補が占める各時間区間について、混雑度が高いほど非線形に上がるセル時間価格を積分する。
+	public double CalculateCellTimeOpportunityCost(int arrivalTime, int departureTime, int personCount)
+	{
+		double baseDensity = ObservedValueDensity > 0.0 ? ObservedValueDensity : 0.5;
+		double cost = 0.0;
+		int firstBucket = Math.Clamp(arrivalTime / TimeBucketWidth, 0, TimeBucketCount - 1);
+		int lastBucket = Math.Clamp((departureTime - 1) / TimeBucketWidth, 0, TimeBucketCount - 1);
+		for (int bucket = firstBucket; bucket <= lastBucket; ++bucket) {
+			int bucketStart = bucket * TimeBucketWidth;
+			int bucketEnd = bucketStart + TimeBucketWidth;
+			int overlap = Math.Min(departureTime, bucketEnd) - Math.Max(arrivalTime, bucketStart);
+			double loadRate = (double)(_scheduledCellLoad[bucket] + personCount) / _grassCellCount;
+			double shadowPrice = baseDensity * Math.Pow(loadRate / 0.65, 4.0);
+			cost += personCount * overlap * shadowPrice;
+		}
+
+		return cost;
+	}
+
+	public bool IsWorthAcceptingByCellTime(
+		(int i, int s, int t, int p, int v) guest,
+		double expectedCompactness)
+	{
+		double expectedUsageFee = guest.v * expectedCompactness;
+		double opportunityCost = CalculateCellTimeOpportunityCost(guest.s, guest.t, guest.p);
+		return expectedUsageFee > opportunityCost;
+	}
+
+	public double GetAverageScheduledLoadRate(int arrivalTime, int departureTime)
+	{
+		int firstBucket = Math.Clamp(arrivalTime / TimeBucketWidth, 0, TimeBucketCount - 1);
+		int lastBucket = Math.Clamp((departureTime - 1) / TimeBucketWidth, 0, TimeBucketCount - 1);
+		long weightedLoad = 0;
+		int totalDuration = 0;
+		for (int bucket = firstBucket; bucket <= lastBucket; ++bucket) {
+			int bucketStart = bucket * TimeBucketWidth;
+			int bucketEnd = bucketStart + TimeBucketWidth;
+			int overlap = Math.Min(departureTime, bucketEnd) - Math.Max(arrivalTime, bucketStart);
+			weightedLoad += (long)_scheduledCellLoad[bucket] * overlap;
+			totalDuration += overlap;
+		}
+
+		return totalDuration == 0
+			? 0.0
+			: Math.Clamp((double)weightedLoad / totalDuration / _grassCellCount, 0.0, 1.0);
 	}
 
 	public double GetProjectedRate(long arrivedValueSum)
@@ -1306,15 +1567,33 @@ public class State
 			: (double)ProjectedScore / arrivedValueSum;
 	}
 
+	public double GetProjectedOccupiedRate(int currentTime, int horizon = 100)
+	{
+		int projectedReleasedCellCount = 0;
+		int releaseLimit = currentTime + horizon;
+		foreach (var group in _activeGroups.Values) {
+			if (group.departureTime <= releaseLimit) {
+				projectedReleasedCellCount += group.points.Count;
+			}
+		}
+
+		return Math.Max(
+			0.0,
+			(double)(_occupiedCellCount - projectedReleasedCellCount) / _grassCellCount);
+	}
+
 	// Plan6のフォールバック用のコンパクト領域成長へ現在の占有盤面を渡す。
 	public List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch2(int p)
 	{
-		return Utils.FindPlacementByReverseBreadthFirstSearch2(
+		var points = Utils.FindPlacementByReverseBreadthFirstSearch2(
 			_input.Row,
 			_occupied,
 			p,
 			_input.PondPrefixSum,
 			_input.GetRectangleCandidates(p));
+		return points.Count == p || _enableCompleteFallback == false
+			? points
+			: Utils.FindPlacementByAnyConnectedComponent(_input.Row, _occupied, p);
 	}
 
 	public List<(int x, int y)> FindPlacementByReverseBreadthFirstSearch2(
@@ -1324,7 +1603,7 @@ public class State
 		int minBaseY,
 		int maxBaseY)
 	{
-		return Utils.FindPlacementByReverseBreadthFirstSearch2(
+		var points = Utils.FindPlacementByReverseBreadthFirstSearch2(
 			_input.Row,
 			_occupied,
 			p,
@@ -1334,6 +1613,9 @@ public class State
 			maxBaseX,
 			minBaseY,
 			maxBaseY);
+		return points.Count == p || _enableCompleteFallback == false
+			? points
+			: Utils.FindPlacementByAnyConnectedComponent(_input.Row, _occupied, p);
 	}
 
 	public List<(int x, int y)> FindPlacementByBestFullSearch(
@@ -1529,7 +1811,7 @@ public class State
 	{
 		if (canAccept) {
 			double compactness = Utils.CalculateCompactness(points);
-			Accept(guest.i, guest.t, guest.v, points, compactness);
+			Accept(guest.i, guest.s, guest.t, guest.v, points, compactness);
 			++AcceptedCount;
 			AcceptedPersonSum += guest.p;
 			AcceptedValueSum += guest.v;
@@ -1541,7 +1823,13 @@ public class State
 	}
 
 	// 利用料は移動しない各Planでは配置時に確定するため、退去時用に保存しておく。
-	private void Accept(int groupId, int departureTime, int value, List<(int x, int y)> points, double compactness)
+	private void Accept(
+		int groupId,
+		int arrivalTime,
+		int departureTime,
+		int value,
+		List<(int x, int y)> points,
+		double compactness)
 	{
 		SetOccupied(points, true);
 		_occupiedCellCount += points.Count;
@@ -1549,6 +1837,11 @@ public class State
 		long usageFee = CalculateUsageFee(value, compactness);
 		_activeGroups.Add(groupId, (departureTime, value, usageFee, points, compactness));
 		_departureQueue.Enqueue(groupId, departureTime);
+		int firstBucket = Math.Clamp(arrivalTime / TimeBucketWidth, 0, TimeBucketCount - 1);
+		int lastBucket = Math.Clamp((departureTime - 1) / TimeBucketWidth, 0, TimeBucketCount - 1);
+		for (int bucket = firstBucket; bucket <= lastBucket; ++bucket) {
+			_scheduledCellLoad[bucket] += points.Count;
+		}
 	}
 
 	private void SetOccupied(IEnumerable<(int x, int y)> points, bool occupied)
