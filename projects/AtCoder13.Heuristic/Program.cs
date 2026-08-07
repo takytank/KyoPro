@@ -98,13 +98,13 @@ public class Program
 			}
 		}
 
-		var best = Plan19(isLocal, sw, rnd, input, info);
+		var best = Plan21(isLocal, sw, rnd, input, info);
 
 		info.Theta = (int)(input.StayTimeSum / input.M);
 		info.AcceptLimit = input.CalculateAcceptLimit();
 		info.Accept = best.AcceptedCount;
-		info.CompactnessAverage = best.ComactnessSum / best.AcceptedCount;
-		info.ZAverage /= best.ComactnessSum;
+		info.CompactnessAverage = best.CompactnessSum / best.AcceptedCount;
+		info.ZAverage /= best.AcceptedCount;
 		info.ZThresholdAverage /= input.M;
 		info.OccupyAverage /= input.M;
 		info.Score = best.Calculate();
@@ -286,6 +286,128 @@ public class Program
 			double plan15Weight = Math.Clamp((6500.0 - averageStayTime) / 3000.0, 0.0, 1.0);
 			double zThreshold = plan12Threshold
 			+ (plan15Threshold - plan12Threshold) * plan15Weight;
+			info.ZThresholdAverage += zThreshold;
+			if (z < zThreshold) {
+				input.RecordDecision(guestCount, z, zThreshold, "threshold");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+				continue;
+			}
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByBestFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+			if (points.Count == guest.p) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-normal");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+				continue;
+			}
+
+			input.RecordDecision(guestCount, z, zThreshold, "normal-placement-failed");
+			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-move");
+				input.OutputMove([moveGroup], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+			} else {
+				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+		return state;
+	}
+
+	// Plan19に、滞在時間500以下かつサイズ30以下の客への受理緩和を追加する。
+	static State Plan20(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+		=> Plan20Core(isLocal, sw, rnd, input, info, false);
+
+	// Plan20に、サイズ10未満かつ平均滞在時間より短い客への中程度の受理緩和を追加する。
+	static State Plan21(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+		=> Plan20Core(isLocal, sw, rnd, input, info, true);
+
+	static State Plan20Core(
+		bool isLocal,
+		Stopwatch sw,
+		Random rnd,
+		Input input,
+		Information info,
+		bool enableMediumRelaxation)
+	{
+		var state = new State(isLocal, input);
+		var plan12Parameters = Utils.LoadPlan7Parameters(
+			new(-0.45, 0.90, 0.25, 0.45, 0.20, 0.00, 0.00, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
+		var plan15Parameters = Utils.LoadPlan7Parameters(
+			new(-0.65, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
+		long arrivedValueSum = 0;
+		int densitySampleCount = 0;
+		double densityMean = 0.0;
+		double densityM2 = 0.0;
+
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			arrivedValueSum += guest.v;
+			double duration = guest.t - guest.s;
+			double density = guest.v / (guest.p * duration);
+			++densitySampleCount;
+			double densityDelta = density - densityMean;
+			densityMean += densityDelta / densitySampleCount;
+			densityM2 += densityDelta * (density - densityMean);
+			double densityStandardDeviation = densitySampleCount < 2
+				? 0.0
+				: Math.Sqrt(densityM2 / (densitySampleCount - 1));
+			double averageStayTime = (double)input.StayTimeSum / (guestCount + 1);
+			double projectedOccupiedRate = state.GetProjectedOccupiedRate(
+				guest.s,
+				Plan12ProjectedOccupancyHorizon);
+			double densityZThreshold = Math.Clamp((projectedOccupiedRate - 0.50) * 2.0, 0.0, 0.8);
+			bool isHighValueDensity = densitySampleCount < 20
+				|| density >= densityMean + densityStandardDeviation * densityZThreshold;
+			state.SetCompleteFallbackEnabled(
+				info.PondCount >= 600
+				&& input.PondClusterCount >= 30
+				&& averageStayTime <= 5500.0
+				&& isHighValueDensity);
+
+			double z = Utils.CalculateValueZScore(guest);
+			double progress = (double)guestCount / input.M;
+			double plan12DynamicRate = progress >= plan12Parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
+			double plan15DynamicRate = progress >= plan15Parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
+			double plan12Threshold = Utils.ShouldRejectDynamically(
+				guest,
+				projectedOccupiedRate,
+				progress,
+				input.PondClusterCount,
+				plan12Parameters,
+				plan12DynamicRate);
+			double plan15Threshold = Utils.CalculatePlan11RejectThreshold(
+				guest,
+				projectedOccupiedRate,
+				progress,
+				input.PondClusterCount,
+				plan15Parameters,
+				plan15DynamicRate);
+			double plan15Weight = Math.Clamp((6500.0 - averageStayTime) / 3000.0, 0.0, 1.0);
+			double zThreshold = plan12Threshold
+			+ (plan15Threshold - plan12Threshold) * plan15Weight;
+			double durationRelaxation = duration <= 500.0 && guest.p <= 30
+				? 0.30
+				: enableMediumRelaxation
+					&& guest.p < 10
+					&& duration <= 0.8 * averageStayTime
+					? 0.15
+					: 0.0;
+			zThreshold -= durationRelaxation;
 			info.ZThresholdAverage += zThreshold;
 			if (z < zThreshold) {
 				input.RecordDecision(guestCount, z, zThreshold, "threshold");
@@ -1316,7 +1438,7 @@ public class State
 	public int AcceptedCount { get; private set; } = 0;
 	public long AcceptedPersonSum { get; private set; } = 0;
 	public long AcceptedValueSum { get; private set; } = 0;
-	public double ComactnessSum { get; private set; } = 0;
+	public double CompactnessSum { get; private set; } = 0;
 	public double OccupiedRate => (double)_occupiedCellCount / _grassCellCount;
 	public long ProjectedScore => _money + _activeGroups.Values.Sum(group => group.usageFee);
 
@@ -1518,7 +1640,7 @@ public class State
 		long movedUsageFee = CalculateUsageFee(group.value, movedCompactness);
 		long moveCost = Math.Max((long)Math.Floor(group.value * _input.R + 0.5), 1);
 		_money -= moveCost;
-		ComactnessSum += movedCompactness - group.compactness;
+		CompactnessSum += movedCompactness - group.compactness;
 		_activeGroups[groupId] = (group.departureTime, group.value, movedUsageFee, movedPoints, movedCompactness);
 		moveGroup = (groupId, movedPoints.Select(point => (point.x, point.y)).ToList());
 		return true;
@@ -1621,7 +1743,7 @@ public class State
 		long finalUsageFee = CalculateUsageFee(bestGroup.value, finalCompactness);
 		long finalMoveCost = Math.Max((long)Math.Floor(bestGroup.value * _input.R + 0.5), 1);
 		_money -= finalMoveCost;
-		ComactnessSum += finalCompactness - bestGroup.compactness;
+		CompactnessSum += finalCompactness - bestGroup.compactness;
 		_activeGroups[bestGroupId] = (
 			bestGroup.departureTime,
 			bestGroup.value,
@@ -1646,7 +1768,7 @@ public class State
 			++AcceptedCount;
 			AcceptedPersonSum += guest.p;
 			AcceptedValueSum += guest.v;
-			ComactnessSum += compactness;
+			CompactnessSum += compactness;
 		}
 
 		_input.OutputReception(canAccept, points);
