@@ -98,7 +98,7 @@ public class Program
 			}
 		}
 
-		var best = Plan18(isLocal, sw, rnd, input, info);
+		var best = Plan19(isLocal, sw, rnd, input, info);
 
 		info.Theta = (int)(input.StayTimeSum / input.M);
 		info.AcceptLimit = input.CalculateAcceptLimit();
@@ -131,303 +131,18 @@ public class Program
 	// Plan10 : Plan9の配置不能時に、全利用中グループを候補として最良の再配置を選ぶ。
 	// Plan11 : Plan10の全利用中グループ再配置を維持し、Plan11専用のreject閾値を使用する。
 	// Plan12 : Plan10の選別・移動探索を維持し、客の退去予測込みで空きスペースを計算する
-
-	// Plan12の受理・移動方針を維持し、最後に任意連結形状を許す完全フォールバックを使う。
-	static State Plan13(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input, enableCompleteFallback: true);
-		var parameters = Utils.LoadPlan7Parameters(
-			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // 確定パラメーター
-		if (isLocal) {
-			// パラメーター調整時はここでparametersを上書きする
-		}
-
-		long arrivedValueSum = 0;
-		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
-			var guest = input.InputGuest();
-			state.ReleaseDepartedGroups(guest.s);
-			arrivedValueSum += guest.v;
-
-			double z = Utils.CalculateValueZScore(guest);
-			double progress = (double)guestCount / input.M;
-			double dynamicRate = progress >= parameters.DynamicRateStartProgress
-				? state.GetProjectedRate(arrivedValueSum)
-				: double.NaN;
-			double projectedOccupiedRate = state.GetProjectedOccupiedRate(guest.s);
-			double zThreshold = Utils.ShouldRejectDynamically(
-				guest, projectedOccupiedRate, progress, input.PondClusterCount, parameters, dynamicRate);
-			info.ZThresholdAverage += zThreshold;
-			if (z < zThreshold) {
-				input.RecordDecision(guestCount, z, zThreshold, "threshold");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-				continue;
-			}
-
-			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
-			var points = state.FindPlacementByBestFullSearch(shape);
-			if (points.Count != guest.p) {
-				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
-			}
-			if (points.Count == guest.p) {
-				input.RecordDecision(guestCount, z, zThreshold, "accepted-normal");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-				continue;
-			}
-
-			input.RecordDecision(guestCount, z, zThreshold, "normal-placement-failed");
-			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
-				input.RecordDecision(guestCount, z, zThreshold, "accepted-move");
-				input.OutputMove([moveGroup], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-			} else {
-				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-			}
-		}
-		state.ReleaseDepartedGroups(int.MaxValue);
-		return state;
-	}
-
-	// Plan12の配置・移動方針を維持し、Zしきい値をセル時間影価格による受理判定へ置き換える。
-	static State Plan14(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		var parameters = Utils.LoadPlan7Parameters(
-			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00)); // Plan12の確定パラメーター
-		long arrivedValueSum = 0;
-		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
-			var guest = input.InputGuest();
-			state.ReleaseDepartedGroups(guest.s);
-			state.RegisterArrivedGuest(guest);
-			arrivedValueSum += guest.v;
-
-			double z = Utils.CalculateValueZScore(guest);
-			var (shape, expectedCompactness) = Utils.CreateNearSquareShape(guest.p);
-			double progress = (double)guestCount / input.M;
-			double dynamicRate = progress >= parameters.DynamicRateStartProgress
-				? state.GetProjectedRate(arrivedValueSum)
-				: double.NaN;
-			double plan12Threshold = Utils.ShouldRejectDynamically(
-				guest,
-				state.GetProjectedOccupiedRate(guest.s),
-				progress,
-				input.PondClusterCount,
-				parameters,
-				dynamicRate);
-			double averageLoadRate = state.GetAverageScheduledLoadRate(guest.s, guest.t);
-			double zThreshold = Math.Max(-0.4, plan12Threshold - 0.30 * (1.0 - averageLoadRate));
-			bool isWorthAccepting = state.IsWorthAcceptingByCellTime(guest, expectedCompactness);
-			info.ZThresholdAverage += zThreshold;
-			if (isWorthAccepting == false || z < zThreshold) {
-				input.RecordDecision(guestCount, z, zThreshold, isWorthAccepting ? "quality-threshold" : "shadow-price");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-				continue;
-			}
-
-			var points = state.FindPlacementByBestFullSearch(shape);
-			if (points.Count != guest.p) {
-				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
-			}
-			if (points.Count == guest.p) {
-				input.RecordDecision(guestCount, z, 0.0, "accepted-normal");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-				continue;
-			}
-
-			input.RecordDecision(guestCount, z, 0.0, "normal-placement-failed");
-			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
-				input.RecordDecision(guestCount, z, 0.0, "accepted-move");
-				input.OutputMove([moveGroup], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-			} else {
-				input.RecordDecision(guestCount, z, 0.0, "move-failed");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-			}
-		}
-		state.ReleaseDepartedGroups(int.MaxValue);
-		return state;
-	}
-
+	// Plan13 : Plan12の受理・移動方針を維持し、最後に任意連結形状を許す完全フォールバックを使う。
+	// Plan14 : Plan12の配置・移動方針を維持し、Zしきい値をセル時間影価格による受理判定へ置き換える。
 	// Plan15 : Plan12の退去予測占有率に、Plan11の高動的レート・低占有率時の緩和を組み合わせる。
+	// Plan16 : Plan15の低Theta向け緩和を維持し、高ThetaではPlan12のしきい値へ戻す。
+	// Plan17 : Plan16 に Plan13 と同様の最後に任意連結形状を許す完全フォールバックを使う。
 
-	// Plan15の低Theta向け緩和を維持し、高ThetaではPlan12のしきい値へ戻す。
-	static State Plan16(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		var plan12Parameters = Utils.LoadPlan7Parameters(
-			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
-		var plan15Parameters = Utils.LoadPlan7Parameters(
-			new(-0.65, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
-		long arrivedValueSum = 0;
-
-		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
-			var guest = input.InputGuest();
-			state.ReleaseDepartedGroups(guest.s);
-			arrivedValueSum += guest.v;
-
-			double z = Utils.CalculateValueZScore(guest);
-			double progress = (double)guestCount / input.M;
-			double plan12DynamicRate = progress >= plan12Parameters.DynamicRateStartProgress
-				? state.GetProjectedRate(arrivedValueSum)
-				: double.NaN;
-			double plan15DynamicRate = progress >= plan15Parameters.DynamicRateStartProgress
-				? state.GetProjectedRate(arrivedValueSum)
-				: double.NaN;
-			double projectedOccupiedRate = state.GetProjectedOccupiedRate(
-				guest.s,
-				Plan12ProjectedOccupancyHorizon);
-			double plan12Threshold = Utils.ShouldRejectDynamically(
-				guest,
-				projectedOccupiedRate,
-				progress,
-				input.PondClusterCount,
-				plan12Parameters,
-				plan12DynamicRate);
-			double plan15Threshold = Utils.CalculatePlan11RejectThreshold(
-				guest,
-				projectedOccupiedRate,
-				progress,
-				input.PondClusterCount,
-				plan15Parameters,
-				plan15DynamicRate);
-			double averageStayTime = (double)input.StayTimeSum / (guestCount + 1);
-			double plan15Weight = Math.Clamp((6500.0 - averageStayTime) / 3000.0, 0.0, 1.0);
-			double zThreshold = plan12Threshold
-				+ (plan15Threshold - plan12Threshold) * plan15Weight;
-			info.ZThresholdAverage += zThreshold;
-			if (z < zThreshold) {
-				input.RecordDecision(guestCount, z, zThreshold, "threshold");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-				continue;
-			}
-
-			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
-			var points = state.FindPlacementByBestFullSearch(shape);
-			if (points.Count != guest.p) {
-				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
-			}
-			if (points.Count == guest.p) {
-				input.RecordDecision(guestCount, z, zThreshold, "accepted-normal");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-				continue;
-			}
-
-			input.RecordDecision(guestCount, z, zThreshold, "normal-placement-failed");
-			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
-				input.RecordDecision(guestCount, z, zThreshold, "accepted-move");
-				input.OutputMove([moveGroup], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-			} else {
-				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-			}
-		}
-		state.ReleaseDepartedGroups(int.MaxValue);
-		return state;
-	}
-
-	// Plan17: Plan16 に Plan13 と同様の最後に任意連結形状を許す完全フォールバックを使う。
-	static State Plan17(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input, enableCompleteFallback: true);
-		var plan12Parameters = Utils.LoadPlan7Parameters(
-			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
-		var plan15Parameters = Utils.LoadPlan7Parameters(
-			new(-0.65, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
-		long arrivedValueSum = 0;
-
-		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
-			var guest = input.InputGuest();
-			state.ReleaseDepartedGroups(guest.s);
-			arrivedValueSum += guest.v;
-
-			double z = Utils.CalculateValueZScore(guest);
-			double progress = (double)guestCount / input.M;
-			double plan12DynamicRate = progress >= plan12Parameters.DynamicRateStartProgress
-				? state.GetProjectedRate(arrivedValueSum)
-				: double.NaN;
-			double plan15DynamicRate = progress >= plan15Parameters.DynamicRateStartProgress
-				? state.GetProjectedRate(arrivedValueSum)
-				: double.NaN;
-			double projectedOccupiedRate = state.GetProjectedOccupiedRate(
-				guest.s,
-				Plan12ProjectedOccupancyHorizon);
-			double plan12Threshold = Utils.ShouldRejectDynamically(
-				guest,
-				projectedOccupiedRate,
-				progress,
-				input.PondClusterCount,
-				plan12Parameters,
-				plan12DynamicRate);
-			double plan15Threshold = Utils.CalculatePlan11RejectThreshold(
-				guest,
-				projectedOccupiedRate,
-				progress,
-				input.PondClusterCount,
-				plan15Parameters,
-				plan15DynamicRate);
-			double averageStayTime = (double)input.StayTimeSum / (guestCount + 1);
-			double plan15Weight = Math.Clamp((6500.0 - averageStayTime) / 3000.0, 0.0, 1.0);
-			double zThreshold = plan12Threshold
-				+ (plan15Threshold - plan12Threshold) * plan15Weight;
-			info.ZThresholdAverage += zThreshold;
-			if (z < zThreshold) {
-				input.RecordDecision(guestCount, z, zThreshold, "threshold");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-				continue;
-			}
-
-			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
-			var points = state.FindPlacementByBestFullSearch(shape);
-			if (points.Count != guest.p) {
-				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
-			}
-			if (points.Count == guest.p) {
-				input.RecordDecision(guestCount, z, zThreshold, "accepted-normal");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-				continue;
-			}
-
-			input.RecordDecision(guestCount, z, zThreshold, "normal-placement-failed");
-			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
-				input.RecordDecision(guestCount, z, zThreshold, "accepted-move");
-				input.OutputMove([moveGroup], info);
-				state.ProcessGuest(guest, true, points, info);
-				info.ZAverage += z;
-			} else {
-				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
-				input.OutputMove([], info);
-				state.ProcessGuest(guest, false, [], info);
-			}
-		}
-		state.ReleaseDepartedGroups(int.MaxValue);
-		return state;
-	}
-
-	// Plan16を基本とし、Pond・Cluster・動的Thetaが条件を満たす場合だけ完全フォールバックを使う。
+	// Plan18: Plan16を基本とし、Pond・Cluster・動的Thetaが条件を満たす場合だけ完全フォールバックを使う。
 	static State Plan18(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(isLocal, input);
 		var plan12Parameters = Utils.LoadPlan7Parameters(
-			new(-0.60, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
+			new(-0.45, 0.90, 0.25, 0.45, 0.20, 0.00, 0.00, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
 		var plan15Parameters = Utils.LoadPlan7Parameters(
 			new(-0.65, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
 		long arrivedValueSum = 0;
@@ -453,6 +168,107 @@ public class Program
 			double projectedOccupiedRate = state.GetProjectedOccupiedRate(
 				guest.s,
 				Plan12ProjectedOccupancyHorizon);
+			double plan12Threshold = Utils.ShouldRejectDynamically(
+				guest,
+				projectedOccupiedRate,
+				progress,
+				input.PondClusterCount,
+				plan12Parameters,
+				plan12DynamicRate);
+			double plan15Threshold = Utils.CalculatePlan11RejectThreshold(
+				guest,
+				projectedOccupiedRate,
+				progress,
+				input.PondClusterCount,
+				plan15Parameters,
+				plan15DynamicRate);
+			double plan15Weight = Math.Clamp((6500.0 - averageStayTime) / 3000.0, 0.0, 1.0);
+			double zThreshold = plan12Threshold
+			+ (plan15Threshold - plan12Threshold) * plan15Weight;
+			info.ZThresholdAverage += zThreshold;
+			if (z < zThreshold) {
+				input.RecordDecision(guestCount, z, zThreshold, "threshold");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+				continue;
+			}
+
+			var (shape, _) = Utils.CreateNearSquareShape(guest.p);
+			var points = state.FindPlacementByBestFullSearch(shape);
+			if (points.Count != guest.p) {
+				points = state.FindPlacementByReverseBreadthFirstSearch2(guest.p);
+			}
+			if (points.Count == guest.p) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-normal");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+				continue;
+			}
+
+			input.RecordDecision(guestCount, z, zThreshold, "normal-placement-failed");
+			if (state.TryMoveBestGroupForGuest(shape, guest, out var moveGroup, out points)) {
+				input.RecordDecision(guestCount, z, zThreshold, "accepted-move");
+				input.OutputMove([moveGroup], info);
+				state.ProcessGuest(guest, true, points, info);
+				info.ZAverage += z;
+			} else {
+				input.RecordDecision(guestCount, z, zThreshold, "move-failed");
+				input.OutputMove([], info);
+				state.ProcessGuest(guest, false, [], info);
+			}
+		}
+		state.ReleaseDepartedGroups(int.MaxValue);
+		return state;
+	}
+
+	// Plan19 : Plan18のフォールバック条件に、到着済み客から推定した価値密度分布を加える。
+	static State Plan19(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		var plan12Parameters = Utils.LoadPlan7Parameters(
+			new(-0.45, 0.90, 0.25, 0.45, 0.20, 0.00, 0.00, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
+		var plan15Parameters = Utils.LoadPlan7Parameters(
+			new(-0.65, 0.85, 0.30, 0.35, 0.35, 0.00, 0.10, 10.0, 0.0, 0.30, 0.40, 0.20, 0.65, 0.65, 5.00));
+		long arrivedValueSum = 0;
+		int densitySampleCount = 0;
+		double densityMean = 0.0;
+		double densityM2 = 0.0;
+
+		for (int guestCount = 0; guestCount < input.M; ++guestCount) {
+			var guest = input.InputGuest();
+			state.ReleaseDepartedGroups(guest.s);
+			arrivedValueSum += guest.v;
+			double duration = guest.t - guest.s;
+			double density = guest.v / (guest.p * duration);
+			++densitySampleCount;
+			double densityDelta = density - densityMean;
+			densityMean += densityDelta / densitySampleCount;
+			densityM2 += densityDelta * (density - densityMean);
+			double densityStandardDeviation = densitySampleCount < 2
+				? 0.0
+				: Math.Sqrt(densityM2 / (densitySampleCount - 1));
+			double averageStayTime = (double)input.StayTimeSum / (guestCount + 1);
+			double projectedOccupiedRate = state.GetProjectedOccupiedRate(
+				guest.s,
+				Plan12ProjectedOccupancyHorizon);
+			double densityZThreshold = Math.Clamp((projectedOccupiedRate - 0.50) * 2.0, 0.0, 0.8);
+			bool isHighValueDensity = densitySampleCount < 20
+				|| density >= densityMean + densityStandardDeviation * densityZThreshold;
+			state.SetCompleteFallbackEnabled(
+				info.PondCount >= 600
+				&& input.PondClusterCount >= 30
+				&& averageStayTime <= 5500.0
+				&& isHighValueDensity);
+
+			double z = Utils.CalculateValueZScore(guest);
+			double progress = (double)guestCount / input.M;
+			double plan12DynamicRate = progress >= plan12Parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
+			double plan15DynamicRate = progress >= plan15Parameters.DynamicRateStartProgress
+				? state.GetProjectedRate(arrivedValueSum)
+				: double.NaN;
 			double plan12Threshold = Utils.ShouldRejectDynamically(
 				guest,
 				projectedOccupiedRate,
