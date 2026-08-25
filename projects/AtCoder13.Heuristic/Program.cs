@@ -15,8 +15,8 @@ public class Program
 	static void Main()
 	{
 		HeuristicHelper.RunCases(
-			runCaseCount: 100,
-			testCaseCount: 150,
+			localTestCaseRunCount: 100,
+			judgePreTestCaseCount: 150,
 			isParallel: false,
 			i => Run(i),
 			(locker, i, ret) => {
@@ -35,9 +35,9 @@ public class Program
 					Console.Out.Flush();
 				}
 
-				return (info.Score, info.Loop, info.Up);
+				return (info.Score, info.Loop, info.Up, info.Elapsed);
 			},
-			(tc, rc) => {
+			(judgeCaseCount, localCaseCount) => {
 				//Console.WriteLine($"enabled count: {count}");
 			});
 	}
@@ -46,15 +46,47 @@ public class Program
 	static (Input input, Information info)
 		Run(int caseNumber)
 	{
-		var (isDebug, sw, rnd) = HeuristicHelper.Initialize();
-		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC056\tools\in\", caseNumber);
+		var (isLocal, sw, rnd) = HeuristicHelper.Initialize();
+		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC070\tools\in\", caseNumber);
 
-		var input = new Input(io, isDebug);
+		var input = new Input(io, isLocal);
 		var info = new Information();
+
+		var best = DoPlan0(isLocal, sw, rnd, input, info);
+
+		input.Output(best);
+		if (isLocal) {
+			info.Score = best.CalculateScore();
+		}
 
 		info.Elapsed = sw.ElapsedMilliseconds;
 
 		return (input, info);
+	}
+
+	static State DoPlan0(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+
+		return state;
+	}
+}
+
+public class State
+{
+	private readonly bool _isLocal;
+	private readonly Input _input;
+
+	public State(bool isLocal, Input input)
+	{
+		_isLocal = isLocal;
+		_input = input;
+	}
+
+	public long CalculateScore()
+	{
+		long score = 0;
+		return score;
 	}
 }
 
@@ -71,14 +103,21 @@ public class Information
 public class Input
 {
 	private readonly IOManager _io;
-	private readonly bool _isDebug;
+	private readonly bool _isLocal;
 
-	public Input(IOManager io, bool isDebug)
+	public Input(IOManager io, bool isLocal)
 	{
 		_io = io;
-		_isDebug = isDebug;
+		_isLocal = isLocal;
+	}
+
+	public void Output(State state)
+	{
 	}
 }
+
+// 以下は共通ライブラリー。 https://github.com/takytank/KyoProLib
+// 明示的な指示があるまで変更してはいけない。
 
 [Flags]
 public enum Direction4
@@ -463,11 +502,11 @@ public class Array2D<T>(int h, int w)
 public class HeuristicHelper
 {
 	public static void RunCases<T>(
-		int runCaseCount,
-		double testCaseCount,
+		int localTestCaseRunCount,
+		double judgePreTestCaseCount,
 		bool isParallel,
 		Func<int, T> run,
-		Func<object, int, T, (long score, int loop, int up)> outputCaseInformation,
+		Func<object, int, T, (long score, int loop, int up, long elapsed)> outputCaseInformation,
 		Action<double, int> addOutput = null)
 	{
 #if DEBUG
@@ -476,15 +515,16 @@ public class HeuristicHelper
 		double scoreLogSum = 0;
 		long loopSum = 0;
 		long upSum = 0;
+		long elapsedSum = 0;
 		long scoreMin = long.MaxValue;
 		long scoreMax = long.MinValue;
 		int errorCount = 0;
 		if (isParallel) {
-			Parallel.For(0, runCaseCount, i => {
+			Parallel.For(0, localTestCaseRunCount, i => {
 				RunCases(i);
 			});
 		} else {
-			for (int i = 0; i < runCaseCount; i++) {
+			for (int i = 0; i < localTestCaseRunCount; i++) {
 				RunCases(i);
 			}
 		}
@@ -493,13 +533,14 @@ public class HeuristicHelper
 		{
 			try {
 				var ret = run(i);
-				var (score, loop, up) = outputCaseInformation(locker, i, ret);
+				var (score, loop, up, elapsed) = outputCaseInformation(locker, i, ret);
 				Console.Out.Flush();
 				lock (locker) {
 					scoreSum += score;
 					scoreLogSum += Math.Log10(score);
 					loopSum += loop;
 					upSum += up;
+					elapsedSum += elapsed;
 					scoreMin = Math.Min(score, scoreMin);
 					scoreMax = Math.Max(score, scoreMax);
 				}
@@ -512,20 +553,22 @@ public class HeuristicHelper
 			}
 		}
 
-		scoreSum = (long)(scoreSum / (runCaseCount / testCaseCount));
-		scoreLogSum /= runCaseCount / testCaseCount;
+		// 本番環境への提出時とスコアのオーダーが揃うように、プレテストのケース数換算のスコアにする。
+		scoreSum = (long)(scoreSum / (localTestCaseRunCount / judgePreTestCaseCount));
+		scoreLogSum /= localTestCaseRunCount / judgePreTestCaseCount;
 		Console.WriteLine("");
 
 		Console.WriteLine("");
 		Console.WriteLine($"sum: {scoreSum}");
-		Console.WriteLine($"ave: {scoreSum / testCaseCount}");
+		Console.WriteLine($"ave: {scoreSum / judgePreTestCaseCount}");
 		Console.WriteLine($"min: {scoreMin}");
 		Console.WriteLine($"max: {scoreMax}");
-		Console.WriteLine($"log: {scoreLogSum / testCaseCount}");
-		Console.WriteLine($"loop ave.: {loopSum / (double)runCaseCount:f3}");
-		Console.WriteLine($"up ave.: {upSum / (double)runCaseCount:f3}");
+		Console.WriteLine($"log: {scoreLogSum / judgePreTestCaseCount}");
+		Console.WriteLine($"loop ave.: {loopSum / (double)localTestCaseRunCount:f3}");
+		Console.WriteLine($"up ave.: {upSum / (double)localTestCaseRunCount:f3}");
+		Console.WriteLine($"elpased ave.: {elapsedSum / (double)localTestCaseRunCount:f3}");
 
-		addOutput?.Invoke(testCaseCount, runCaseCount);
+		addOutput?.Invoke(judgePreTestCaseCount, localTestCaseRunCount);
 
 		Console.WriteLine($"error : {errorCount}");
 
