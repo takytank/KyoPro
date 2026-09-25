@@ -26,6 +26,8 @@ public class Program
 						$"{i:d4}:",
 						$"N={input.N:d2}",
 						$"K={input.K:d2}",
+						$"W={info.WallCount:d3}",
+						$"S={info.SlimeCount:d3}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
 						$"score={info.Score:d5}",
@@ -52,8 +54,18 @@ public class Program
 
 		var input = new Input(io, isLocal);
 		var info = new Information();
+		for (int i = 0; i < input.N; i++) {
+			for (int j = 0; j < input.N; j++) {
+				char c = input.C[i][j];
+				if (c >= 'a' && c <= 'l') {
+					++info.SlimeCount;
+				} else if (c == '#') {
+					++info.WallCount;
+				}
+			}
+		}
 
-		var best = DoPlan1(isLocal, sw, rnd, input, info);
+		var best = DoPlan3(isLocal, sw, rnd, input, info);
 
 		input.Output(best);
 		if (isLocal) {
@@ -128,6 +140,204 @@ public class Program
 
 		return state;
 	}
+
+	static State DoPlan2(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var colorOrder = new int[input.K];
+		for (int c = 0; c < input.K; c++) {
+			colorOrder[c] = c;
+		}
+
+		return DoPlanByColorOrder(isLocal, sw, rnd, input, info, colorOrder);
+	}
+
+	static State DoPlan3(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var colorCounts = new int[input.K];
+		foreach (string row in input.C) {
+			foreach (char cell in row) {
+				if (cell >= 'a' && cell < 'a' + input.K) {
+					colorCounts[cell - 'a']++;
+				}
+			}
+		}
+
+		var colorOrder = new int[input.K];
+		for (int c = 0; c < input.K; c++) {
+			colorOrder[c] = c;
+		}
+
+		Array.Sort(colorOrder, (a, b) => {
+			int compare = colorCounts[a].CompareTo(colorCounts[b]);
+			return compare != 0 ? compare : a.CompareTo(b);
+		});
+
+		return DoPlanByColorOrder(isLocal, sw, rnd, input, info, colorOrder);
+	}
+
+	static State DoPlanByColorOrder(
+		bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
+		int[] colorOrder)
+	{
+		var state = new State(isLocal, input);
+		int n = input.N;
+
+		foreach (int c in colorOrder) {
+			var dists = new int[n, n].Fill(int.MaxValue);
+			var que = new Queue<(int i, int j, int d)>();
+			var (si, sj) = input.Dens[c];
+			dists[si, sj] = 0;
+			que.Enqueue((si, sj, 0));
+
+			while (que.Count > 0) {
+				var (i, j, d) = que.Dequeue();
+				int nd = d + 1;
+				foreach (var (ii, jj) in Helper.Adjacence4(i, j, n, n)) {
+					if (input.Map[ii, jj] == -2 || dists[ii, jj] <= nd) {
+						continue;
+					}
+
+					dists[ii, jj] = nd;
+					que.Enqueue((ii, jj, nd));
+				}
+			}
+
+			var pque = new HeapQueue<(int i, int j, int d), int>(x => x.d, reverses: false);
+			var queued = new HashSet<(int i, int j)>();
+
+			void EnqueueIfTargetExists(int i, int j)
+			{
+				if (state.Slimes[i, j].Count > 0
+					&& state.Slimes[i, j].Peek() == c
+					&& queued.Add((i, j))) {
+					pque.Enqueue((i, j, dists[i, j]));
+				}
+			}
+
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					EnqueueIfTargetExists(i, j);
+				}
+			}
+
+			var deferred = new List<(int i, int j)>();
+			bool retryDeferred;
+			do {
+				bool changedSinceRetry = false;
+
+				while (pque.Count > 0 && state.Moves.Count < 100000) {
+					var (i, j, _) = pque.Dequeue();
+					queued.Remove((i, j));
+
+					if (state.Slimes[i, j].Count == 0
+						|| state.Slimes[i, j].Peek() != c) {
+						continue;
+					}
+
+					if (!TryFindBestMove(i, j,
+						out int k, out Direction4 dir, out int l,
+						out int ni, out int nj)) {
+						deferred.Add((i, j));
+						continue;
+					}
+
+					state.Move(i, j, k, dir, l);
+					changedSinceRetry = true;
+					EnqueueIfTargetExists(i, j);
+					EnqueueIfTargetExists(ni, nj);
+				}
+
+				if (state.Moves.Count >= 100000) {
+					return state;
+				}
+
+				retryDeferred = deferred.Count > 0 && changedSinceRetry;
+				if (retryDeferred) {
+					foreach (var (i, j) in deferred) {
+						EnqueueIfTargetExists(i, j);
+					}
+					deferred.Clear();
+				}
+			} while (retryDeferred);
+
+			bool TryFindBestMove(
+				int i, int j,
+				out int bestK, out Direction4 bestDir, out int bestL,
+				out int bestNi, out int bestNj)
+			{
+				bestK = 0;
+				bestDir = Direction4.N;
+				bestL = 0;
+				bestNi = 0;
+				bestNj = 0;
+
+				int h = state.Slimes[i, j].Count;
+				int fromDist = dists[i, j];
+				int targetCount = 0;
+				int topTargetCount = 0;
+				bool stillCountingTop = true;
+				foreach (int slime in state.Slimes[i, j]) {
+					if (slime == c) {
+						targetCount++;
+						if (stillCountingTop) {
+							topTargetCount++;
+						}
+					} else {
+						stillCountingTop = false;
+					}
+				}
+
+				long bestTotalDistance = (long)targetCount * fromDist;
+				bool found = false;
+
+				for (int k = h - topTargetCount; k < h; k++) {
+					int moved = h - k;
+					foreach (var dir in Direction4Extensions.ForEach4()) {
+						for (int l = 1; l <= k + 1; l++) {
+							bool pathIsFloor = true;
+							for (int step = 1; step <= l; step++) {
+								var (ii, jj) = dir.Move(i, j, step);
+								if ((uint)ii >= (uint)n
+									|| (uint)jj >= (uint)n
+									|| input.Map[ii, jj] == -2) {
+									pathIsFloor = false;
+									break;
+								}
+							}
+
+							if (!pathIsFloor) {
+								break;
+							}
+
+							var (destI, destJ) = dir.Move(i, j, l);
+							int toDist = dists[destI, destJ];
+							if (toDist >= fromDist
+								|| state.Slimes[destI, destJ].Count + moved > 8) {
+								continue;
+							}
+
+							long totalDistance =
+								(long)(targetCount - moved) * fromDist
+								+ (long)moved * toDist;
+							if (totalDistance < bestTotalDistance) {
+								bestTotalDistance = totalDistance;
+								bestK = k;
+								bestDir = dir;
+								bestL = l;
+								bestNi = destI;
+								bestNj = destJ;
+								found = true;
+							}
+						}
+					}
+				}
+
+				return found;
+			}
+		}
+
+		return state;
+	}
 }
 
 public class State
@@ -160,20 +370,31 @@ public class State
 	public bool Move(int i, int j, int k, Direction4 d, int l)
 	{
 		var (ni, nj) = d.Move(i, j, l);
-		int mc = Slimes[i, j].Count - k;
-		bool backed = false;
-		for (int kk = 0; kk < mc; kk++) {
-			var slime = Slimes[i, j].Pop();
-			if (Slimes[ni, nj].Count == 0 && _input.Map[ni, nj] == slime) {
-				// 帰巣
-				--SlimeCount;
-				backed = true;
-			} else {
-				Slimes[ni, nj].Push(slime);
-			}
+		int moveCount = Slimes[i, j].Count - k;
+		for (int count = 0; count < moveCount; count++) {
+			Slimes[ni, nj].Push(Slimes[i, j].Pop());
 		}
 
 		Moves.Add((i, j, k, d, l));
+		bool backed = ReturnHome(i, j);
+		backed |= ReturnHome(ni, nj);
+		return backed;
+	}
+
+	private bool ReturnHome(int i, int j)
+	{
+		int denColor = _input.Map[i, j];
+		if (denColor < 0) {
+			return false;
+		}
+
+		bool backed = false;
+		while (Slimes[i, j].Count > 0 && Slimes[i, j].Peek() == denColor) {
+			Slimes[i, j].Pop();
+			--SlimeCount;
+			backed = true;
+		}
+
 		return backed;
 	}
 
@@ -193,6 +414,8 @@ public class Information
 	public int Up { get; set; } = 0;
 	public long Elapsed { get; set; } = 0;
 
+	public int WallCount { get; set; } = 0;
+	public int SlimeCount { get; set; } = 0;
 }
 
 public class Input
