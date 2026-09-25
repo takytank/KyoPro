@@ -24,7 +24,8 @@ public class Program
 				lock (locker) {
 					var status = new List<string> {
 						$"{i:d4}:",
-						//$"N={input.N:d2}",
+						$"N={input.N:d2}",
+						$"K={input.K:d2}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
 						$"score={info.Score:d5}",
@@ -47,12 +48,12 @@ public class Program
 		Run(int caseNumber)
 	{
 		var (isLocal, sw, rnd) = HeuristicHelper.Initialize();
-		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC070\tools\in\", caseNumber);
+		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC072\tools\in\", caseNumber);
 
 		var input = new Input(io, isLocal);
 		var info = new Information();
 
-		var best = DoPlan0(isLocal, sw, rnd, input, info);
+		var best = DoPlan1(isLocal, sw, rnd, input, info);
 
 		input.Output(best);
 		if (isLocal) {
@@ -70,6 +71,63 @@ public class Program
 
 		return state;
 	}
+
+	static State DoPlan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+
+		int n = input.N;
+		// 各色ごとに巣からBFSし、近い方から順に移動させる。
+		for (int c = 0; c < input.K; c++) {
+			// BFSで巣からの距離を計算
+			var dists = new int[n, n].Fill(int.MaxValue);
+			var que = new Queue<(int i, int j, int d)>();
+			var (si, sj) = input.Dens[c];
+			dists[si, sj] = 0;
+			que.Enqueue((si, sj, 0));
+			while (que.Count > 0) {
+				var (i, j, d) = que.Dequeue();
+				int nd = d + 1;
+				foreach (var (ii, jj) in Helper.Adjacence4(i, j, n, n)) {
+					if (input.Map[ii, jj] == -2) {
+						continue;
+					}
+
+					if (dists[ii, jj] > nd) {
+						dists[ii, jj] = nd;
+						que.Enqueue((ii, jj, nd));
+					}
+				}
+			}
+
+			var pque = new HeapQueue<(int i, int j, int d), int>(x => x.d, reverses: true);
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					if (state.Slimes[i, j].Count > 0 && state.Slimes[i, j].Peek() == c) {
+						pque.Enqueue((i, j, dists[i, j]));
+					}
+				}
+			}
+
+			while (pque.Count > 0) {
+				var (i, j, d) = pque.Dequeue();
+				// とりあえず一匹ずつ
+				foreach (var dir in Direction4Extensions.ForEach4()) {
+					var (ni, nj) = dir.Move(i, j);
+					if ((uint)ni < n && (uint)nj < n && dists[ni, nj] < d) {
+						bool backed = state.Move(i, j, state.Slimes[i, j].Count - 1, dir, 1);
+						if (backed == false) {
+							pque.Enqueue((ni, nj, dists[ni, nj]));
+						}
+
+						break;
+					}
+				}
+			}
+		}
+
+		return state;
+	}
 }
 
 public class State
@@ -77,15 +135,52 @@ public class State
 	private readonly bool _isLocal;
 	private readonly Input _input;
 
+	public int SlimeCount { get; private set; }
+	public Stack<int>[,] Slimes { get; private set; }
+	public List<(int i, int j, int k, Direction4 d, int l)> Moves { get; private set; } = [];
+
 	public State(bool isLocal, Input input)
 	{
 		_isLocal = isLocal;
 		_input = input;
+
+		int n = _input.N;
+		Slimes = Helper.Array2(n, n, (i, j) => new Stack<int>());
+		for (int i = 0; i < n; i++) {
+			for (int j = 0; j < n; j++) {
+				char c = _input.C[i][j];
+				if (c >= 'a' && c <= 'l') {
+					Slimes[i, j].Push(c - 'a');
+					++SlimeCount;
+				}
+			}
+		}
+	}
+
+	public bool Move(int i, int j, int k, Direction4 d, int l)
+	{
+		var (ni, nj) = d.Move(i, j, l);
+		int mc = Slimes[i, j].Count - k;
+		bool backed = false;
+		for (int kk = 0; kk < mc; kk++) {
+			var slime = Slimes[i, j].Pop();
+			if (Slimes[ni, nj].Count == 0 && _input.Map[ni, nj] == slime) {
+				// 帰巣
+				--SlimeCount;
+				backed = true;
+			} else {
+				Slimes[ni, nj].Push(slime);
+			}
+		}
+
+		Moves.Add((i, j, k, d, l));
+		return backed;
 	}
 
 	public long CalculateScore()
 	{
-		long score = 0;
+		long score = Moves.Count;
+		score += SlimeCount * 100000L;
 		return score;
 	}
 }
@@ -105,19 +200,149 @@ public class Input
 	private readonly IOManager _io;
 	private readonly bool _isLocal;
 
+	public int N { get; }
+	public int K { get; }
+	public string[] C { get; }
+
+	public int[,] Map { get; }
+	public (int i, int j)[] Dens { get; }
+
 	public Input(IOManager io, bool isLocal)
 	{
 		_io = io;
 		_isLocal = isLocal;
+
+		(N, K) = _io.Int2();
+		C = io.ArrayString(N);
+
+		Map = new int[N, N];
+		Dens = new (int i, int j)[K];
+		for (int i = 0; i < N; i++) {
+			for (int j = 0; j < N; j++) {
+				char c = C[i][j];
+				if (c >= 'A' && c <= 'L') {
+					int cc = c - 'A';
+					Map[i, j] = c - 'A';
+					Dens[cc] = (i, j);
+				} else if (c == '#') {
+					Map[i, j] = -2;
+				} else {
+					Map[i, j] = -1;
+				}
+			}
+		}
 	}
 
 	public void Output(State state)
 	{
+		foreach (var (i, j, k, d, l) in state.Moves) {
+			_io.WriteLine($"{i} {j} {k} {d.ToSymbol()} {l}");
+		}
 	}
 }
 
 // 以下は共通ライブラリー。 https://github.com/takytank/KyoProLib
 // 明示的な指示があるまで変更してはいけない。
+
+public class HeapQueue<TObject, TPriority> where TPriority : IComparable<TPriority>
+{
+	private readonly Func<TObject, TPriority> selector_;
+	private readonly int reverseFactory_;
+	private TObject[] heap_;
+
+	public TObject Top => heap_[0];
+	public int Count { get; private set; }
+
+	public HeapQueue(
+		Func<TObject, TPriority> selector,
+		bool reverses = false)
+		: this(1024, selector, reverses) { }
+
+	public HeapQueue(
+		int capacity,
+		Func<TObject, TPriority> selector,
+		bool reverses = false)
+	{
+		if (capacity == 0) {
+			capacity = 1024;
+		}
+
+		heap_ = new TObject[capacity];
+		selector_ = selector;
+		reverseFactory_ = reverses ? -1 : 1;
+	}
+
+	public void Enqueue(TObject item)
+	{
+		if (heap_.Length == Count) {
+			Extend(heap_.Length * 2);
+		}
+
+		var priority = selector_(item);
+		heap_[Count] = item;
+		++Count;
+
+		int c = Count - 1;
+		while (c > 0) {
+			int p = (c - 1) >> 1;
+			if (Compare(Priority(p), priority) < 0) {
+				heap_[c] = heap_[p];
+				c = p;
+			} else {
+				break;
+			}
+		}
+
+		heap_[c] = item;
+	}
+
+	public TObject Dequeue()
+	{
+		TObject ret = heap_[0];
+		int n = Count - 1;
+
+		var item = heap_[n];
+		var priority = Priority(n);
+		int p = 0;
+		int c = (p << 1) + 1;
+		while (c < n) {
+			if (c != n - 1 && Compare(Priority(c + 1), Priority(c)) > 0) {
+				++c;
+			}
+
+			if (Compare(priority, Priority(c)) < 0) {
+				heap_[p] = heap_[c];
+				p = c;
+				c = (p << 1) + 1;
+			} else {
+				break;
+			}
+		}
+
+		heap_[p] = item;
+		Count--;
+
+		return ret;
+	}
+
+	public void Clear() => Count = 0;
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private TPriority Priority(int index)
+		=> selector_(heap_[index]);
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private int Compare(TPriority x, TPriority y)
+		=> x.CompareTo(y) * reverseFactory_;
+
+	[MethodImpl(MethodImplOptions.AggressiveInlining)]
+	private void Extend(int newSize)
+	{
+		var newHeap = new TObject[newSize];
+		heap_.CopyTo(newHeap, 0);
+		heap_ = newHeap;
+	}
+}
 
 [Flags]
 public enum Direction4
