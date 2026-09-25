@@ -15,8 +15,8 @@ public class Program
 	static void Main()
 	{
 		HeuristicHelper.RunCases(
-			localTestCaseRunCount: 1,
-			judgePreTestCaseCount: 150,
+			localTestCaseRunCount: 100,
+			judgePreTestCaseCount: 50,
 			isParallel: false,
 			i => Run(i),
 			(locker, i, ret) => {
@@ -65,7 +65,7 @@ public class Program
 			}
 		}
 
-		var best = DoPlan5(isLocal, sw, rnd, input, info);
+		var best = DoPlan6(isLocal, sw, rnd, input, info);
 
 		input.Output(best);
 		if (isLocal) {
@@ -191,9 +191,16 @@ public class Program
 		return DoPlan4Core(isLocal, sw, rnd, input, info, requireNonWorsening: true);
 	}
 
+	static State DoPlan6(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		return DoPlan4Core(
+			isLocal, sw, rnd, input, info,
+			requireNonWorsening: true, useTwoStepLookahead: true);
+	}
+
 	static State DoPlan4Core(
 		bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
-		bool requireNonWorsening)
+		bool requireNonWorsening, bool useTwoStepLookahead = false)
 	{
 		var state = new State(isLocal, input);
 		int n = input.N;
@@ -301,7 +308,8 @@ public class Program
 
 			int h = state.Slimes[i, j].Count;
 			int[] stack = state.Slimes[i, j].ToArray();
-			long bestImprovement = 0;
+			long bestScore = 0;
+			long bestImmediateImprovement = 0;
 			bool found = false;
 
 			for (int k = 0; k < h; k++) {
@@ -350,8 +358,33 @@ public class Program
 						}
 
 						long improvement = fromDistance - toDistance;
-						if (improvement > bestImprovement) {
-							bestImprovement = improvement;
+						if (improvement <= 0) {
+							continue;
+						}
+
+						long score = improvement;
+						if (useTwoStepLookahead) {
+							var sourceAfter = CopyStack(state.Slimes[i, j]);
+							var destinationAfter = CopyStack(state.Slimes[destI, destJ]);
+							for (int count = 0; count < moved; count++) {
+								destinationAfter.Push(sourceAfter.Pop());
+							}
+							ReturnHome(sourceAfter, i, j);
+							ReturnHome(destinationAfter, destI, destJ);
+
+							long nextSourceImprovement = BestNextImprovement(
+								i, j, sourceAfter,
+								i, j, sourceAfter, destI, destJ, destinationAfter);
+							long nextDestinationImprovement = BestNextImprovement(
+								destI, destJ, destinationAfter,
+								i, j, sourceAfter, destI, destJ, destinationAfter);
+							score += Math.Max(nextSourceImprovement, nextDestinationImprovement);
+						}
+
+						if (score > bestScore
+							|| (score == bestScore && improvement > bestImmediateImprovement)) {
+							bestScore = score;
+							bestImmediateImprovement = improvement;
 							bestK = k;
 							bestDir = dir;
 							bestL = l;
@@ -364,6 +397,102 @@ public class Program
 			}
 
 			return found;
+		}
+
+		long BestNextImprovement(
+			int fromI, int fromJ, Stack<int> tower,
+			int changedSourceI, int changedSourceJ, Stack<int> changedSource,
+			int changedDestinationI, int changedDestinationJ, Stack<int> changedDestination)
+		{
+			int h = tower.Count;
+			if (h == 0) {
+				return 0;
+			}
+
+			int[] stack = tower.ToArray();
+			long bestImprovement = 0;
+			for (int k = 0; k < h; k++) {
+				int moved = h - k;
+				long fromDistance = 0;
+				for (int index = 0; index < moved; index++) {
+					fromDistance += dists[stack[index], fromI, fromJ];
+				}
+
+				foreach (var dir in Direction4Extensions.ForEach4()) {
+					for (int l = 1; l <= k + 1; l++) {
+						bool pathIsFloor = true;
+						for (int step = 1; step <= l; step++) {
+							var (ii, jj) = dir.Move(fromI, fromJ, step);
+							if ((uint)ii >= (uint)n
+								|| (uint)jj >= (uint)n
+								|| input.Map[ii, jj] == -2) {
+								pathIsFloor = false;
+								break;
+							}
+						}
+
+						if (!pathIsFloor) {
+							break;
+						}
+
+						var (destI, destJ) = dir.Move(fromI, fromJ, l);
+						int destinationHeight =
+							GetHypotheticalHeight(destI, destJ,
+								changedSourceI, changedSourceJ, changedSource,
+								changedDestinationI, changedDestinationJ, changedDestination);
+						if (destinationHeight + moved > 8) {
+							continue;
+						}
+
+						long toDistance = 0;
+						bool noSlimeWorsens = true;
+						for (int index = 0; index < moved; index++) {
+							int color = stack[index];
+							int from = dists[color, fromI, fromJ];
+							int to = dists[color, destI, destJ];
+							toDistance += to;
+							if (to > from) {
+								noSlimeWorsens = false;
+							}
+						}
+
+						if (requireNonWorsening && !noSlimeWorsens) {
+							continue;
+						}
+
+						bestImprovement = Math.Max(bestImprovement, fromDistance - toDistance);
+					}
+				}
+			}
+
+			return bestImprovement;
+		}
+
+		int GetHypotheticalHeight(
+			int i, int j,
+			int changedSourceI, int changedSourceJ, Stack<int> changedSource,
+			int changedDestinationI, int changedDestinationJ, Stack<int> changedDestination)
+		{
+			if (i == changedSourceI && j == changedSourceJ) {
+				return changedSource.Count;
+			}
+			if (i == changedDestinationI && j == changedDestinationJ) {
+				return changedDestination.Count;
+			}
+			return state.Slimes[i, j].Count;
+		}
+
+		Stack<int> CopyStack(Stack<int> stack)
+		{
+			return new Stack<int>(stack.Reverse());
+		}
+
+		void ReturnHome(Stack<int> tower, int i, int j)
+		{
+			int denColor = input.Map[i, j];
+			while (denColor >= 0 && tower.Count > 0 && tower.Peek() == denColor) {
+				tower.Pop();
+			}
 		}
 	}
 
