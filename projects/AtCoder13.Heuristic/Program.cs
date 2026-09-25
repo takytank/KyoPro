@@ -15,7 +15,7 @@ public class Program
 	static void Main()
 	{
 		HeuristicHelper.RunCases(
-			localTestCaseRunCount: 100,
+			localTestCaseRunCount: 1,
 			judgePreTestCaseCount: 150,
 			isParallel: false,
 			i => Run(i),
@@ -65,11 +65,17 @@ public class Program
 			}
 		}
 
-		var best = DoPlan3(isLocal, sw, rnd, input, info);
+		var best = DoPlan5(isLocal, sw, rnd, input, info);
 
 		input.Output(best);
 		if (isLocal) {
 			info.Score = best.CalculateScore();
+
+			// 手元での盤面評価時に true にして実行する。
+			bool isDebug = false;
+			if (isDebug) {
+				best.Simulate();
+			}
 		}
 
 		info.Elapsed = sw.ElapsedMilliseconds;
@@ -173,6 +179,192 @@ public class Program
 		});
 
 		return DoPlanByColorOrder(isLocal, sw, rnd, input, info, colorOrder);
+	}
+
+	static State DoPlan4(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		return DoPlan4Core(isLocal, sw, rnd, input, info, requireNonWorsening: false);
+	}
+
+	static State DoPlan5(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		return DoPlan4Core(isLocal, sw, rnd, input, info, requireNonWorsening: true);
+	}
+
+	static State DoPlan4Core(
+		bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
+		bool requireNonWorsening)
+	{
+		var state = new State(isLocal, input);
+		int n = input.N;
+		var dists = new int[input.K, n, n];
+
+		// 各色の巣からの距離を個別に計算する。
+		for (int c = 0; c < input.K; c++) {
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					dists[c, i, j] = int.MaxValue;
+				}
+			}
+
+			var que = new Queue<(int i, int j, int d)>();
+			var (si, sj) = input.Dens[c];
+			dists[c, si, sj] = 0;
+			que.Enqueue((si, sj, 0));
+
+			while (que.Count > 0) {
+				var (i, j, d) = que.Dequeue();
+				int nd = d + 1;
+				foreach (var (ii, jj) in Helper.Adjacence4(i, j, n, n)) {
+					if (input.Map[ii, jj] == -2 || dists[c, ii, jj] <= nd) {
+						continue;
+					}
+
+					dists[c, ii, jj] = nd;
+					que.Enqueue((ii, jj, nd));
+				}
+			}
+		}
+
+		var pque = new HeapQueue<
+			(int i, int j, (int special, int distance) priority, int version),
+			(int special, int distance)>(
+			x => x.priority, reverses: false);
+		var versions = new int[n, n];
+
+		void Enqueue(int i, int j)
+		{
+			if (state.Slimes[i, j].Count == 0) {
+				return;
+			}
+
+			int topColor = state.Slimes[i, j].Peek();
+			int nestColor = input.Map[i, j];
+			bool blocksNest = nestColor >= 0 && topColor != nestColor;
+			bool isHeightLimit = state.Slimes[i, j].Count == 8;
+			int special = blocksNest || isHeightLimit ? 1 : 0;
+			var priority = (special, dists[topColor, i, j]);
+			int version = ++versions[i, j];
+			pque.Enqueue((i, j, priority, version));
+		}
+
+		for (int i = 0; i < n; i++) {
+			for (int j = 0; j < n; j++) {
+				Enqueue(i, j);
+			}
+		}
+
+		var deferred = new List<(int i, int j)>();
+		while (true) {
+			bool changedSinceRetry = false;
+			while (pque.Count > 0 && state.Moves.Count < 100000) {
+				var (i, j, _, version) = pque.Dequeue();
+				if (version != versions[i, j] || state.Slimes[i, j].Count == 0) {
+					continue;
+				}
+
+				if (!TryFindBestMove(i, j,
+					out int k, out Direction4 dir, out int l,
+					out int ni, out int nj)) {
+					deferred.Add((i, j));
+					continue;
+				}
+
+				state.Move(i, j, k, dir, l);
+				changedSinceRetry = true;
+				Enqueue(i, j);
+				Enqueue(ni, nj);
+			}
+
+			if (state.Moves.Count >= 100000 || deferred.Count == 0 || !changedSinceRetry) {
+				break;
+			}
+
+			foreach (var (i, j) in deferred) {
+				Enqueue(i, j);
+			}
+			deferred.Clear();
+		}
+
+		return state;
+
+		bool TryFindBestMove(
+			int i, int j,
+			out int bestK, out Direction4 bestDir, out int bestL,
+			out int bestNi, out int bestNj)
+		{
+			bestK = 0;
+			bestDir = Direction4.N;
+			bestL = 0;
+			bestNi = 0;
+			bestNj = 0;
+
+			int h = state.Slimes[i, j].Count;
+			int[] stack = state.Slimes[i, j].ToArray();
+			long bestImprovement = 0;
+			bool found = false;
+
+			for (int k = 0; k < h; k++) {
+				int moved = h - k;
+				long fromDistance = 0;
+				for (int index = 0; index < moved; index++) {
+					fromDistance += dists[stack[index], i, j];
+				}
+
+				foreach (var dir in Direction4Extensions.ForEach4()) {
+					for (int l = 1; l <= k + 1; l++) {
+						bool pathIsFloor = true;
+						for (int step = 1; step <= l; step++) {
+							var (ii, jj) = dir.Move(i, j, step);
+							if ((uint)ii >= (uint)n
+								|| (uint)jj >= (uint)n
+								|| input.Map[ii, jj] == -2) {
+								pathIsFloor = false;
+								break;
+							}
+						}
+
+						if (!pathIsFloor) {
+							break;
+						}
+
+						var (destI, destJ) = dir.Move(i, j, l);
+						if (state.Slimes[destI, destJ].Count + moved > 8) {
+							continue;
+						}
+
+						long toDistance = 0;
+						bool noSlimeWorsens = true;
+						for (int index = 0; index < moved; index++) {
+							int color = stack[index];
+							int from = dists[color, i, j];
+							int to = dists[color, destI, destJ];
+							toDistance += to;
+							if (to > from) {
+								noSlimeWorsens = false;
+							}
+						}
+
+						if (requireNonWorsening && !noSlimeWorsens) {
+							continue;
+						}
+
+						long improvement = fromDistance - toDistance;
+						if (improvement > bestImprovement) {
+							bestImprovement = improvement;
+							bestK = k;
+							bestDir = dir;
+							bestL = l;
+							bestNi = destI;
+							bestNj = destJ;
+							found = true;
+						}
+					}
+				}
+			}
+
+			return found;
+		}
 	}
 
 	static State DoPlanByColorOrder(
@@ -403,6 +595,225 @@ public class State
 		long score = Moves.Count;
 		score += SlimeCount * 100000L;
 		return score;
+	}
+
+	public void Simulate()
+	{
+		if (Moves.Count > 100000) {
+			throw new InvalidOperationException(
+				$"Invalid move sequence: {Moves.Count} operations exceeds the 100000-operation limit.");
+		}
+
+		int n = _input.N;
+		var board = Helper.Array2(n, n, (i, j) => new Stack<int>());
+		for (int i = 0; i < n; i++) {
+			for (int j = 0; j < n; j++) {
+				char cell = _input.C[i][j];
+				if (cell >= 'a' && cell <= 'l') {
+					board[i, j].Push(cell - 'a');
+				}
+			}
+		}
+
+		var dists = new int[_input.K, n, n];
+		for (int c = 0; c < _input.K; c++) {
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					dists[c, i, j] = int.MaxValue;
+				}
+			}
+
+			var que = new Queue<(int i, int j, int d)>();
+			var (si, sj) = _input.Dens[c];
+			dists[c, si, sj] = 0;
+			que.Enqueue((si, sj, 0));
+			while (que.Count > 0) {
+				var (i, j, d) = que.Dequeue();
+				int nd = d + 1;
+				foreach (var (ii, jj) in Helper.Adjacence4(i, j, n, n)) {
+					if (_input.Map[ii, jj] == -2 || dists[c, ii, jj] <= nd) {
+						continue;
+					}
+
+					dists[c, ii, jj] = nd;
+					que.Enqueue((ii, jj, nd));
+				}
+			}
+		}
+
+		void ReturnHome(int i, int j)
+		{
+			int denColor = _input.Map[i, j];
+			while (denColor >= 0 && board[i, j].Count > 0
+				&& board[i, j].Peek() == denColor) {
+				board[i, j].Pop();
+			}
+		}
+
+		InvalidOperationException InvalidMove(
+			int turn, (int i, int j, int k, Direction4 d, int l) move, string reason)
+		{
+			return new InvalidOperationException(
+				$"Invalid move at turn {turn}: ({move.i}, {move.j}) k={move.k} "
+				+ $"d={move.d} l={move.l}. {reason}");
+		}
+
+		void WriteStateLog(int turn, string moveJson)
+		{
+			var colorCounts = new int[_input.K];
+			var distanceByColor = new long[_input.K];
+			var heightCounts = new int[9];
+			int remaining = 0;
+			int maxHeight = 0;
+			int blockedNests = 0;
+			long totalDistance = 0;
+
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					var tower = board[i, j];
+					int height = tower.Count;
+					if (_input.Map[i, j] != -2) {
+						heightCounts[height]++;
+					}
+					maxHeight = Math.Max(maxHeight, height);
+
+					if (_input.Map[i, j] >= 0 && height > 0
+						&& tower.Peek() != _input.Map[i, j]) {
+						blockedNests++;
+					}
+
+					foreach (int color in tower) {
+						colorCounts[color]++;
+						distanceByColor[color] += dists[color, i, j];
+						remaining++;
+					}
+				}
+			}
+
+			for (int c = 0; c < _input.K; c++) {
+				totalDistance += distanceByColor[c];
+			}
+
+			var log = new StringBuilder();
+			log.Append("{\"turn\":").Append(turn)
+				.Append(",\"move\":").Append(moveJson ?? "null")
+				.Append(",\"remaining\":").Append(remaining)
+				.Append(",\"maxHeight\":").Append(maxHeight)
+				.Append(",\"heightCounts\":");
+			AppendArray(log, heightCounts);
+			log.Append(",\"colorCounts\":");
+			AppendArray(log, colorCounts);
+			log.Append(",\"distanceByColor\":");
+			AppendArray(log, distanceByColor);
+			log.Append(",\"totalDistance\":").Append(totalDistance)
+				.Append(",\"blockedNests\":").Append(blockedNests)
+				.Append(",\"board\":[");
+
+			for (int i = 0; i < n; i++) {
+				if (i > 0) {
+					log.Append(',');
+				}
+				log.Append('[');
+				for (int j = 0; j < n; j++) {
+					if (j > 0) {
+						log.Append(',');
+					}
+
+					string cell;
+					if (_input.Map[i, j] == -2) {
+						cell = "#";
+					} else {
+						var tower = board[i, j].ToArray();
+						var towerText = new StringBuilder();
+						for (int index = tower.Length - 1; index >= 0; index--) {
+							towerText.Append((char)('a' + tower[index]));
+						}
+
+						if (_input.Map[i, j] >= 0) {
+							cell = $"{(char)('A' + _input.Map[i, j])}:{(towerText.Length == 0 ? "-" : towerText.ToString())}";
+						} else {
+							cell = towerText.Length == 0 ? "." : towerText.ToString();
+						}
+					}
+
+					log.Append('"').Append(cell).Append('"');
+				}
+				log.Append(']');
+			}
+
+			log.Append("]}");
+			Console.Error.WriteLine(log);
+		}
+
+		void AppendArray<T>(StringBuilder builder, T[] values)
+		{
+			builder.Append('[');
+			for (int index = 0; index < values.Length; index++) {
+				if (index > 0) {
+					builder.Append(',');
+				}
+				builder.Append(values[index]);
+			}
+			builder.Append(']');
+		}
+
+		WriteStateLog(0, null);
+		for (int turn = 0; turn < Moves.Count; turn++) {
+			var move = Moves[turn];
+			if ((uint)move.i >= (uint)n || (uint)move.j >= (uint)n) {
+				throw InvalidMove(turn, move, "The source is outside the board.");
+			}
+			if (move.d != Direction4.U && move.d != Direction4.D
+				&& move.d != Direction4.L && move.d != Direction4.R) {
+				throw InvalidMove(turn, move, "The direction is invalid.");
+			}
+			if (_input.Map[move.i, move.j] == -2) {
+				throw InvalidMove(turn, move, "The source is a wall.");
+			}
+
+			int height = board[move.i, move.j].Count;
+			if (height == 0) {
+				throw InvalidMove(turn, move, "The source has no slime tower.");
+			}
+			if (move.k < 0 || move.k >= height) {
+				throw InvalidMove(turn, move,
+					$"k must satisfy 0 <= k < {height}.");
+			}
+			if (move.l < 1 || move.l > move.k + 1) {
+				throw InvalidMove(turn, move,
+					$"l must satisfy 1 <= l <= k + 1 ({move.k + 1}).");
+			}
+
+			for (int step = 1; step <= move.l; step++) {
+				var (ii, jj) = move.d.Move(move.i, move.j, step);
+				if ((uint)ii >= (uint)n || (uint)jj >= (uint)n) {
+					throw InvalidMove(turn, move,
+						$"The path leaves the board at ({ii}, {jj}).");
+				}
+				if (_input.Map[ii, jj] == -2) {
+					throw InvalidMove(turn, move,
+						$"The path hits a wall at ({ii}, {jj}).");
+				}
+			}
+
+			var (destI, destJ) = move.d.Move(move.i, move.j, move.l);
+			int moved = height - move.k;
+			int destinationHeight = board[destI, destJ].Count;
+			if (destinationHeight + moved > 8) {
+				throw InvalidMove(turn, move,
+					$"The destination tower height would be {destinationHeight + moved}, exceeding 8.");
+			}
+
+			for (int count = 0; count < moved; count++) {
+				board[destI, destJ].Push(board[move.i, move.j].Pop());
+			}
+			ReturnHome(move.i, move.j);
+			ReturnHome(destI, destJ);
+
+			string moveJson =
+				$"[{move.i},{move.j},{move.k},\"{move.d.ToSymbol()}\",{move.l}]";
+			WriteStateLog(turn + 1, moveJson);
+		}
 	}
 }
 
