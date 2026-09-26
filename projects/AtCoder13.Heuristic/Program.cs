@@ -65,7 +65,7 @@ public class Program
 			}
 		}
 
-		var best = DoPlan6(isLocal, sw, rnd, input, info);
+		var best = DoPlan8(isLocal, sw, rnd, input, info);
 
 		input.Output(best);
 		if (isLocal) {
@@ -157,6 +157,1017 @@ public class Program
 		return DoPlanByColorOrder(isLocal, sw, rnd, input, info, colorOrder);
 	}
 
+	static State DoPlan8(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		int n = input.N;
+		var colorCounts = new int[input.K];
+		foreach (string row in input.C) {
+			foreach (char cell in row) {
+				if (cell >= 'a' && cell < 'a' + input.K) colorCounts[cell - 'a']++;
+			}
+		}
+		var order = Enumerable.Range(0, input.K).ToArray();
+		Array.Sort(order, (a, b) => colorCounts[a] != colorCounts[b]
+			? colorCounts[a].CompareTo(colorCounts[b]) : a.CompareTo(b));
+		var nestDistances = new int[input.K][,];
+		for (int c = 0; c < input.K; c++) nestDistances[c] = BuildDistance(input.Dens[c].i, input.Dens[c].j);
+		var floorDistances = BuildAllFloorDistances();
+		var previousColorBoards = Enumerable.Range(0, input.K)
+			.Select(_ => new HashSet<(ulong, ulong)>()).ToArray();
+		var preferredCell = Enumerable.Repeat(-1, input.K).ToArray();
+		bool hasPreviousMove = false;
+		int previousFromI = -1;
+		int previousFromJ = -1;
+		int previousToI = -1;
+		int previousToJ = -1;
+		int previousMoved = 0;
+		while (state.SlimeCount > 0 && state.Moves.Count < 100000) {
+			int movesAtStart = state.Moves.Count;
+			foreach (int color in order) {
+				var (denI, denJ) = input.Dens[color];
+				while (CountColor(color) > 0 && state.Moves.Count < 100000) {
+					if (!previousColorBoards[color].Add(GetBoardKey(color))) {
+						if (TryFindProgressMove(color)) continue;
+						break;
+					}
+					// 帰巣搬送中に受け渡した塔は、次の反復で他の塔より先に処理する。
+					if (preferredCell[color] >= 0) {
+						int cell = preferredCell[color];
+						preferredCell[color] = -1;
+						int pi = cell / n;
+						int pj = cell % n;
+						int run = TopRun(state.Slimes[pi, pj], color);
+						if (run > 0 && FindPriorityMove(pi, pj, color, denI, denJ,
+							out int preferredMoved, out Direction4 preferredDir, out int preferredLen)) {
+							if (TryDoMove(pi, pj, preferredMoved, preferredDir, preferredLen)) continue;
+						}
+					}
+
+					// 高さ7の塔は、合流対象ではなく巣への搬送を先に計画する。
+					if (FindTallestHomeMove(color, denI, denJ,
+						out int tallI, out int tallJ, out int tallCount,
+						out Direction4 tallDir, out int tallLen, out int receiver)) {
+						if (TryDoMove(tallI, tallJ, tallCount, tallDir, tallLen)) {
+							if (receiver >= 0) preferredCell[color] = receiver;
+							continue;
+						}
+					}
+
+					if (FindPair(color, denI, denJ, out int si, out int sj, out int ti, out int tj, out int moved)) {
+						if (FindMove(si, sj, ti, tj, moved, out Direction4 pairDir, out int pairLen, out int pairMoved)
+							&& TryDoMove(si, sj, pairMoved, pairDir, pairLen)) continue;
+					}
+
+					// 合流できる相手・経路が見つからない場合にだけ、帰巣可能な塔を整理する。
+					if (FindUrgentHomeMove(color, denI, denJ,
+						out int homeI, out int homeJ, out int homeCount,
+						out Direction4 homeDir, out int homeLen)
+						&& TryDoMove(homeI, homeJ, homeCount, homeDir, homeLen)) {
+						continue;
+					}
+
+					// 合流できる相手がない場合は、進行可能な最遠塔を巣へ送る。
+					if (FindPair(color, denI, denJ, out si, out sj, out ti, out tj, out moved)
+						&& (ti == denI && tj == denJ)
+						&& FindMove(si, sj, ti, tj, moved, out Direction4 homePairDir, out int homePairLen, out int homePairMoved)
+						&& TryDoMove(si, sj, homePairMoved, homePairDir, homePairLen)) {
+						continue;
+					}
+					if (TryFindProgressMove(color)) continue;
+					break;
+				}
+			}
+			if (state.Moves.Count == movesAtStart
+				&& !TryFindProgressMove()) break;
+		}
+		return state;
+
+		bool TryDoMove(int i, int j, int moved, Direction4 direction, int length)
+		{
+			var (ni, nj) = direction.Move(i, j, length);
+			if (IsImmediateReverse(i, j, ni, nj, moved)) return false;
+			state.Move(i, j, state.Slimes[i, j].Count - moved, direction, length);
+			hasPreviousMove = true;
+			previousFromI = i;
+			previousFromJ = j;
+			previousToI = ni;
+			previousToJ = nj;
+			previousMoved = moved;
+			return true;
+		}
+
+		bool IsImmediateReverse(int fromI, int fromJ, int toI, int toJ, int moved)
+		{
+			return hasPreviousMove
+				&& fromI == previousToI && fromJ == previousToJ
+				&& toI == previousFromI && toJ == previousFromJ
+				&& moved == previousMoved;
+		}
+
+		int CountColor(int c)
+		{
+			int count = 0;
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					foreach (int slime in state.Slimes[i, j]) if (slime == c) count++;
+				}
+			}
+			return count;
+		}
+		(ulong, ulong) GetBoardKey(int color)
+		{
+			ulong first = 14695981039346656037UL;
+			ulong second = 7809847782465536322UL;
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					foreach (int slime in state.Slimes[i, j]) AddToken((uint)slime + 1);
+					AddToken(0);
+				}
+			}
+			return (first, second);
+
+			void AddToken(uint token)
+			{
+				first = (first ^ token) * 1099511628211UL;
+				second ^= token + 0x9e3779b97f4a7c15UL + (second << 6) + (second >> 2);
+			}
+		}
+		int TopRun(Stack<int> tower, int c) { int count = 0; foreach (int x in tower) { if (x != c) break; count++; } return count; }
+		int[,] BuildDistance(int ti, int tj) { var d = new int[n, n]; for (int i = 0; i < n; i++) for (int j = 0; j < n; j++) d[i, j] = int.MaxValue; var q = new Queue<(int i, int j)>(); d[ti, tj] = 0; q.Enqueue((ti, tj)); while (q.Count > 0) { var (i, j) = q.Dequeue(); foreach (var (ni, nj) in Helper.Adjacence4(i, j, n, n)) { if (input.Map[ni, nj] == -2 || d[ni, nj] != int.MaxValue) continue; d[ni, nj] = d[i, j] + 1; q.Enqueue((ni, nj)); } } return d; }
+		int[,] BuildAllFloorDistances()
+		{
+			var distances = new int[n * n, n * n];
+			for (int si = 0; si < n; si++) {
+				for (int sj = 0; sj < n; sj++) {
+					int source = si * n + sj;
+					for (int cell = 0; cell < n * n; cell++) distances[source, cell] = int.MaxValue;
+					distances[source, source] = 0;
+					var queue = new Queue<(int i, int j)>();
+					queue.Enqueue((si, sj));
+					while (queue.Count > 0) {
+						var (i, j) = queue.Dequeue();
+						foreach (var (ni, nj) in Helper.Adjacence4(i, j, n, n)) {
+							int next = ni * n + nj;
+							if (input.Map[ni, nj] == -2 || distances[source, next] != int.MaxValue) continue;
+							distances[source, next] = distances[source, i * n + j] + 1;
+							queue.Enqueue((ni, nj));
+						}
+					}
+				}
+			}
+			return distances;
+		}
+		bool FindTallestHomeMove(int c, int denI, int denJ, out int sourceI, out int sourceJ, out int moved, out Direction4 direction, out int length, out int receiver)
+		{
+			sourceI = sourceJ = moved = length = 0;
+			direction = Direction4.N;
+			receiver = -1;
+			int nestCapacity = 8 - state.Slimes[denI, denJ].Count;
+			if (nestCapacity <= 0) return false;
+
+			int bestTowerHeight = 6;
+			int bestProgress = int.MaxValue;
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					Stack<int> source = state.Slimes[i, j];
+					int run = TopRun(source, c);
+					if (source.Count < 7 || run == 0 || nestDistances[c][i, j] == int.MaxValue) continue;
+					int countToNest = Math.Min(Math.Min(7, run), nestCapacity);
+					if (FindMove(i, j, denI, denJ, countToNest, out Direction4 homeDirection, out int homeLength, out int homeMoved)) {
+						var (homeI, homeJ) = homeDirection.Move(i, j, homeLength);
+						int blockedReceiver = -1;
+						for (int step = 1; step < homeLength; step++) {
+							var (pathI, pathJ) = homeDirection.Move(i, j, step);
+							if (TopRun(state.Slimes[pathI, pathJ], c) > 0
+								&& state.Slimes[pathI, pathJ].Count < 8) {
+								blockedReceiver = pathI * n + pathJ;
+								break;
+							}
+						}
+						if (blockedReceiver >= 0) {
+							var (receiverI, receiverJ) = (blockedReceiver / n, blockedReceiver % n);
+							int handoffCount = Math.Min(Math.Min(7, run), 8 - state.Slimes[receiverI, receiverJ].Count);
+							int handoffLength = floorDistances[i * n + j, blockedReceiver];
+							if (handoffCount > 0 && handoffLength > 0
+								&& handoffLength <= source.Count - handoffCount + 1
+								&& (source.Count > bestTowerHeight
+									|| (source.Count == bestTowerHeight && nestDistances[c][receiverI, receiverJ] < bestProgress))) {
+								bestTowerHeight = source.Count;
+								bestProgress = nestDistances[c][receiverI, receiverJ];
+								sourceI = i;
+								sourceJ = j;
+								moved = handoffCount;
+								direction = homeDirection;
+								length = handoffLength;
+								receiver = blockedReceiver;
+							}
+							continue;
+						}
+						int progress = nestDistances[c][homeI, homeJ];
+						if (source.Count > bestTowerHeight || (source.Count == bestTowerHeight && progress < bestProgress)) {
+							bestTowerHeight = source.Count;
+							bestProgress = progress;
+							sourceI = i;
+							sourceJ = j;
+							moved = homeMoved;
+							direction = homeDirection;
+							length = homeLength;
+							receiver = -1;
+						}
+					}
+
+					// 巣への直行経路が塞がる/容量不足なら、経路上の同色塔へ運べる分を渡す。
+					foreach (Direction4 dir in Direction4Extensions.ForEach4()) {
+						int maxLength = source.Count - Math.Min(7, run) + 1;
+						for (int len = 1; len <= maxLength; len++) {
+							var (ni, nj) = dir.Move(i, j, len);
+							if ((uint)ni >= (uint)n || (uint)nj >= (uint)n || input.Map[ni, nj] == -2) break;
+							if (input.Map[ni, nj] == c || nestDistances[c][ni, nj] >= nestDistances[c][i, j]) continue;
+							int receiverRun = TopRun(state.Slimes[ni, nj], c);
+							if (receiverRun == 0) continue;
+							int count = Math.Min(Math.Min(7, run), 8 - state.Slimes[ni, nj].Count);
+							if (count <= 0) continue;
+							if (floorDistances[i * n + j, ni * n + nj] + nestDistances[c][ni, nj]
+								!= nestDistances[c][i, j]) continue;
+							int progress = nestDistances[c][ni, nj];
+							if (source.Count < bestTowerHeight
+								|| (source.Count == bestTowerHeight && progress >= bestProgress)) continue;
+							bestTowerHeight = source.Count;
+							bestProgress = progress;
+							sourceI = i;
+							sourceJ = j;
+							moved = count;
+							direction = dir;
+							length = len;
+							receiver = ni * n + nj;
+						}
+					}
+				}
+			}
+			return sourceI >= 0 && bestTowerHeight >= 7;
+		}
+		bool FindPriorityMove(int si, int sj, int c, int denI, int denJ, out int moved, out Direction4 direction, out int length)
+		{
+			moved = 0;
+			direction = Direction4.N;
+			length = 0;
+			Stack<int> source = state.Slimes[si, sj];
+			int run = TopRun(source, c);
+			if (run == 0) return false;
+			if (source.Count >= 7) return FindMove(si, sj, denI, denJ, Math.Min(7, run), out direction, out length, out moved) && moved > 0;
+
+			long best = long.MaxValue;
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					int targetRun = TopRun(state.Slimes[i, j], c);
+					if (targetRun == 0 || (i == si && j == sj) || state.Slimes[i, j].Count >= 8) continue;
+					int count = Math.Min(7, Math.Min(run, 8 - state.Slimes[i, j].Count));
+					if (!FindMove(si, sj, i, j, count, out Direction4 dir, out int len, out _)) continue;
+					long score = (long)floorDistances[si * n + sj, i * n + j] * 10 - Math.Min(count, targetRun);
+					if (score >= best) continue;
+					best = score;
+					moved = count;
+					direction = dir;
+					length = len;
+				}
+			}
+			return moved > 0 || (FindMove(si, sj, denI, denJ, Math.Min(7, run), out direction, out length, out moved) && moved > 0);
+		}
+		bool FindUrgentHomeMove(int c, int denI, int denJ, out int sourceI, out int sourceJ, out int moved, out Direction4 direction, out int length)
+		{
+			sourceI = sourceJ = moved = length = 0;
+			direction = Direction4.N;
+			int[,] distances = nestDistances[c];
+			int nestCapacity = 8 - state.Slimes[denI, denJ].Count;
+			if (nestCapacity <= 0) return false;
+
+			// 高さ7では空きが1段しかなくなるため、積み上げや移動経路を塞ぐ前に帰巣させる。
+			// 次に巣の隣の塔を帰巣させ、巣周辺の合流先を空ける。
+			for (int priority = 0; priority < 2; priority++) {
+				for (int i = 0; i < n; i++) {
+					for (int j = 0; j < n; j++) {
+						Stack<int> tower = state.Slimes[i, j];
+						int run = TopRun(tower, c);
+						if (run == 0 || distances[i, j] == 0 || distances[i, j] == int.MaxValue) continue;
+						bool urgent = priority == 0 ? tower.Count >= 7 : distances[i, j] == 1;
+						if (!urgent) continue;
+
+						int count = Math.Min(Math.Min(7, run), nestCapacity);
+						if (count == 0 || !FindMove(i, j, denI, denJ, count, out Direction4 dir, out int len, out int homeMoved)) continue;
+						var (destI, destJ) = dir.Move(i, j, len);
+						if (state.Slimes[destI, destJ].Count + count > 8) continue;
+
+						sourceI = i;
+						sourceJ = j;
+						moved = homeMoved;
+						direction = dir;
+						length = len;
+						return true;
+					}
+				}
+			}
+			return false;
+		}
+		bool FindPair(int c, int di, int dj, out int bi, out int bj, out int btI, out int btJ, out int bm)
+		{
+			bi = bj = btI = btJ = -1;
+			bm = 0;
+			var d = nestDistances[c];
+			int farthest = -1;
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					int run = TopRun(state.Slimes[i, j], c);
+					if (run > 0 && d[i, j] < int.MaxValue) farthest = Math.Max(farthest, d[i, j]);
+				}
+			}
+
+			// 最遠の供給元から順に、巣へ向かう最短経路上の合流先を探す。
+			for (int sourceDistance = farthest; sourceDistance > 0; sourceDistance--) {
+				long bestSourceCost = long.MaxValue;
+				for (int i = 0; i < n; i++) {
+					for (int j = 0; j < n; j++) {
+						int run = TopRun(state.Slimes[i, j], c);
+						if (run == 0 || d[i, j] != sourceDistance) continue;
+						long sourceDistanceToReceiver = long.MaxValue;
+						int sourceTargetRun = 0;
+						int sourceCount = 0;
+						int sourceTargetI = -1;
+						int sourceTargetJ = -1;
+						for (int y = 0; y < n; y++) {
+							for (int x = 0; x < n; x++) {
+								if ((i == y && j == x) || d[y, x] > sourceDistance) continue;
+								int targetRun = TopRun(state.Slimes[y, x], c);
+								int targetHeight = state.Slimes[y, x].Count;
+								if (targetRun == 0 || targetHeight >= 8) continue;
+								int count = Math.Min(7, Math.Min(run, 8 - targetHeight));
+								int sep = floorDistances[i * n + j, y * n + x];
+								// 同距離の塔も候補に含め、近場で合流できる機会を逃さない。
+								if (count <= 0 || sep == int.MaxValue
+								|| !FindMove(i, j, y, x, count, out _, out _, out _)) continue;
+								int sourceJump = Math.Max(1, state.Slimes[i, j].Count - count + 1);
+								int directTargetJump = Math.Max(1, targetHeight + 1);
+								int mergedTargetJump = Math.Max(1, Math.Min(8, targetHeight + count) + 1);
+								int directMoves = EstimateMoves(sourceDistance, sourceJump)
+									+ EstimateMoves(d[y, x], directTargetJump);
+								int mergeMoves = EstimateMoves(sep, sourceJump)
+									+ EstimateMoves(d[y, x], mergedTargetJump);
+								int remainingSource = run - count;
+								int splitMoves = remainingSource > 0
+									? EstimateMoves(Math.Max(0, sourceDistance - sep), Math.Max(1, state.Slimes[i, j].Count - remainingSource + 1))
+									: 0;
+								mergeMoves += splitMoves;
+								// 合流で移動操作数が増える候補は採らず、個別帰巣に任せる。
+								if (mergeMoves > directMoves) continue;
+								long detour = (long)sep + d[y, x] - sourceDistance;
+								long candidateCost = (long)sep * 10000
+									+ (long)mergeMoves * 1000
+									+ Math.Max(0, detour) * 50
+									- (long)Math.Min(count, targetRun) * 10;
+								if (candidateCost >= sourceDistanceToReceiver) continue;
+								sourceDistanceToReceiver = (int)candidateCost;
+								sourceTargetRun = targetRun;
+								sourceCount = count;
+								sourceTargetI = y;
+								sourceTargetJ = x;
+							}
+						}
+						if (sourceTargetI < 0) continue;
+						long sourceCost = (long)sourceDistanceToReceiver * 1000
+							- (long)Math.Min(sourceCount, sourceTargetRun) * 10;
+						if (sourceCost >= bestSourceCost) continue;
+						bestSourceCost = sourceCost;
+						bi = i;
+						bj = j;
+						btI = sourceTargetI;
+						btJ = sourceTargetJ;
+						bm = sourceCount;
+					}
+				}
+				if (bi >= 0) return true;
+			}
+
+			// 最短経路上に合流先がない場合は、合流せず最遠の塔を巣へ近づける。
+			bi = bj = -1;
+			bm = 0;
+			long bestHomeScore = long.MaxValue;
+			int farthestRun = -1;
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					int run = TopRun(state.Slimes[i, j], c);
+					if (run == 0 || d[i, j] == 0 || d[i, j] == int.MaxValue) continue;
+					int count = Math.Min(7, run);
+					if (!FindMove(i, j, di, dj, count, out _, out _, out _)) continue;
+					long score = -d[i, j] * 1000L - count;
+					if (score >= bestHomeScore) continue;
+					bestHomeScore = score;
+					farthestRun = run;
+					bi = i;
+					bj = j;
+				}
+			}
+			if (bi < 0) return false;
+			btI = di;
+			btJ = dj;
+			bm = Math.Min(Math.Min(7, farthestRun), 8 - state.Slimes[di, dj].Count);
+			if (bm <= 0) return false;
+			return true;
+
+			int EstimateMoves(int distance, int jumpLength)
+			{
+				return (distance + jumpLength - 1) / jumpLength;
+			}
+		}
+		bool FindMove(int si, int sj, int ti, int tj, int moved, out Direction4 bestDir, out int bestLen, out int bestMoved)
+		{
+			bestDir = Direction4.N;
+			bestLen = 0;
+			bestMoved = 0;
+			int current = floorDistances[si * n + sj, ti * n + tj];
+			if (current == int.MaxValue) return false;
+			long best = long.MaxValue;
+			int sourceHeight = state.Slimes[si, sj].Count;
+			int sourceColor = state.Slimes[si, sj].Peek();
+			int sourceRun = TopRun(state.Slimes[si, sj], sourceColor);
+			int max = sourceHeight - moved + 1;
+			foreach (var dir in Direction4Extensions.ForEach4()) {
+				for (int len = 1; len <= max; len++) {
+					bool clear = true;
+					for (int step = 1; step <= len; step++) {
+						var (i, j) = dir.Move(si, sj, step);
+						if ((uint)i >= (uint)n || (uint)j >= (uint)n || input.Map[i, j] == -2) {
+							clear = false;
+							break;
+						}
+					}
+					if (!clear) break;
+
+					var (ni, nj) = dir.Move(si, sj, len);
+					bool isTarget = ni == ti && nj == tj;
+					int destinationCapacity = 8 - state.Slimes[ni, nj].Count;
+					int actualMoved = isTarget
+						? moved
+						: Math.Min(sourceRun, destinationCapacity);
+					if (actualMoved <= 0 || (isTarget && destinationCapacity < moved)) continue;
+					if (len > sourceHeight - actualMoved + 1) continue;
+					if (IsImmediateReverse(si, sj, ni, nj, actualMoved)) continue;
+					int nextDistance = floorDistances[ni * n + nj, ti * n + tj];
+					if (nextDistance >= current) continue;
+					long score = nextDistance * 100L + len - (isTarget ? 10000 : 0);
+					if (score < best) {
+						best = score;
+						bestDir = dir;
+						bestLen = len;
+						bestMoved = actualMoved;
+					}
+				}
+			}
+			return bestLen > 0;
+		}
+		bool TryFindProgressMove(int preferredColor = -1)
+		{
+			int bestI = -1;
+			int bestJ = -1;
+			int bestDistance = -1;
+			int bestDestI = -1;
+			int bestDestJ = -1;
+			Direction4 bestDirection = Direction4.N;
+
+			// 通常の合流・帰巣計画が止まった場合だけ、最上段を巣に近づく隣接マスへ1匹ずつ運ぶ。
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					Stack<int> tower = state.Slimes[i, j];
+					if (tower.Count == 0) continue;
+					int color = tower.Peek();
+					if (preferredColor >= 0 && color != preferredColor) continue;
+					int distance = nestDistances[color][i, j];
+					if (distance <= bestDistance || distance == int.MaxValue) continue;
+					foreach (Direction4 direction in Direction4Extensions.ForEach4()) {
+						var (ni, nj) = direction.Move(i, j);
+						if ((uint)ni >= (uint)n || (uint)nj >= (uint)n
+							|| input.Map[ni, nj] == -2
+							|| state.Slimes[ni, nj].Count >= 8
+						|| IsImmediateReverse(i, j, ni, nj, 1)
+							|| nestDistances[color][ni, nj] >= distance) continue;
+						bestI = i;
+						bestJ = j;
+						bestDistance = distance;
+						bestDestI = ni;
+						bestDestJ = nj;
+						bestDirection = direction;
+						break;
+					}
+				}
+			}
+
+			if (bestI < 0 && preferredColor >= 0) return TryFindProgressMove();
+			if (bestI < 0) return false;
+			return TryDoMove(bestI, bestJ, 1, bestDirection, 1);
+		}
+	}
+
+	static State DoPlan8Previous(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		int n = input.N;
+		var colorCounts = new int[input.K];
+		foreach (string row in input.C) {
+			foreach (char cell in row) {
+				if (cell >= 'a' && cell < 'a' + input.K) {
+					colorCounts[cell - 'a']++;
+				}
+			}
+		}
+
+		var colorOrder = Enumerable.Range(0, input.K).ToArray();
+		Array.Sort(colorOrder, (a, b) => {
+			int compare = colorCounts[a].CompareTo(colorCounts[b]);
+			return compare != 0 ? compare : a.CompareTo(b);
+		});
+		int cellCount = n * n;
+		var allDistances = new int[cellCount, cellCount];
+		for (int sourceI = 0; sourceI < n; sourceI++) {
+			for (int sourceJ = 0; sourceJ < n; sourceJ++) {
+				int source = sourceI * n + sourceJ;
+				for (int cell = 0; cell < cellCount; cell++) {
+					allDistances[source, cell] = -1;
+				}
+				var queue = new Queue<(int i, int j)>();
+				allDistances[source, source] = 0;
+				queue.Enqueue((sourceI, sourceJ));
+				while (queue.Count > 0) {
+					var (i, j) = queue.Dequeue();
+					foreach (var (ni, nj) in Helper.Adjacence4(i, j, n, n)) {
+						int next = ni * n + nj;
+						if (input.Map[ni, nj] == -2 || allDistances[source, next] >= 0) {
+							continue;
+						}
+						allDistances[source, next] = allDistances[source, i * n + j] + 1;
+						queue.Enqueue((ni, nj));
+					}
+				}
+			}
+		}
+
+		var nestDistances = new int[input.K][,];
+		for (int color = 0; color < input.K; color++) {
+			nestDistances[color] = BuildDistanceMap(input.Dens[color].i, input.Dens[color].j);
+		}
+
+		foreach (int color in colorOrder) {
+			var (denI, denJ) = input.Dens[color];
+			while (CountColor(color) > 0 && state.Moves.Count < 100000) {
+				var mergeCandidates = new List<(long cost, int fromI, int fromJ, int toI, int toJ, int moved)>();
+				var denDistance = nestDistances[color];
+
+				for (int fromI = 0; fromI < n; fromI++) {
+					for (int fromJ = 0; fromJ < n; fromJ++) {
+						var source = state.Slimes[fromI, fromJ];
+						int sourceRun = TopRunLength(source, color);
+						int sourceDistance = denDistance[fromI, fromJ];
+						if (sourceRun == 0 || sourceDistance == 0 || sourceDistance == int.MaxValue) {
+							continue;
+						}
+
+						for (int toI = 0; toI < n; toI++) {
+							for (int toJ = 0; toJ < n; toJ++) {
+								if (fromI == toI && fromJ == toJ) {
+									continue;
+								}
+								var target = state.Slimes[toI, toJ];
+								int targetRun = TopRunLength(target, color);
+								if (targetRun == 0 || target.Count >= 8) {
+									continue;
+								}
+
+								int moved = Math.Min(7, Math.Min(sourceRun, 8 - target.Count));
+								int sourceToTarget = FloorDistance(fromI, fromJ, toI, toJ);
+								int targetToNest = denDistance[toI, toJ];
+								if (moved == 0 || sourceToTarget == int.MaxValue
+									|| targetToNest == int.MaxValue) {
+									continue;
+								}
+
+								int detour = sourceToTarget + targetToNest - sourceDistance;
+								long cost = (long)detour * moved * 1000
+									+ (long)targetToNest * 10
+									+ sourceToTarget;
+								mergeCandidates.Add((cost, fromI, fromJ, toI, toJ, moved));
+							}
+						}
+					}
+				}
+
+				mergeCandidates.Sort((a, b) => a.cost.CompareTo(b.cost));
+				bool movedThisTurn = false;
+				foreach (var candidate in mergeCandidates) {
+					if (!TryFindRoute(candidate.fromI, candidate.fromJ,
+						candidate.toI, candidate.toJ, candidate.moved,
+						out Direction4 direction, out int length)) {
+						continue;
+					}
+
+					int sourceHeight = state.Slimes[candidate.fromI, candidate.fromJ].Count;
+					state.Move(candidate.fromI, candidate.fromJ,
+						sourceHeight - candidate.moved, direction, length);
+					movedThisTurn = true;
+					break;
+				}
+
+				if (!movedThisTurn) {
+					int bestI = -1;
+					int bestJ = -1;
+					int bestDistance = -1;
+					for (int i = 0; i < n; i++) {
+						for (int j = 0; j < n; j++) {
+							int run = TopRunLength(state.Slimes[i, j], color);
+							int distance = denDistance[i, j];
+							if (run == 0 || distance <= bestDistance || distance == int.MaxValue) {
+								continue;
+							}
+
+							int moved = Math.Min(7, run);
+							if (!TryFindRoute(i, j, denI, denJ, moved,
+								out _, out _)) {
+								continue;
+							}
+							bestI = i;
+							bestJ = j;
+							bestDistance = distance;
+						}
+					}
+
+					if (bestI < 0 || !TryFindRoute(bestI, bestJ, denI, denJ,
+						Math.Min(7, TopRunLength(state.Slimes[bestI, bestJ], color)),
+						out Direction4 homeDirection, out int homeLength)) {
+						break;
+					}
+
+					int homeMoved = Math.Min(7, TopRunLength(state.Slimes[bestI, bestJ], color));
+					state.Move(bestI, bestJ,
+						state.Slimes[bestI, bestJ].Count - homeMoved,
+						homeDirection, homeLength);
+				}
+			}
+
+			if (CountColor(color) > 0) {
+				return state;
+			}
+		}
+
+		return state;
+
+		int[,] BuildDistanceMap(int targetI, int targetJ)
+		{
+			var map = new int[n, n];
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					map[i, j] = int.MaxValue;
+				}
+			}
+
+			var queue = new Queue<(int i, int j)>();
+			map[targetI, targetJ] = 0;
+			queue.Enqueue((targetI, targetJ));
+			while (queue.Count > 0) {
+				var (i, j) = queue.Dequeue();
+				foreach (var (ni, nj) in Helper.Adjacence4(i, j, n, n)) {
+					if (input.Map[ni, nj] == -2 || map[ni, nj] != int.MaxValue) {
+						continue;
+					}
+					map[ni, nj] = map[i, j] + 1;
+					queue.Enqueue((ni, nj));
+				}
+			}
+			return map;
+		}
+
+		int FloorDistance(int fromI, int fromJ, int toI, int toJ)
+		{
+			var map = BuildDistanceMap(toI, toJ);
+			return map[fromI, fromJ] == int.MaxValue ? -1 : map[fromI, fromJ];
+		}
+
+		int CountColor(int color)
+		{
+			int count = 0;
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					count += state.Slimes[i, j].Count(slime => slime == color);
+				}
+			}
+			return count;
+		}
+
+		int TopRunLength(Stack<int> tower, int color)
+		{
+			int count = 0;
+			foreach (int slime in tower) {
+				if (slime != color) {
+					break;
+				}
+				count++;
+			}
+			return count;
+		}
+
+		bool TryFindRoute(
+			int fromI, int fromJ, int targetI, int targetJ, int moved,
+			out Direction4 firstDirection, out int firstLength)
+		{
+			firstDirection = Direction4.N;
+			firstLength = 0;
+			if (fromI == targetI && fromJ == targetJ) {
+				return false;
+			}
+
+			var visited = new bool[n, n];
+			var firstDirections = new Direction4[n, n];
+			var firstLengths = new int[n, n];
+			var queue = new Queue<(int i, int j)>();
+			visited[fromI, fromJ] = true;
+			queue.Enqueue((fromI, fromJ));
+
+			while (queue.Count > 0) {
+				var (i, j) = queue.Dequeue();
+				int baseHeight = state.Slimes[i, j].Count - moved;
+				int maxLength = Math.Max(1, baseHeight + 1);
+				foreach (var direction in Direction4Extensions.ForEach4()) {
+					for (int length = 1; length <= maxLength; length++) {
+						var (ni, nj) = direction.Move(i, j, length);
+						if ((uint)ni >= (uint)n || (uint)nj >= (uint)n
+							|| input.Map[ni, nj] == -2) {
+							break;
+						}
+						if (visited[ni, nj]
+							|| state.Slimes[ni, nj].Count + moved > 8) {
+							continue;
+						}
+
+						visited[ni, nj] = true;
+						firstDirections[ni, nj] = i == fromI && j == fromJ
+							? direction : firstDirections[i, j];
+						firstLengths[ni, nj] = i == fromI && j == fromJ
+							? length : firstLengths[i, j];
+						if (ni == targetI && nj == targetJ) {
+							firstDirection = firstDirections[ni, nj];
+							firstLength = firstLengths[ni, nj];
+							return true;
+						}
+						queue.Enqueue((ni, nj));
+					}
+				}
+			}
+			return false;
+		}
+	}
+
+	static State DoPlan8Legacy(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var state = new State(isLocal, input);
+		int n = input.N;
+		var colorCounts = new int[input.K];
+		foreach (string row in input.C) {
+			foreach (char cell in row) {
+				if (cell >= 'a' && cell < 'a' + input.K) {
+					colorCounts[cell - 'a']++;
+				}
+			}
+		}
+
+		var colorOrder = new int[input.K];
+		for (int c = 0; c < input.K; c++) {
+			colorOrder[c] = c;
+		}
+
+		Array.Sort(colorOrder, (a, b) => {
+			int compare = colorCounts[a].CompareTo(colorCounts[b]);
+			return compare != 0 ? compare : a.CompareTo(b);
+		});
+
+		var distances = new int[input.K][,];
+		int cellCount = n * n;
+		var allDistances = new int[cellCount, cellCount];
+		for (int targetI = 0; targetI < n; targetI++) {
+			for (int targetJ = 0; targetJ < n; targetJ++) {
+				int targetCell = targetI * n + targetJ;
+				for (int cell = 0; cell < cellCount; cell++) {
+					allDistances[targetCell, cell] = -1;
+				}
+
+				var queue = new Queue<(int i, int j)>();
+				allDistances[targetCell, targetCell] = 0;
+				queue.Enqueue((targetI, targetJ));
+				while (queue.Count > 0) {
+					var (i, j) = queue.Dequeue();
+					foreach (var (ni, nj) in Helper.Adjacence4(i, j, n, n)) {
+						int nextCell = ni * n + nj;
+						if (input.Map[ni, nj] == -2
+							|| allDistances[targetCell, nextCell] >= 0) {
+							continue;
+						}
+						allDistances[targetCell, nextCell] =
+							allDistances[targetCell, i * n + j] + 1;
+						queue.Enqueue((ni, nj));
+					}
+				}
+			}
+		}
+
+		for (int color = 0; color < input.K; color++) {
+			distances[color] = BuildDistanceMap(input.Dens[color].i, input.Dens[color].j);
+		}
+
+		foreach (int color in colorOrder) {
+			var (denI, denJ) = input.Dens[color];
+			while (CountColor(color) > 0 && state.Moves.Count < 100000) {
+				if (!FindBestMerge(color, denI, denJ,
+					out int sourceI, out int sourceJ, out int moved,
+					out int targetI, out int targetJ)) {
+					return state;
+				}
+
+				var routeDistances = BuildDistanceMap(targetI, targetJ);
+				if (!TryFindProgressMove(sourceI, sourceJ, targetI, targetJ,
+					routeDistances, moved, out Direction4 direction, out int jump)) {
+					return state;
+				}
+
+				int sourceHeight = state.Slimes[sourceI, sourceJ].Count;
+				state.Move(sourceI, sourceJ, sourceHeight - moved, direction, jump);
+			}
+		}
+
+		return state;
+
+		int[,] BuildDistanceMap(int targetI, int targetJ)
+		{
+			var map = new int[n, n];
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					map[i, j] = int.MaxValue;
+				}
+			}
+
+			var queue = new Queue<(int i, int j)>();
+			map[targetI, targetJ] = 0;
+			queue.Enqueue((targetI, targetJ));
+			while (queue.Count > 0) {
+				var (i, j) = queue.Dequeue();
+				foreach (var (ni, nj) in Helper.Adjacence4(i, j, n, n)) {
+					if (input.Map[ni, nj] == -2 || map[ni, nj] != int.MaxValue) {
+						continue;
+					}
+
+					map[ni, nj] = map[i, j] + 1;
+					queue.Enqueue((ni, nj));
+				}
+			}
+
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					if (map[i, j] < 0 && input.Map[i, j] != -2) {
+						map[i, j] = int.MaxValue;
+					}
+				}
+			}
+
+			return map;
+		}
+
+		bool FindBestMerge(
+			int color, int denI, int denJ,
+			out int bestSourceI, out int bestSourceJ,
+			out int bestMoved, out int bestTargetI, out int bestTargetJ)
+		{
+			bestSourceI = bestSourceJ = bestTargetI = bestTargetJ = -1;
+			bestMoved = 0;
+			long bestCost = long.MaxValue;
+			bool hasMergeTarget = false;
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					if (TopRunLength(state.Slimes[i, j], color) > 0
+						&& distances[color][i, j] > 0) {
+						hasMergeTarget = true;
+					}
+				}
+			}
+
+			for (int sourceI = 0; sourceI < n; sourceI++) {
+				for (int sourceJ = 0; sourceJ < n; sourceJ++) {
+					var source = state.Slimes[sourceI, sourceJ];
+					int sourceRun = TopRunLength(source, color);
+					if (sourceRun == 0 || distances[color][sourceI, sourceJ] == 0) {
+						continue;
+					}
+
+					for (int targetI = 0; targetI < n; targetI++) {
+						for (int targetJ = 0; targetJ < n; targetJ++) {
+							if (targetI == sourceI && targetJ == sourceJ) {
+								continue;
+							}
+							var target = state.Slimes[targetI, targetJ];
+							int targetRun = TopRunLength(target, color);
+							bool isDen = targetI == denI && targetJ == denJ;
+							if (hasMergeTarget ? targetRun == 0 : !isDen) {
+								continue;
+							}
+							int moved = Math.Min(7, sourceRun);
+							moved = Math.Min(moved, 8 - target.Count);
+							if (moved <= 0) {
+								continue;
+							}
+
+							int sourceToTarget = allDistances[
+								targetI * n + targetJ, sourceI * n + sourceJ];
+							if (sourceToTarget < 0 || distances[color][targetI, targetJ] == int.MaxValue) {
+								continue;
+							}
+							long cost = hasMergeTarget
+								? (long)sourceToTarget + distances[color][targetI, targetJ]
+								: sourceToTarget;
+							if (cost >= bestCost) {
+								continue;
+							}
+
+							bestCost = cost;
+							bestSourceI = sourceI;
+							bestSourceJ = sourceJ;
+							bestMoved = moved;
+							bestTargetI = targetI;
+							bestTargetJ = targetJ;
+						}
+					}
+				}
+			}
+
+			return bestSourceI >= 0;
+		}
+
+		int CountColor(int color)
+		{
+			int count = 0;
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					count += state.Slimes[i, j].Count(slime => slime == color);
+				}
+			}
+			return count;
+		}
+
+		int TopRunLength(Stack<int> tower, int color)
+		{
+			int count = 0;
+			foreach (int slime in tower) {
+				if (slime != color) {
+					break;
+				}
+				count++;
+			}
+			return count;
+		}
+
+		bool TryFindProgressMove(
+			int fromI, int fromJ, int goalI, int goalJ, int[,] routeDistances,
+			int moved, out Direction4 direction, out int jump)
+		{
+			direction = Direction4.N;
+			jump = 0;
+			int height = state.Slimes[fromI, fromJ].Count;
+			int maxJump = height - moved + 1;
+			int bestDistance = routeDistances[fromI, fromJ];
+
+			foreach (var dir in Direction4Extensions.ForEach4()) {
+				for (int length = maxJump; length >= 1; length--) {
+					bool clear = true;
+					for (int step = 1; step <= length; step++) {
+						var (i, j) = dir.Move(fromI, fromJ, step);
+						if ((uint)i >= (uint)n || (uint)j >= (uint)n
+							|| input.Map[i, j] == -2) {
+							clear = false;
+							break;
+						}
+					}
+					if (!clear) {
+						break;
+					}
+
+					var (destI, destJ) = dir.Move(fromI, fromJ, length);
+					if (state.Slimes[destI, destJ].Count + moved > 8
+						|| routeDistances[destI, destJ] >= bestDistance) {
+						continue;
+					}
+
+					bestDistance = routeDistances[destI, destJ];
+					direction = dir;
+					jump = length;
+				}
+			}
+
+			return jump > 0;
+		}
+	}
+
 	static State DoPlan3(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var colorCounts = new int[input.K];
@@ -198,11 +1209,182 @@ public class Program
 			requireNonWorsening: true, useTwoStepLookahead: true);
 	}
 
-	static State DoPlan4Core(
-		bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
-		bool requireNonWorsening, bool useTwoStepLookahead = false)
+	static State DoPlan7(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 		var state = new State(isLocal, input);
+		int n = input.N;
+		var dists = new int[input.K, n, n];
+
+		for (int c = 0; c < input.K; c++) {
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					dists[c, i, j] = int.MaxValue;
+				}
+			}
+
+			var queue = new Queue<(int i, int j, int d)>();
+			var (si, sj) = input.Dens[c];
+			dists[c, si, sj] = 0;
+			queue.Enqueue((si, sj, 0));
+			while (queue.Count > 0) {
+				var (i, j, d) = queue.Dequeue();
+				int nd = d + 1;
+				foreach (var (ii, jj) in Helper.Adjacence4(i, j, n, n)) {
+					if (input.Map[ii, jj] == -2 || dists[c, ii, jj] <= nd) {
+						continue;
+					}
+
+					dists[c, ii, jj] = nd;
+					queue.Enqueue((ii, jj, nd));
+				}
+			}
+		}
+
+		var paths = new List<List<(int i, int j, Direction4 dir)>>();
+		for (int i = 0; i < n; i++) {
+			for (int j = 0; j < n; j++) {
+				int color = input.C[i][j] - 'a';
+				if ((uint)color >= (uint)input.K) {
+					continue;
+				}
+
+				var path = new List<(int i, int j, Direction4 dir)>();
+				int ci = i;
+				int cj = j;
+				while (dists[color, ci, cj] > 0) {
+					bool foundNext = false;
+					foreach (var (ni, nj, dir) in Direction4Extensions.Adjacence4(ci, cj, n, n)) {
+						if (input.Map[ni, nj] == -2
+							|| dists[color, ni, nj] != dists[color, ci, cj] - 1) {
+							continue;
+						}
+
+						path.Add((ci, cj, dir));
+						ci = ni;
+						cj = nj;
+						foundNext = true;
+						break;
+					}
+
+					if (!foundNext) {
+						break;
+					}
+				}
+
+				paths.Add(path);
+			}
+		}
+
+		var reservedHeights = new int[n, n];
+		var claimed = new bool[n, n];
+		const int maxScaffoldHeight = 5;
+		const int minScaffoldHeight = 4;
+		const int maxScaffoldCount = 3;
+
+		for (int scaffoldIndex = 0; scaffoldIndex < maxScaffoldCount; scaffoldIndex++) {
+			int bestI = -1;
+			int bestJ = -1;
+			int bestHeight = 0;
+			int bestDonorCount = 0;
+			long bestNetBenefit = 0;
+			var bestDonors = new List<(int i, int j, Direction4 dir)>();
+
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					if (claimed[i, j] || input.Map[i, j] < -1) {
+						continue;
+					}
+					if (input.Map[i, j] >= 0) {
+						continue;
+					}
+
+					int baseHeight = state.Slimes[i, j].Count;
+					var donors = new List<(int i, int j, Direction4 dir)>();
+					foreach (var (di, dj, dirFromCenter) in Direction4Extensions.Adjacence4(i, j, n, n)) {
+						if (input.Map[di, dj] != -2 && !claimed[di, dj]
+							&& state.Slimes[di, dj].Count > 0) {
+							donors.Add((di, dj, dirFromCenter));
+						}
+					}
+
+					int height = Math.Min(maxScaffoldHeight, baseHeight + donors.Count);
+					if (height < minScaffoldHeight) {
+						continue;
+					}
+
+					long expectedSavings = EstimateScaffoldSavings(i, j, height);
+					int donorCount = height - baseHeight;
+					long netBenefit = expectedSavings - 2L * donorCount;
+					if (netBenefit > bestNetBenefit) {
+						bestI = i;
+						bestJ = j;
+						bestHeight = height;
+						bestDonorCount = donorCount;
+						bestNetBenefit = netBenefit;
+						bestDonors = donors;
+					}
+				}
+			}
+
+			if (bestI < 0) {
+				break;
+			}
+
+			for (int donorIndex = 0; donorIndex < bestDonorCount; donorIndex++) {
+				var (di, dj, dirFromCenter) = bestDonors[donorIndex];
+				state.Move(di, dj, 0, dirFromCenter.Reverse(), 1);
+				claimed[di, dj] = true;
+			}
+
+			claimed[bestI, bestJ] = true;
+			reservedHeights[bestI, bestJ] = bestHeight;
+		}
+
+		if (reservedHeights.Cast<int>().Any(height => height > 0)) {
+			state = DoPlan4Core(
+				isLocal, sw, rnd, input, info, requireNonWorsening: true,
+				useTwoStepLookahead: true, initialState: state,
+				reservedHeights: reservedHeights);
+
+			Array.Clear(reservedHeights);
+		}
+
+		return DoPlan4Core(
+			isLocal, sw, rnd, input, info, requireNonWorsening: true,
+			useTwoStepLookahead: true, initialState: state);
+
+		long EstimateScaffoldSavings(int siteI, int siteJ, int height)
+		{
+			long savings = 0;
+			int maxJump = height + 1;
+			foreach (var path in paths) {
+				for (int index = 0; index < path.Count; index++) {
+					if (path[index].i != siteI || path[index].j != siteJ) {
+						continue;
+					}
+
+					Direction4 dir = path[index].dir;
+					int straightSteps = 0;
+					for (int next = index; next < path.Count
+						&& next - index < maxJump
+						&& path[next].dir == dir; next++) {
+						straightSteps++;
+					}
+
+					savings += Math.Max(0, straightSteps - 1);
+				}
+			}
+
+			return savings;
+		}
+	}
+
+	static State DoPlan4Core(
+		bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
+		bool requireNonWorsening, bool useTwoStepLookahead = false,
+		State? initialState = null, int[,]? reservedHeights = null)
+	{
+		var state = initialState ?? new State(isLocal, input);
 		int n = input.N;
 		var dists = new int[input.K, n, n];
 
@@ -312,7 +1494,10 @@ public class Program
 			long bestImmediateImprovement = 0;
 			bool found = false;
 
-			for (int k = 0; k < h; k++) {
+			int minRetained = reservedHeights == null
+				? 0
+				: Math.Min(reservedHeights[i, j], h);
+			for (int k = minRetained; k < h; k++) {
 				int moved = h - k;
 				long fromDistance = 0;
 				for (int index = 0; index < moved; index++) {
@@ -411,7 +1596,10 @@ public class Program
 
 			int[] stack = tower.ToArray();
 			long bestImprovement = 0;
-			for (int k = 0; k < h; k++) {
+			int minRetained = reservedHeights == null
+				? 0
+				: Math.Min(reservedHeights[fromI, fromJ], h);
+			for (int k = minRetained; k < h; k++) {
 				int moved = h - k;
 				long fromDistance = 0;
 				for (int index = 0; index < moved; index++) {
