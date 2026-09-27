@@ -65,7 +65,7 @@ public class Program
 			}
 		}
 
-		var best = DoPlan8(isLocal, sw, rnd, input, info);
+		var best = DoPlan11(isLocal, sw, rnd, input, info);
 
 		input.Output(best);
 		if (isLocal) {
@@ -83,78 +83,1942 @@ public class Program
 		return (input, info);
 	}
 
-	static State DoPlan0(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+
+
+	static State DoPlan3(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
-		var state = new State(isLocal, input);
-
-		return state;
-	}
-
-	static State DoPlan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-
-		int n = input.N;
-		// 各色ごとに巣からBFSし、近い方から順に移動させる。
-		for (int c = 0; c < input.K; c++) {
-			// BFSで巣からの距離を計算
-			var dists = new int[n, n].Fill(int.MaxValue);
-			var que = new Queue<(int i, int j, int d)>();
-			var (si, sj) = input.Dens[c];
-			dists[si, sj] = 0;
-			que.Enqueue((si, sj, 0));
-			while (que.Count > 0) {
-				var (i, j, d) = que.Dequeue();
-				int nd = d + 1;
-				foreach (var (ii, jj) in Helper.Adjacence4(i, j, n, n)) {
-					if (input.Map[ii, jj] == -2) {
-						continue;
-					}
-
-					if (dists[ii, jj] > nd) {
-						dists[ii, jj] = nd;
-						que.Enqueue((ii, jj, nd));
-					}
-				}
-			}
-
-			var pque = new HeapQueue<(int i, int j, int d), int>(x => x.d, reverses: true);
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					if (state.Slimes[i, j].Count > 0 && state.Slimes[i, j].Peek() == c) {
-						pque.Enqueue((i, j, dists[i, j]));
-					}
-				}
-			}
-
-			while (pque.Count > 0) {
-				var (i, j, d) = pque.Dequeue();
-				// とりあえず一匹ずつ
-				foreach (var dir in Direction4Extensions.ForEach4()) {
-					var (ni, nj) = dir.Move(i, j);
-					if ((uint)ni < n && (uint)nj < n && dists[ni, nj] < d) {
-						bool backed = state.Move(i, j, state.Slimes[i, j].Count - 1, dir, 1);
-						if (backed == false) {
-							pque.Enqueue((ni, nj, dists[ni, nj]));
-						}
-
-						break;
-					}
+		var colorCounts = new int[input.K];
+		foreach (string row in input.C) {
+			foreach (char cell in row) {
+				if (cell >= 'a' && cell < 'a' + input.K) {
+					colorCounts[cell - 'a']++;
 				}
 			}
 		}
 
-		return state;
-	}
-
-	static State DoPlan2(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
 		var colorOrder = new int[input.K];
 		for (int c = 0; c < input.K; c++) {
 			colorOrder[c] = c;
 		}
 
+		Array.Sort(colorOrder, (a, b) => {
+			int compare = colorCounts[a].CompareTo(colorCounts[b]);
+			return compare != 0 ? compare : a.CompareTo(b);
+		});
+
 		return DoPlanByColorOrder(isLocal, sw, rnd, input, info, colorOrder);
+	}
+
+	static State DoPlan6(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		return DoPlan4Core(
+			isLocal, sw, rnd, input, info,
+			requireNonWorsening: true, useTwoStepLookahead: true);
+	}
+
+	static State DoPlan9(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var baseline = DoPlan8(isLocal, sw, rnd, input, info);
+		var optimizer = new Plan9Optimizer(isLocal, sw, input, info);
+		baseline = optimizer.OptimizeSameColorMerges(baseline);
+		return optimizer.Optimize(baseline);
+	}
+
+	static State DoPlan10(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var baseline = DoPlan9(isLocal, sw, rnd, input, info);
+		return new Plan9Optimizer(isLocal, sw, input, info).OptimizeJumpSupports(baseline);
+	}
+
+	static State DoPlan11(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var baseline = DoPlan10(isLocal, sw, rnd, input, info);
+		return new Plan9Optimizer(isLocal, sw, input, info).OptimizeRebuiltRides(baseline);
+	}
+
+	private sealed class Plan9Optimizer
+	{
+		private const int SearchMilliseconds = 1200;
+		private const int CheckpointInterval = 32;
+		private const int MaxTrialsPerRound = 1200;
+		private readonly bool isLocal;
+		private readonly Input input;
+		private readonly Information info;
+		private readonly Stopwatch stopwatch;
+		private readonly int n;
+		private readonly int[] colors;
+		private readonly int[] origins;
+		private readonly Direction4[] directions = Direction4Extensions.ForEach4().ToArray();
+		private readonly record struct Candidate(int First, int Second, int Length);
+		private readonly record struct Leg(int Index, int Start, int End);
+		private readonly record struct RouteHop(int Cell, Direction4 Direction, int Length);
+		private sealed record Journey(int Color, int[] Cells, Leg[] Legs);
+		private sealed record RideCandidate(Journey First, Journey Second, int[] Ends, int Saving);
+
+		// Cargoは下から上の個体ID。修復で同色内の順序が変わった場合は、実際のIDを記録し直す。
+		private sealed class Transport
+		{
+			public int From { get; }
+			public int To { get; }
+			public Direction4 Direction { get; }
+			public int Length { get; }
+			public int[] Cargo { get; }
+			public int[] SortedCargo { get; }
+			public int[] Returned { get; }
+			public int Color { get; }
+
+			public Transport(int from, int to, Direction4 direction, int length, int[] cargo, int[] returned, int[] colors)
+			{
+				From = from;
+				To = to;
+				Direction = direction;
+				Length = length;
+				Cargo = cargo;
+				Returned = returned;
+				SortedCargo = (int[])cargo.Clone();
+				Array.Sort(SortedCargo);
+				Color = colors[cargo[0]];
+				foreach (int id in cargo) if (colors[id] != Color) { Color = -1; break; }
+			}
+		}
+
+		public Plan9Optimizer(bool isLocal, Stopwatch sw, Input input, Information info)
+		{
+			this.isLocal = isLocal;
+			this.input = input;
+			this.info = info;
+			stopwatch = sw;
+			n = input.N;
+			var cells = new List<int>();
+			var slimeColors = new List<int>();
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					char c = input.C[i][j];
+					if (c < 'a' || c >= 'a' + input.K) continue;
+					cells.Add(i * n + j);
+					slimeColors.Add(c - 'a');
+				}
+			}
+			origins = cells.ToArray();
+			colors = slimeColors.ToArray();
+		}
+
+		private bool CanSearch => stopwatch.ElapsedMilliseconds < SearchMilliseconds;
+		private static bool SameGroup(Transport a, Transport b)
+			=> a.SortedCargo.AsSpan().SequenceEqual(b.SortedCargo);
+
+		public State OptimizeJumpSupports(State baseline)
+		{
+			var board = new ReplayBoard(this);
+			var best = new List<Transport>(baseline.Moves.Count);
+			foreach (var (i, j, k, direction, length) in baseline.Moves) {
+				int from = i * n + j;
+				if (!board.Capture(from, direction, length, board.Heights[from] - k, out var step))
+					throw new InvalidOperationException("Plan10: invalid Plan9 operation.");
+				best.Add(step!);
+			}
+			var finalBoard = board;
+			// 将来の便を足場として前倒しし、同じ集団の直線輸送を一度のジャンプへ置き換える。
+			for (int round = 0; round < 16 && CanSearch; round++) {
+				BuildIndex(best, out var dependencies, out _, out var checkpoints);
+				bool improved = false;
+				int trials = 0;
+				for (int arrival = 0; arrival + 2 < best.Count && CanSearch && !improved; arrival++) {
+					var carrier = best[arrival + 1];
+					if (carrier.Cargo.Length != best[arrival].Cargo.Length
+						|| carrier.From != best[arrival].To || !SameGroup(carrier, best[arrival])) continue;
+					int last = arrival + 1;
+					while (last + 1 < best.Count && last - arrival < 7
+						&& best[last].Returned.Length == 0 && best[last + 1].From == best[last].To
+						&& best[last + 1].Direction == carrier.Direction
+						&& SameGroup(best[last + 1], carrier)) last++;
+					for (int end = last; end >= arrival + 2 && !improved && CanSearch; end--) {
+						int distance = 0;
+						for (int index = arrival + 1; index <= end; index++) distance += best[index].Length;
+						if (distance > 8 || carrier.Direction.Move(carrier.From / n, carrier.From % n, distance)
+							!= (best[end].To / n, best[end].To % n)) continue;
+						for (int support = end + 1; support < Math.Min(best.Count, end + 97) && trials < 240 && CanSearch; support++) {
+							var future = best[support];
+							if (future.To != carrier.From || future.From == carrier.From
+								|| future.Returned.Length != 0 || future.Cargo.Intersect(carrier.Cargo).Any()) continue;
+							trials++;
+							info.Loop++;
+							var replacement = TryAdvanceJumpSupport(best, arrival, end, support, distance,
+								dependencies, checkpoints, finalBoard);
+							if (replacement == null) continue;
+							best = replacement;
+							info.Up++;
+							improved = true;
+							break;
+						}
+					}
+				}
+				if (!improved) break;
+			}
+			if (best.Count >= baseline.Moves.Count) return baseline;
+			var result = new State(isLocal, input);
+			foreach (var step in best) {
+				int i = step.From / n;
+				int j = step.From % n;
+				result.Move(i, j, result.Slimes[i, j].Count - step.Cargo.Length, step.Direction, step.Length);
+			}
+			if (result.SlimeCount != baseline.SlimeCount) throw new InvalidOperationException("Plan10: incomplete result.");
+			return result;
+		}
+
+		private List<Transport>? TryAdvanceJumpSupport(List<Transport> steps, int arrival, int end,
+			int support, int distance, int[][] dependencies, List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var board = checkpoints[arrival / CheckpointInterval].Copy();
+			for (int index = arrival / CheckpointInterval * CheckpointInterval; index < arrival; index++)
+				if (!board.Apply(steps[index])) return null;
+			var result = new List<Transport>(steps.Count);
+			for (int index = 0; index < arrival; index++) result.Add(steps[index]);
+			var selected = new HashSet<int>();
+			var pending = new Stack<int>(dependencies[support]);
+			while (pending.TryPop(out int index)) {
+				if (index < arrival || !selected.Add(index)) continue;
+				if (index <= end || index >= support || steps[index].Cargo.Intersect(steps[arrival].Cargo).Any()) return null;
+				foreach (int dependency in dependencies[index]) pending.Push(dependency);
+			}
+			foreach (int index in selected.Order()) {
+				if (!board.Apply(steps[index])) return null;
+				result.Add(steps[index]);
+			}
+			// 足場が先に到着すれば、元の便はその上に着地して同じ個体を輸送できる。
+			if (!board.Apply(steps[support]) || !board.Apply(steps[arrival])) return null;
+			result.Add(steps[support]);
+			result.Add(steps[arrival]);
+			var first = steps[arrival + 1];
+			if (board.Heights[first.From] < first.Cargo.Length + distance - 1
+				|| !board.Tower(first.From)[^first.Cargo.Length..].SequenceEqual(first.Cargo)
+				|| !board.Capture(first.From, first.Direction, distance, first.Cargo.Length, out var jump)) return null;
+			if (!jump!.Returned.AsSpan().SequenceEqual(steps[end].Returned)) return null;
+			result.Add(jump);
+			int budget = end - arrival - 2;
+			for (int index = arrival + 1; index < steps.Count; index++) {
+				if ((index & 63) == 0 && !CanSearch) return null;
+				if (index <= end || index == support || selected.Contains(index)) continue;
+				if (!AppendWithRepair(ref board, steps[index], result, ref budget)) return null;
+			}
+			return result.Count < steps.Count && board.SameState(finalBoard) ? result : null;
+		}
+
+		public State OptimizeSameColorMerges(State baseline)
+		{
+			var board = new ReplayBoard(this);
+			var best = new List<Transport>(baseline.Moves.Count);
+			foreach (var (i, j, k, direction, length) in baseline.Moves) {
+				int from = i * n + j;
+				if (!board.Capture(from, direction, length, board.Heights[from] - k, out var step))
+					throw new InvalidOperationException("Plan9: invalid Plan8 operation.");
+				best.Add(step!);
+			}
+			var finalBoard = board;
+			for (int round = 0; round < 24 && CanSearch; round++) {
+				BuildIndex(best, out _, out _, out var checkpoints);
+				bool improved = false;
+				for (int index = 0; index + 1 < best.Count && CanSearch && !improved; index++) {
+					var replacement = TryJoinSplitTransfer(best, index, checkpoints, finalBoard);
+					if (replacement == null) continue;
+					best = replacement;
+					info.Up++;
+					improved = true;
+				}
+				if (improved) continue;
+				for (int second = 0; second < best.Count && CanSearch && !improved; second++) {
+					info.Loop++;
+					var replacement = TryHomewardSameColorMerge(best, second, checkpoints, finalBoard)
+						?? TryRedirectSameColorMerge(best, second, checkpoints, finalBoard)
+						?? TryShiftSameColorMerge(best, second, checkpoints, finalBoard);
+					if (replacement == null) continue;
+					best = replacement;
+					info.Up++;
+					improved = true;
+				}
+				if (improved) continue;
+				for (int merge = 0; merge + 1 < best.Count && CanSearch && !improved; merge++) {
+					var incoming = best[merge];
+					if (incoming.Color < 0 || incoming.Returned.Length != 0) continue;
+					var before = checkpoints[merge / CheckpointInterval].Copy();
+					for (int index = merge / CheckpointInterval * CheckpointInterval; index < merge; index++) before.Apply(best[index]);
+					var receiver = before.Tower(incoming.To);
+					if (receiver.Length == 0 || receiver.Length + incoming.Cargo.Length > 8
+						|| receiver.ToArray().Any(id => colors[id] != incoming.Color)) continue;
+					int next = -1;
+					for (int index = merge + 1; index < Math.Min(best.Count, merge + 17); index++) {
+						if (best[index].From != incoming.To) continue;
+						if (best[index].Color == incoming.Color && best[index].Cargo.Length == receiver.Length + incoming.Cargo.Length
+							&& best[index].Returned.Length == 0) next = index;
+						break;
+					}
+					if (next < 0) continue;
+					info.Loop++;
+					var detourReplacement = TryRemoveSameColorMergeDetour(best, merge, receiver.Length, checkpoints, finalBoard);
+					if (detourReplacement != null) {
+						best = detourReplacement;
+						info.Up++;
+						improved = true;
+						break;
+					}
+					for (int cut = merge - 1; cut >= Math.Max(0, merge - 12) && CanSearch; cut--) {
+						if (best[cut].To != incoming.From || !SameGroup(best[cut], incoming)
+							|| best[cut].Returned.Length != 0) continue;
+						info.Loop++;
+						var replacement = TryMoveSameColorMerge(best, cut, merge, next, receiver.Length, checkpoints, finalBoard);
+						if (replacement == null) replacement = TryWaitSameColorMerge(best, cut, merge, receiver.Length, checkpoints, finalBoard);
+						if (replacement != null) {
+							best = replacement;
+							info.Up++;
+							improved = true;
+							break;
+						}
+					}
+				}
+				if (!improved) break;
+			}
+			if (best.Count >= baseline.Moves.Count) return baseline;
+			var result = new State(isLocal, input);
+			foreach (var step in best) {
+				int i = step.From / n;
+				int j = step.From % n;
+				result.Move(i, j, result.Slimes[i, j].Count - step.Cargo.Length, step.Direction, step.Length);
+			}
+			if (result.SlimeCount != baseline.SlimeCount) throw new InvalidOperationException("Plan9: incomplete merge optimization.");
+			return result;
+		}
+
+		private List<Transport>? TryJoinSplitTransfer(List<Transport> steps, int first,
+			List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var a = steps[first];
+			var b = steps[first + 1];
+			if (a.Color < 0 || a.Color != b.Color || a.From != b.From || a.To != b.To
+				|| a.Direction != b.Direction || a.Length != b.Length
+				|| a.Returned.Length != 0 || b.Returned.Length != 0) return null;
+			int count = a.Cargo.Length + b.Cargo.Length;
+			var board = checkpoints[first / CheckpointInterval].Copy();
+			for (int index = first / CheckpointInterval * CheckpointInterval; index < first; index++)
+				if (!board.Apply(steps[index])) return null;
+			if (board.Heights[a.From] < count || !board.Tower(a.From)[^count..].ToArray().All(id => colors[id] == a.Color)) return null;
+			if (!board.Capture(a.From, a.Direction, a.Length, count, out var combined)
+				|| combined!.Returned.Length != 0) return null;
+			var result = new List<Transport>(steps.Count - 1);
+			for (int index = 0; index < first; index++) result.Add(steps[index]);
+			result.Add(combined);
+			int budget = 0;
+			for (int index = first + 2; index < steps.Count; index++) {
+				if ((index & 63) == 0 && !CanSearch) return null;
+				if (!AppendWithRepair(ref board, steps[index], result, ref budget)) return null;
+			}
+			return result.Count < steps.Count && board.SameColorState(finalBoard) ? result : null;
+		}
+
+		private List<Transport>? TryHomewardSameColorMerge(List<Transport> steps, int merge,
+			List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var joining = steps[merge];
+			if (joining.Color < 0 || joining.Returned.Length != 0) return null;
+			var before = checkpoints[merge / CheckpointInterval].Copy();
+			for (int index = merge / CheckpointInterval * CheckpointInterval; index < merge; index++)
+				if (!before.Apply(steps[index])) return null;
+			var receiving = before.Tower(joining.To).ToArray();
+			int count = receiving.Length + joining.Cargo.Length;
+			if (receiving.Length == 0 || count > 8 || receiving.Any(id => colors[id] != joining.Color)) return null;
+			var group = receiving.Concat(joining.Cargo).Order().ToArray();
+			var continuation = new List<int>();
+			int position = joining.To;
+			for (int index = merge + 1; index < Math.Min(steps.Count, merge + 40); index++) {
+				var step = steps[index];
+				if (step.From != position) continue;
+				if (!step.SortedCargo.AsSpan().SequenceEqual(group)) break;
+				continuation.Add(index);
+				position = step.To;
+				if (step.Returned.Length > 0) break;
+			}
+			if (continuation.Count < 3 || !steps[continuation[^1]].Returned.Order().SequenceEqual(group)) return null;
+			var incoming = new List<int>();
+			position = joining.To;
+			for (int index = merge - 1; index >= Math.Max(0, merge - 28); index--) {
+				var step = steps[index];
+				if (step.To != position) continue;
+				if (step.Color != joining.Color || step.Returned.Length != 0
+					|| !receiving.All(id => step.Cargo.Contains(id))) break;
+				incoming.Add(index);
+				position = step.From;
+				if (incoming.Count == 12) break;
+			}
+			// 最初から合流先にいる個体も、動いて来た受け側と同様に再配置する。
+			if (incoming.Count == 0 && receiving.Any(id => origins[id] != joining.To)) return null;
+			var joiningLegs = new List<int>();
+			position = joining.From;
+			for (int index = merge - 1; index >= Math.Max(0, merge - 28); index--) {
+				var step = steps[index];
+				if (step.To != position) continue;
+				if (step.Color != joining.Color || step.Returned.Length != 0
+					|| !joining.Cargo.All(id => step.Cargo.Contains(id))) break;
+				joiningLegs.Add(index);
+				position = step.From;
+				if (joiningLegs.Count == 12) break;
+			}
+			var (denI, denJ) = input.Dens[joining.Color];
+			int den = denI * n + denJ;
+			var candidateCells = new List<(int cell, int estimate)>();
+			for (int cell = 0; cell < n * n; cell++) {
+				if (input.Map[cell / n, cell % n] == -2 || cell == den || cell == joining.To
+					|| before.Heights[cell] + count > 8 || before.Tower(cell).Contains(receiving[0])) continue;
+				int nestDistance = Math.Abs(cell / n - denI) + Math.Abs(cell % n - denJ);
+				int originalDistance = Math.Abs(joining.To / n - denI) + Math.Abs(joining.To % n - denJ);
+				if (nestDistance >= originalDistance) continue;
+				int joiningDistance = Math.Abs(cell / n - joining.From / n) + Math.Abs(cell % n - joining.From % n);
+				if (joiningDistance > 10) continue;
+				candidateCells.Add((cell, nestDistance * 2 + joiningDistance));
+			}
+			var starts = (incoming.Count == 0 ? new[] { merge } : incoming.ToArray())
+				.Concat(joiningLegs.Take(8)).Distinct().ToArray();
+			foreach (int start in starts) {
+				if (!CanSearch) break;
+				int receiverSource = incoming.Where(index => index >= start).DefaultIfEmpty(-1).Min();
+				int source = receiverSource < 0 ? joining.To : steps[receiverSource].From;
+				int joiningSource = joiningLegs.Where(index => index >= start).DefaultIfEmpty(-1).Min();
+				int joiningFrom = joiningSource < 0 ? joining.From : steps[joiningSource].From;
+				var skipped = new HashSet<int>(continuation) { merge };
+				foreach (int index in incoming) if (index >= start) skipped.Add(index);
+				foreach (int index in joiningLegs) if (index >= start) skipped.Add(index);
+				int budget = skipped.Count - 1;
+				var boardAtStart = checkpoints[start / CheckpointInterval].Copy();
+				for (int index = start / CheckpointInterval * CheckpointInterval; index < start; index++)
+					if (!boardAtStart.Apply(steps[index])) return null;
+				var prefix = new List<Transport>(steps.Count);
+				for (int index = 0; index < start; index++) prefix.Add(steps[index]);
+				int prefixBudget = budget;
+				bool prefixValid = true;
+				for (int index = start; index < merge; index++) {
+					if (skipped.Contains(index)) continue;
+					if (!AppendWithRepair(ref boardAtStart, steps[index], prefix, ref prefixBudget)) {
+						prefixValid = false;
+						break;
+					}
+				}
+				if (!prefixValid) continue;
+				var routes = new List<(int moves, ReplayBoard board, List<Transport> operations)>();
+				foreach (var (meeting, _) in candidateCells
+					.OrderBy(item => item.estimate + Math.Abs(item.cell / n - source / n)
+						+ Math.Abs(item.cell % n - source % n)
+						+ Math.Abs(item.cell / n - joiningFrom / n)
+						+ Math.Abs(item.cell % n - joiningFrom % n)).Take(32)) {
+					if (!CanSearch) return null;
+					var trial = boardAtStart.Copy();
+					var operations = new List<Transport>();
+					if (!RouteSameColor(ref trial, source, meeting, receiving.Length, operations, false, joining.Color)
+						|| !RouteSameColor(ref trial, joiningFrom, meeting, joining.Cargo.Length, operations, false, joining.Color)
+						|| !RouteSameColor(ref trial, meeting, den, count, operations, true, joining.Color)
+						|| operations.Count > prefixBudget) continue;
+					routes.Add((operations.Count, trial, operations));
+				}
+				// 両便の集荷と合流後の帰巣を合わせた実際の手数で評価する。
+				foreach (var route in routes.OrderBy(item => item.moves).Take(6)) {
+					var board = route.board;
+					var result = new List<Transport>(prefix);
+					result.AddRange(route.operations);
+					int remainingBudget = prefixBudget - route.moves;
+					bool valid = true;
+					for (int index = merge + 1; index < steps.Count; index++) {
+						if ((index & 63) == 0 && !CanSearch) { valid = false; break; }
+						if (skipped.Contains(index)) continue;
+						if (!AppendWithRepair(ref board, steps[index], result, ref remainingBudget)) { valid = false; break; }
+					}
+					if (valid && result.Count < steps.Count && board.SameColorState(finalBoard)) return result;
+				}
+			}
+			return null;
+		}
+
+		private List<Transport>? TryRedirectSameColorMerge(List<Transport> steps, int merge,
+			List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var joining = steps[merge];
+			if (joining.Color < 0 || joining.Returned.Length != 0) return null;
+			var before = checkpoints[merge / CheckpointInterval].Copy();
+			for (int index = merge / CheckpointInterval * CheckpointInterval; index < merge; index++)
+				if (!before.Apply(steps[index])) return null;
+			var receiving = before.Tower(joining.To).ToArray();
+			if (receiving.Length == 0 || receiving.Length + joining.Cargo.Length > 8
+				|| receiving.Any(id => colors[id] != joining.Color)) return null;
+			int receiverStep = -1;
+			for (int index = merge - 1; index >= Math.Max(0, merge - 24); index--) {
+				var step = steps[index];
+				if (step.To != joining.To || step.Cargo.Length != receiving.Length
+					|| step.Returned.Length != 0 || !step.SortedCargo.AsSpan().SequenceEqual(receiving.Order().ToArray())) continue;
+				receiverStep = index;
+				break;
+			}
+			if (receiverStep < 0) return null;
+			var group = joining.Cargo.Concat(receiving).Order().ToArray();
+			var forward = new List<int>();
+			int position = joining.To;
+			for (int index = merge + 1; index < Math.Min(steps.Count, merge + 24); index++) {
+				var step = steps[index];
+				if (step.From != position) continue;
+				if (step.Returned.Length != 0 || !step.SortedCargo.AsSpan().SequenceEqual(group)) break;
+				forward.Add(index);
+				position = step.To;
+				if (forward.Count == 12) break;
+			}
+			if (forward.Count < 2) return null;
+			int start = steps[receiverStep].From;
+			int origin = joining.From;
+			var (denI, denJ) = input.Dens[joining.Color];
+			for (int anchorIndex = forward.Count - 1; anchorIndex >= 1 && CanSearch; anchorIndex--) {
+				int anchor = steps[forward[anchorIndex]].To;
+				var candidates = new List<(int cell, int estimate)>();
+				for (int cell = 0; cell < n * n; cell++) {
+					if (cell == joining.To || cell == start || cell == origin || cell == anchor
+						|| input.Map[cell / n, cell % n] == -2 || before.Heights[cell] != 0) continue;
+					int first = Math.Abs(cell / n - start / n) + Math.Abs(cell % n - start % n);
+					int second = Math.Abs(cell / n - origin / n) + Math.Abs(cell % n - origin % n);
+					int onward = Math.Abs(cell / n - anchor / n) + Math.Abs(cell % n - anchor % n);
+					int toDen = Math.Abs(cell / n - denI) + Math.Abs(cell % n - denJ);
+					int oldToDen = Math.Abs(joining.To / n - denI) + Math.Abs(joining.To % n - denJ);
+					if (first > 8 || second > 8 || onward > 10 || toDen > oldToDen + 2) continue;
+					candidates.Add((cell, first + second + onward + toDen));
+				}
+				foreach (var (meeting, _) in candidates.OrderBy(item => item.estimate).Take(32)) {
+					if (!CanSearch) return null;
+					var board = checkpoints[receiverStep / CheckpointInterval].Copy();
+					for (int index = receiverStep / CheckpointInterval * CheckpointInterval; index < receiverStep; index++)
+						if (!board.Apply(steps[index])) return null;
+					var result = new List<Transport>(steps.Count);
+					for (int index = 0; index < receiverStep; index++) result.Add(steps[index]);
+					int budget = anchorIndex + 2;
+					bool valid = true;
+					for (int index = receiverStep; index < steps.Count; index++) {
+						if ((index & 63) == 0 && !CanSearch) { valid = false; break; }
+						if (index == receiverStep || (index > merge && forward.Take(anchorIndex + 1).Contains(index))) continue;
+						if (index == merge) {
+							int count = result.Count;
+							if (!RouteSameColor(ref board, start, meeting, receiving.Length, result, false, joining.Color)
+								|| !RouteSameColor(ref board, origin, meeting, joining.Cargo.Length, result, false, joining.Color)
+								|| !RouteSameColor(ref board, meeting, anchor, group.Length, result, false, joining.Color)) {
+								valid = false;
+								break;
+							}
+							budget -= result.Count - count;
+							if (budget < 0) { valid = false; break; }
+							continue;
+						}
+						if (!AppendWithRepair(ref board, steps[index], result, ref budget)) { valid = false; break; }
+					}
+					if (valid && result.Count < steps.Count && board.SameColorState(finalBoard)) return result;
+				}
+			}
+			return null;
+		}
+
+		private List<Transport>? TryShiftSameColorMerge(List<Transport> steps, int merge,
+			List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var joining = steps[merge];
+			if (joining.Color < 0 || joining.Returned.Length != 0) return null;
+			var before = checkpoints[merge / CheckpointInterval].Copy();
+			for (int index = merge / CheckpointInterval * CheckpointInterval; index < merge; index++)
+				if (!before.Apply(steps[index])) return null;
+			var receiving = before.Tower(joining.To).ToArray();
+			if (receiving.Length == 0 || receiving.Length + joining.Cargo.Length > 8
+				|| receiving.Any(id => colors[id] != joining.Color)) return null;
+			// 受け側の個体が来た経路を遡り、元の合流後に再び通る地点を探す。
+			var inbound = new List<int>();
+			int position = joining.To;
+			for (int index = merge - 1; index >= Math.Max(0, merge - 24); index--) {
+				var step = steps[index];
+				if (step.To != position) continue;
+				if (step.Color != joining.Color || step.Returned.Length != 0
+					|| !receiving.All(id => step.Cargo.Contains(id))) break;
+				inbound.Add(index);
+				position = step.From;
+				if (inbound.Count >= 10) break;
+			}
+			if (inbound.Count == 0) return null;
+			var outbound = new List<int>();
+			position = joining.To;
+			int groupCount = receiving.Length + joining.Cargo.Length;
+			for (int index = merge + 1; index < Math.Min(steps.Count, merge + 24); index++) {
+				var step = steps[index];
+				if (step.From != position) continue;
+				if (step.Color != joining.Color || step.Cargo.Length != groupCount || step.Returned.Length != 0) break;
+				outbound.Add(index);
+				position = step.To;
+				if (outbound.Count >= 10) break;
+			}
+			if (outbound.Count == 0) return null;
+			foreach (int start in inbound) {
+				if (!CanSearch) break;
+				int meeting = steps[start].From;
+				if (outbound.All(index => steps[index].To != meeting)) continue;
+				var removed = new HashSet<int> { merge };
+				foreach (int index in inbound) if (index >= start) removed.Add(index);
+				int end = outbound.First(index => steps[index].To == meeting);
+				foreach (int index in outbound) {
+					removed.Add(index);
+					if (index == end) break;
+				}
+				var board = checkpoints[start / CheckpointInterval].Copy();
+				for (int index = start / CheckpointInterval * CheckpointInterval; index < start; index++)
+					if (!board.Apply(steps[index])) return null;
+				var result = new List<Transport>(steps.Count);
+				for (int index = 0; index < start; index++) result.Add(steps[index]);
+				int budget = removed.Count - 2;
+				bool valid = true;
+				for (int index = start; index < steps.Count; index++) {
+					if ((index & 63) == 0 && !CanSearch) { valid = false; break; }
+					if (index == merge) {
+						int beforeRoute = result.Count;
+						if (board.Heights[meeting] < receiving.Length
+							|| !SameColors(board.Tower(meeting)[^receiving.Length..], receiving)
+							|| !RouteSameColor(ref board, joining.From, meeting, joining.Cargo.Length, result, false, joining.Color)) {
+							valid = false;
+							break;
+						}
+						budget -= result.Count - beforeRoute;
+						if (budget < 0) { valid = false; break; }
+						continue;
+					}
+					if (removed.Contains(index)) continue;
+					if (!AppendWithRepair(ref board, steps[index], result, ref budget)) { valid = false; break; }
+				}
+				if (valid && result.Count < steps.Count && board.SameColorState(finalBoard)) return result;
+			}
+			return null;
+		}
+
+		private bool RouteSameColor(ref ReplayBoard board, int from, int to, int count,
+			List<Transport> result, bool home, int color)
+		{
+			if (from == to || board.Heights[from] < count || board.Heights[to] + count > 8
+				|| !board.Tower(from)[^count..].ToArray().All(id => colors[id] == color)) return false;
+			var previous = Enumerable.Repeat(-1, n * n).ToArray();
+			var incoming = new RouteHop[n * n];
+			var queue = new Queue<int>();
+			previous[from] = from;
+			queue.Enqueue(from);
+			while (queue.TryDequeue(out int cell) && previous[to] < 0 && CanSearch) {
+				int foot = board.Heights[cell] - (cell == from ? count : 0);
+				for (int d = 0; d < directions.Length; d++) {
+					var direction = directions[d];
+					for (int length = 1; length <= foot + 1; length++) {
+						var (i, j) = direction.Move(cell / n, cell % n, length);
+						if ((uint)i >= (uint)n || (uint)j >= (uint)n || input.Map[i, j] == -2) break;
+						int next = i * n + j;
+						if (previous[next] >= 0 || board.Heights[next] + count > 8
+							|| (next != to && input.Map[i, j] == color)) continue;
+						previous[next] = cell;
+						incoming[next] = new RouteHop(cell, direction, length);
+						queue.Enqueue(next);
+						if (next == to) break;
+					}
+					if (previous[to] >= 0) break;
+				}
+			}
+			if (previous[to] < 0) return false;
+			var route = new List<RouteHop>();
+			for (int cell = to; cell != from; cell = previous[cell]) route.Add(incoming[cell]);
+			route.Reverse();
+			var trial = board.Copy();
+			var local = new List<Transport>();
+			foreach (var hop in route) {
+				if (!trial.Capture(hop.Cell, hop.Direction, hop.Length, count, out var moved)
+					|| (home ? hop != route[^1] && moved!.Returned.Length != 0 : moved!.Returned.Length != 0)) return false;
+				local.Add(moved!);
+			}
+			if (home && local[^1].Returned.Length != count) return false;
+			board = trial;
+			result.AddRange(local);
+			return true;
+		}
+
+		private List<Transport>? TryRemoveSameColorMergeDetour(List<Transport> steps, int merge,
+			int receiverCount, List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var incoming = steps[merge];
+			int groupCount = incoming.Cargo.Length + receiverCount;
+			for (int outbound = merge - 1; outbound >= Math.Max(0, merge - 12) && CanSearch; outbound--) {
+				var departure = steps[outbound];
+				if (departure.To != incoming.To || departure.Color != incoming.Color
+					|| departure.Cargo.Length != receiverCount || departure.Returned.Length != 0) continue;
+				int rendezvous = departure.From;
+				var returnLegs = new List<int>();
+				int position = incoming.To;
+				for (int index = merge + 1; index < Math.Min(steps.Count, merge + 9); index++) {
+					var step = steps[index];
+					if (step.From != position) continue;
+					if (step.Color != incoming.Color || step.Cargo.Length != groupCount || step.Returned.Length != 0) break;
+					returnLegs.Add(index);
+					position = step.To;
+					if (position == rendezvous) break;
+				}
+				if (position != rendezvous || returnLegs.Count == 0) continue;
+				var board = checkpoints[outbound / CheckpointInterval].Copy();
+				for (int index = outbound / CheckpointInterval * CheckpointInterval; index < outbound; index++)
+					if (!board.Apply(steps[index])) return null;
+				var result = new List<Transport>(steps.Count);
+				for (int index = 0; index < outbound; index++) result.Add(steps[index]);
+				int budget = returnLegs.Count;
+				int returnIndex = 0;
+				bool valid = true;
+				for (int index = outbound; index < steps.Count; index++) {
+					if ((index & 63) == 0 && !CanSearch) { valid = false; break; }
+					if (index == outbound || (returnIndex < returnLegs.Count && index == returnLegs[returnIndex])) {
+						if (index != outbound) returnIndex++;
+						continue;
+					}
+					if (index == merge) {
+						if (board.Heights[incoming.From] < incoming.Cargo.Length
+							|| !SameColors(board.Tower(incoming.From)[^incoming.Cargo.Length..], incoming.Cargo)
+							|| board.Heights[rendezvous] + incoming.Cargo.Length > 8) { valid = false; break; }
+						var target = new Transport(incoming.From, rendezvous, incoming.Direction, 1,
+							board.Tower(incoming.From)[^incoming.Cargo.Length..].ToArray(), [], colors);
+						if (!TryRepairRoute(ref board, target, result, ref budget)) { valid = false; break; }
+						continue;
+					}
+					if (!AppendWithRepair(ref board, steps[index], result, ref budget)) { valid = false; break; }
+				}
+				if (valid && result.Count < steps.Count && board.SameColorState(finalBoard)) return result;
+			}
+			return null;
+		}
+
+		private List<Transport>? TryWaitSameColorMerge(List<Transport> steps, int cut, int merge,
+			int receiverCount, List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var incoming = steps[merge];
+			int rendezvous = steps[cut].From;
+			int groupCount = incoming.Cargo.Length + receiverCount;
+			var route = new List<int>();
+			int position = incoming.To;
+			for (int index = merge + 1; index < Math.Min(steps.Count, merge + 13); index++) {
+				var step = steps[index];
+				if (step.From != position) continue;
+				if (step.Color != incoming.Color || step.Cargo.Length != groupCount || step.Returned.Length != 0) break;
+				route.Add(index);
+				position = step.To;
+				if (position == rendezvous) break;
+			}
+			if (position != rendezvous || route.Count == 0) return null;
+			var board = checkpoints[cut / CheckpointInterval].Copy();
+			for (int index = cut / CheckpointInterval * CheckpointInterval; index < cut; index++) board.Apply(steps[index]);
+			var result = new List<Transport>(steps.Count);
+			for (int index = 0; index < cut; index++) result.Add(steps[index]);
+			int budget = 1;
+			int routeIndex = 0;
+			for (int index = cut; index < steps.Count; index++) {
+				if ((index & 63) == 0 && !CanSearch) return null;
+				if (index == cut || index == merge) continue;
+				if (routeIndex < route.Count && index == route[routeIndex]) {
+					var leg = steps[index];
+					if (!board.Capture(leg.From, leg.Direction, leg.Length, receiverCount, out var moved)
+						|| moved!.Returned.Length != 0) return null;
+					result.Add(moved);
+					routeIndex++;
+					continue;
+				}
+				if (!AppendWithRepair(ref board, steps[index], result, ref budget)) return null;
+			}
+			if (result.Count >= steps.Count || !board.SameColorState(finalBoard)) return null;
+			return result;
+		}
+
+		private List<Transport>? TryMoveSameColorMerge(List<Transport> steps, int cut, int merge, int next,
+			int receiverCount, List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var incoming = steps[merge];
+			var successor = steps[next];
+			var board = checkpoints[cut / CheckpointInterval].Copy();
+			for (int index = cut / CheckpointInterval * CheckpointInterval; index < cut; index++) board.Apply(steps[index]);
+			var result = new List<Transport>(steps.Count);
+			for (int index = 0; index < cut; index++) result.Add(steps[index]);
+			if (board.Heights[successor.To] + incoming.Cargo.Length + receiverCount > 8) return null;
+			int budget = 1;
+			for (int index = cut; index <= next; index++) {
+				if (index == cut) {
+					if (!TryStraight(board, steps[cut].From, successor.To, incoming.Cargo.Length, out var dir, out int len)
+						|| !board.Capture(steps[cut].From, dir, len, incoming.Cargo.Length, out var moved)
+						|| moved!.Returned.Length != 0) return null;
+					result.Add(moved);
+					continue;
+				}
+				if (index == merge) continue;
+				if (index == next) {
+					if (!TryStraight(board, successor.From, successor.To, receiverCount, out var dir, out int len)
+						|| !board.Capture(successor.From, dir, len, receiverCount, out var moved)
+						|| moved!.Returned.Length != 0) return null;
+					result.Add(moved);
+					continue;
+				}
+				if (!AppendWithRepair(ref board, steps[index], result, ref budget)) return null;
+			}
+			for (int index = next + 1; index < steps.Count; index++) {
+				if ((index & 63) == 0 && !CanSearch) return null;
+				if (!AppendWithRepair(ref board, steps[index], result, ref budget)) return null;
+			}
+			if (result.Count >= steps.Count || !board.SameColorState(finalBoard)) return null;
+			return result;
+		}
+
+		private bool TryStraight(ReplayBoard board, int from, int to, int count, out Direction4 direction, out int length)
+		{
+			direction = Direction4.N;
+			length = 0;
+			if (board.Heights[from] < count || board.Heights[to] + count > 8) return false;
+			foreach (var dir in directions) {
+				for (int distance = 1; distance <= board.Heights[from] - count + 1; distance++) {
+					var (i, j) = dir.Move(from / n, from % n, distance);
+					if ((uint)i >= (uint)n || (uint)j >= (uint)n || input.Map[i, j] == -2) break;
+					if (i * n + j != to) continue;
+					direction = dir;
+					length = distance;
+					return true;
+				}
+			}
+			return false;
+		}
+
+		public State Optimize(State baseline)
+		{
+			var board = new ReplayBoard(this);
+			var best = new List<Transport>(baseline.Moves.Count);
+			foreach (var (i, j, k, direction, length) in baseline.Moves) {
+				int from = i * n + j;
+				if (!board.Capture(from, direction, length, board.Heights[from] - k, out var step)) {
+					throw new InvalidOperationException("Plan9: invalid Plan8 operation.");
+				}
+				best.Add(step!);
+			}
+			var finalBoard = board;
+			for (int round = 0; round < 32 && CanSearch; round++) {
+				var candidates = FindCandidates(best);
+				if (candidates.Count == 0 || !CanSearch) break;
+				BuildIndex(best, out var dependencies, out var supportDependencies, out var checkpoints);
+				bool improved = false;
+				int trials = 0;
+				foreach (var candidate in candidates) {
+					if (!CanSearch || trials >= MaxTrialsPerRound) break;
+					for (int length = candidate.Length; length >= 2 && CanSearch && !improved; length--) {
+						for (int mode = 0; mode < 2 && CanSearch && trials < MaxTrialsPerRound; mode++) {
+							trials++;
+							info.Loop++;
+							var replacement = TryCombine(best, candidate with { Length = length },
+								mode == 0 ? dependencies : supportDependencies, checkpoints, finalBoard);
+							if (replacement == null) continue;
+							best = replacement;
+							info.Up++;
+							improved = true;
+							break;
+						}
+					}
+					if (improved) break;
+				}
+				if (!improved) break;
+			}
+			// 従来の完全一致による短縮を確保した後、途中合流・飛距離の違い・後続修復を許す。
+			for (int round = 0; round < 32 && CanSearch; round++) {
+				var candidates = FindRideCandidates(best);
+				if (candidates.Count == 0 || !CanSearch) break;
+				BuildIndex(best, out var dependencies, out var supportDependencies, out var checkpoints);
+				bool improved = false;
+				int trials = 0;
+				foreach (var candidate in candidates) {
+					if (!CanSearch || trials >= MaxTrialsPerRound) break;
+					foreach (int end in candidate.Ends) {
+						if (!CanSearch || trials >= MaxTrialsPerRound || improved) break;
+						for (int mode = 0; mode < 2 && CanSearch && trials < MaxTrialsPerRound; mode++) {
+							trials++;
+							info.Loop++;
+							var replacement = TryRide(best, candidate, end,
+								mode == 0 ? dependencies : supportDependencies, checkpoints, finalBoard);
+							if (replacement == null) continue;
+							best = replacement;
+							info.Up++;
+							improved = true;
+							break;
+						}
+					}
+					if (improved) break;
+				}
+				if (!improved) break;
+			}
+			if (best.Count == baseline.Moves.Count) return baseline;
+			var result = new State(isLocal, input);
+			foreach (var step in best) {
+				int i = step.From / n;
+				int j = step.From % n;
+				result.Move(i, j, result.Slimes[i, j].Count - step.Cargo.Length, step.Direction, step.Length);
+			}
+			if (result.SlimeCount != baseline.SlimeCount || result.Moves.Count >= baseline.Moves.Count) {
+				throw new InvalidOperationException("Plan9: inconsistent optimized result.");
+			}
+			return result;
+		}
+
+		public State OptimizeRebuiltRides(State baseline)
+		{
+			var board = new ReplayBoard(this);
+			var best = new List<Transport>(baseline.Moves.Count);
+			foreach (var (i, j, k, direction, length) in baseline.Moves) {
+				if (!board.Capture(i * n + j, direction, length, board.Heights[i * n + j] - k, out var step))
+					throw new InvalidOperationException("Plan11: invalid baseline operation.");
+				best.Add(step!);
+			}
+			var finalBoard = board;
+			var timer = Stopwatch.StartNew();
+			for (int round = 0; round < 64 && timer.ElapsedMilliseconds < 1200; round++) {
+				BuildIndex(best, out var dependencies, out var supportDependencies, out var checkpoints);
+				var routes = new Dictionary<(int From, int To), List<int>>();
+				var candidates = new List<(int First, int Second)>();
+				for (int index = 0; index < best.Count; index++) {
+					var step = best[index];
+					if (step.Color < 0 || step.Returned.Length != 0 || step.Cargo.Length >= 8) continue;
+					var key = (step.From, step.To);
+					if (!routes.TryGetValue(key, out var earlier)) routes[key] = earlier = [];
+					for (int j = earlier.Count - 1; j >= Math.Max(0, earlier.Count - 48); j--) {
+						var first = best[earlier[j]];
+						if (first.Color != step.Color && first.Cargo.Length + step.Cargo.Length <= 8)
+							candidates.Add((earlier[j], index));
+					}
+					earlier.Add(index);
+				}
+				// 操作順の近い便を優先し、前倒しが必要な準備操作を抑える。
+				candidates.Sort((a, b) => (a.Second - a.First).CompareTo(b.Second - b.First));
+				bool improved = false;
+				int trials = 0;
+				foreach (var (first, second) in candidates) {
+					if (timer.ElapsedMilliseconds >= 1200 || trials++ >= 500) break;
+					info.Loop++;
+					var replacement = TryRebuildRide(best, first, second, dependencies, checkpoints, finalBoard);
+					if (replacement == null) continue;
+					best = replacement;
+					info.Up++;
+					improved = true;
+					break;
+				}
+				if (!improved) break;
+			}
+			for (int round = 0; round < 32 && timer.ElapsedMilliseconds < 1600; round++) {
+				BuildIndex(best, out var dependencies, out _, out var checkpoints);
+				var byRoute = new Dictionary<(int From, int To), List<int>>();
+				for (int index = 0; index < best.Count; index++) {
+					var step = best[index];
+					if (step.Color < 0 || step.Returned.Length != 0) continue;
+					if (!byRoute.TryGetValue((step.From, step.To), out var list))
+						byRoute[(step.From, step.To)] = list = [];
+					list.Add(index);
+				}
+				bool improved = false;
+				int trials = 0;
+				for (int first = 0; first < best.Count && !improved && timer.ElapsedMilliseconds < 1600; first++) {
+					var a = best[first];
+					if (a.Color < 0 || a.Returned.Length != 0 || a.Cargo.Length >= 8) continue;
+					// 中継点を越える直行便を、集荷済みの別色と中継点で合流する経路に変更する。
+					for (int distance = a.Length + 1; distance <= 7 && !improved; distance++) {
+						var (i, j) = a.Direction.Move(a.From / n, a.From % n, distance);
+						if ((uint)i >= (uint)n || (uint)j >= (uint)n || input.Map[i, j] == -2) break;
+						int end = i * n + j;
+						if (!byRoute.TryGetValue((a.From, end), out var direct)
+							|| !byRoute.TryGetValue((a.To, end), out var continuation)) continue;
+						foreach (int next in continuation) {
+							if (next <= first || !SameGroup(a, best[next]) || best[next].Cargo.Length != a.Cargo.Length
+								|| best[next].Direction != a.Direction) continue;
+							foreach (int other in direct) {
+								if (other <= first || other == next || best[other].Color == a.Color
+									|| best[other].Cargo.Length + a.Cargo.Length > 8) continue;
+								if (++trials > 400 || timer.ElapsedMilliseconds >= 1600) break;
+								info.Loop++;
+								var replacement = TryRebuildDetour(best, first, next, other, dependencies, checkpoints, finalBoard);
+								if (replacement == null) continue;
+								best = replacement;
+								info.Up++;
+								improved = true;
+								break;
+							}
+							if (trials > 400 || improved) break;
+						}
+					}
+				}
+				if (!improved) break;
+			}
+			best = OptimizeBranches(best, finalBoard, timer);
+			best = OptimizeNewRelays(best, finalBoard, timer);
+			best = OptimizeRelayNetworks(best, finalBoard, timer);
+			if (best.Count == baseline.Moves.Count) return baseline;
+			var result = new State(isLocal, input);
+			foreach (var step in best) {
+				int i = step.From / n;
+				int j = step.From % n;
+				result.Move(i, j, result.Slimes[i, j].Count - step.Cargo.Length, step.Direction, step.Length);
+			}
+			if (result.SlimeCount != baseline.SlimeCount || result.Moves.Count >= baseline.Moves.Count)
+				throw new InvalidOperationException("Plan11: inconsistent rebuilt rides.");
+			return result;
+		}
+
+		private List<Transport> OptimizeBranches(List<Transport> best, ReplayBoard finalBoard, Stopwatch timer)
+		{
+			for (int round = 0; round < 24 && timer.ElapsedMilliseconds < 1900; round++) {
+				BuildIndex(best, out var dependencies, out _, out var checkpoints);
+				var byRoute = new Dictionary<(int From, int To), List<int>>();
+				var bySource = new Dictionary<int, List<int>>();
+				for (int index = 0; index < best.Count; index++) {
+					var step = best[index];
+					if (step.Color < 0 || step.Returned.Length != 0) continue;
+					if (!byRoute.TryGetValue((step.From, step.To), out var route))
+						byRoute[(step.From, step.To)] = route = [];
+					route.Add(index);
+					if (!bySource.TryGetValue(step.From, out var source)) bySource[step.From] = source = [];
+					source.Add(index);
+				}
+				bool improved = false;
+				int trials = 0;
+				for (int first = 0; first < best.Count && !improved && timer.ElapsedMilliseconds < 1900; first++) {
+					var a = best[first];
+					if (a.Color < 0 || a.Returned.Length != 0 || a.Cargo.Length >= 8
+						|| !byRoute.TryGetValue((a.From, a.To), out var same)
+						|| !bySource.TryGetValue(a.To, out var continuations)) continue;
+					foreach (int second in same) {
+						var b = best[second];
+						if (second <= first || b.Color == a.Color || a.Cargo.Length + b.Cargo.Length > 8) continue;
+						foreach (int left in continuations) {
+							var x = best[left];
+							if (left <= first || !SameGroup(a, x) || a.Cargo.Length != x.Cargo.Length) continue;
+							foreach (int right in continuations) {
+								var y = best[right];
+								if (right <= second || right == left || !SameGroup(b, y)
+									|| b.Cargo.Length != y.Cargo.Length || x.To == y.To) continue;
+								if (++trials > 350 || timer.ElapsedMilliseconds >= 1900) break;
+								info.Loop++;
+								var replacement = TryRebuildBranch(best, first, second, left, right,
+									dependencies, checkpoints, finalBoard);
+								if (replacement == null) continue;
+								best = replacement;
+								info.Up++;
+								improved = true;
+								break;
+							}
+							if (improved || trials > 350) break;
+						}
+						if (improved || trials > 350) break;
+					}
+				}
+				if (!improved) break;
+			}
+			return best;
+		}
+
+		private List<Transport> OptimizeNewRelays(List<Transport> best, ReplayBoard finalBoard, Stopwatch timer)
+		{
+			for (int round = 0; round < 24 && timer.ElapsedMilliseconds < 2200; round++) {
+				BuildIndex(best, out var dependencies, out _, out var checkpoints);
+				var bySource = new Dictionary<int, List<int>>();
+				var nextUse = Enumerable.Repeat(-1, colors.Length).ToArray();
+				var next = Enumerable.Repeat(-1, best.Count).ToArray();
+				for (int index = best.Count - 1; index >= 0; index--) {
+					foreach (int id in best[index].Cargo) {
+						if (nextUse[id] >= 0 && (next[index] < 0 || nextUse[id] < next[index])) next[index] = nextUse[id];
+					}
+					foreach (int id in best[index].Cargo) nextUse[id] = index;
+					foreach (int id in best[index].Returned) nextUse[id] = index;
+				}
+				for (int index = 0; index < best.Count; index++) {
+					var step = best[index];
+					if (step.Color < 0 || step.Returned.Length != 0 || step.Cargo.Length >= 8) continue;
+					if (!bySource.TryGetValue(step.From, out var list)) bySource[step.From] = list = [];
+					list.Add(index);
+				}
+				bool improved = false;
+				int trials = 0;
+				for (int first = 0; first < best.Count && !improved && timer.ElapsedMilliseconds < 2200; first++) {
+					var a = best[first];
+					int left = next[first];
+					if (a.Color < 0 || a.Returned.Length != 0 || left <= first || a.Cargo.Length >= 8
+						|| !bySource.TryGetValue(a.From, out var same)) continue;
+					var x = best[left];
+					if (x.From != a.To || x.Color != a.Color || x.Returned.Length != 0 || !SameGroup(a, x)) continue;
+					foreach (int second in same) {
+						if (second <= first) continue;
+						var b = best[second];
+						int right = next[second];
+						if (b.Color == a.Color || a.Cargo.Length + b.Cargo.Length > 8 || right <= second || right == left) continue;
+						var y = best[right];
+						if (y.From != b.To || y.Color != b.Color || y.Returned.Length != 0 || !SameGroup(b, y)) continue;
+						for (int cell = 0; cell < n * n && !improved; cell++) {
+							if (cell == a.From || cell == a.To || cell == b.To || cell == x.To || cell == y.To
+								|| input.Map[cell / n, cell % n] == -2) continue;
+							if ((cell / n != a.From / n && cell % n != a.From % n)
+								|| (cell / n != x.To / n && cell % n != x.To % n)
+								|| (cell / n != y.To / n && cell % n != y.To % n)) continue;
+							if (++trials > 350 || timer.ElapsedMilliseconds >= 2200) break;
+							info.Loop++;
+							var replacement = TryNewRelay(best, first, second, left, right, cell,
+								dependencies, checkpoints, finalBoard);
+							if (replacement == null) continue;
+							best = replacement;
+							info.Up++;
+							improved = true;
+						}
+						if (improved || trials > 350) break;
+					}
+				}
+				if (!improved) break;
+			}
+			return best;
+		}
+
+		private List<Transport> OptimizeRelayNetworks(List<Transport> best, ReplayBoard finalBoard, Stopwatch timer)
+		{
+			for (int round = 0; round < 24 && timer.ElapsedMilliseconds < 2600; round++) {
+				BuildIndex(best, out var dependencies, out _, out var checkpoints);
+				var bySource = new Dictionary<int, List<int>>();
+				var nextUse = Enumerable.Repeat(-1, colors.Length).ToArray();
+				var next = Enumerable.Repeat(-1, best.Count).ToArray();
+				for (int index = best.Count - 1; index >= 0; index--) {
+					foreach (int id in best[index].Cargo) {
+						int use = nextUse[id];
+						if (use >= 0 && (next[index] < 0 || use < next[index])) next[index] = use;
+					}
+					foreach (int id in best[index].Cargo) nextUse[id] = index;
+					foreach (int id in best[index].Returned) nextUse[id] = index;
+				}
+				for (int index = 0; index < best.Count; index++) {
+					var step = best[index];
+					if (step.Color < 0 || step.Returned.Length != 0 || step.Cargo.Length >= 8) continue;
+					if (!bySource.TryGetValue(step.From, out var list)) bySource[step.From] = list = [];
+					list.Add(index);
+				}
+				bool improved = false;
+				int trials = 0;
+				for (int first = 0; first < best.Count && !improved && timer.ElapsedMilliseconds < 2600; first++) {
+					var a = best[first];
+					int a1 = next[first];
+					if (a.Color < 0 || a.Returned.Length != 0 || a.Cargo.Length >= 8 || a1 < 0
+						|| !bySource.TryGetValue(a.From, out var same)) continue;
+					int a2 = next[a1];
+					if (a2 < 0 || !IsContinuous(a, best[a1]) || !IsContinuous(best[a1], best[a2])) continue;
+					foreach (int second in same) {
+						if (second <= first) continue;
+						var b = best[second];
+						int b1 = next[second];
+						if (b.Color == a.Color || a.Cargo.Length + b.Cargo.Length > 8 || b1 < 0) continue;
+						int b2 = next[b1];
+						if (b2 < 0 || !IsContinuous(b, best[b1]) || !IsContinuous(best[b1], best[b2])
+							|| new[] { first, a1, a2, second, b1, b2 }.Distinct().Count() != 6) continue;
+						int endA = best[a2].To;
+						int endB = best[b2].To;
+						for (int r = 0; r < 2 && !improved; r++) {
+							int relay2 = r == 0 ? endA / n * n + endB % n : endB / n * n + endA % n;
+							if (relay2 == a.From || relay2 == endA || relay2 == endB
+								|| input.Map[relay2 / n, relay2 % n] == -2) continue;
+							for (int s = 0; s < 2 && !improved; s++) {
+								int relay1 = s == 0 ? a.From / n * n + relay2 % n : relay2 / n * n + a.From % n;
+								if (relay1 == a.From || relay1 == relay2 || relay1 == endA || relay1 == endB
+									|| input.Map[relay1 / n, relay1 % n] == -2) continue;
+								if (++trials > 400 || timer.ElapsedMilliseconds >= 2600) break;
+								info.Loop++;
+								var replacement = TryRelayNetwork(best, first, second, a1, a2, b1, b2,
+									relay1, relay2, dependencies, checkpoints, finalBoard);
+								if (replacement == null) continue;
+								best = replacement;
+								info.Up++;
+								improved = true;
+							}
+							if (trials > 400 || improved) break;
+						}
+					}
+				}
+				if (!improved) break;
+			}
+			return best;
+
+			static bool IsContinuous(Transport previous, Transport current)
+				=> previous.To == current.From && previous.Cargo.Length == current.Cargo.Length
+					&& previous.Color == current.Color && current.Returned.Length == 0
+					&& SameGroup(previous, current);
+		}
+
+		private List<Transport>? TryRelayNetwork(List<Transport> steps, int first, int second,
+			int a1, int a2, int b1, int b2, int relay1, int relay2, int[][] dependencies,
+			List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var a = steps[first];
+			var b = steps[second];
+			var selected = new bool[steps.Count];
+			var pending = new Stack<int>(dependencies[second]);
+			var preparation = new List<int>();
+			while (pending.TryPop(out int index)) {
+				if (index < first || selected[index]) continue;
+				if (index == first || index == a1 || index == a2 || index >= second) return null;
+				if (steps[index].Cargo.Any(id => Array.IndexOf(a.Cargo, id) >= 0)
+					|| steps[index].Returned.Any(id => Array.IndexOf(a.Cargo, id) >= 0)) return null;
+				selected[index] = true;
+				preparation.Add(index);
+				foreach (int required in dependencies[index]) pending.Push(required);
+			}
+			preparation.Sort();
+			var board = checkpoints[first / CheckpointInterval].Copy();
+			for (int index = first / CheckpointInterval * CheckpointInterval; index < first; index++)
+				if (!board.Apply(steps[index])) return null;
+			var result = new List<Transport>(steps.Count - 2);
+			for (int index = 0; index < first; index++) result.Add(steps[index]);
+			foreach (int index in preparation) {
+				if (!board.Apply(steps[index])) return null;
+				result.Add(steps[index]);
+			}
+			int count = a.Cargo.Length + b.Cargo.Length;
+			if (board.Heights[a.From] < count) return null;
+			var actual = board.Tower(a.From)[^count..].ToArray();
+			Array.Sort(actual);
+			var expected = a.Cargo.Concat(b.Cargo).Order().ToArray();
+			if (!actual.AsSpan().SequenceEqual(expected)) return null;
+			foreach (int target in new[] { relay1, relay2 }) {
+				int source = target == relay1 ? a.From : relay1;
+				if (!TryStraight(board, source, target, count, out var direction, out int length)
+					|| !board.Capture(source, direction, length, count, out var moved)
+					|| moved!.Returned.Length != 0) return null;
+				result.Add(moved);
+			}
+			var x = steps[a2];
+			var y = steps[b2];
+			var tower = board.Tower(relay2);
+			var firstSplit = SameColors(tower[^x.Cargo.Length..], x.Cargo) ? x
+					: SameColors(tower[^y.Cargo.Length..], y.Cargo) ? y : null;
+			if (firstSplit == null) return null;
+			var secondSplit = ReferenceEquals(firstSplit, x) ? y : x;
+			foreach (var split in new[] { firstSplit, secondSplit }) {
+				if (!TryStraight(board, relay2, split.To, split.Cargo.Length, out var direction, out int length)
+					|| !board.Capture(relay2, direction, length, split.Cargo.Length, out var moved)) return null;
+				result.Add(moved!);
+			}
+			for (int index = first + 1; index < steps.Count; index++) {
+				if (selected[index] || index == second || index == a1 || index == a2 || index == b1 || index == b2) continue;
+				if (board.Apply(steps[index])) result.Add(steps[index]);
+				else if (board.ApplyCompatible(steps[index], out var compatible)) result.Add(compatible!);
+				else return null;
+			}
+			return board.SameState(finalBoard) ? result : null;
+		}
+
+		private List<Transport>? TryNewRelay(List<Transport> steps, int first, int second, int left, int right,
+			int relay, int[][] dependencies, List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var a = steps[first];
+			var b = steps[second];
+			var x = steps[left];
+			var y = steps[right];
+			var selected = new bool[steps.Count];
+			var pending = new Stack<int>(dependencies[second]);
+			var preparation = new List<int>();
+			while (pending.TryPop(out int index)) {
+				if (index < first || selected[index]) continue;
+				if (index == first || index == left || index >= second) return null;
+				if (steps[index].Cargo.Any(id => Array.IndexOf(a.Cargo, id) >= 0)
+					|| steps[index].Returned.Any(id => Array.IndexOf(a.Cargo, id) >= 0)) return null;
+				selected[index] = true;
+				preparation.Add(index);
+				foreach (int required in dependencies[index]) pending.Push(required);
+			}
+			preparation.Sort();
+			var board = checkpoints[first / CheckpointInterval].Copy();
+			for (int index = first / CheckpointInterval * CheckpointInterval; index < first; index++)
+				if (!board.Apply(steps[index])) return null;
+			var result = new List<Transport>(steps.Count - 1);
+			for (int index = 0; index < first; index++) result.Add(steps[index]);
+			foreach (int index in preparation) {
+				if (!board.Apply(steps[index])) return null;
+				result.Add(steps[index]);
+			}
+			int count = a.Cargo.Length + b.Cargo.Length;
+			if (board.Heights[a.From] < count) return null;
+			var actual = board.Tower(a.From)[^count..].ToArray();
+			Array.Sort(actual);
+			var expected = a.Cargo.Concat(b.Cargo).Order().ToArray();
+			if (!actual.AsSpan().SequenceEqual(expected)
+				|| !TryStraight(board, a.From, relay, count, out var direction, out int length)
+				|| !board.Capture(a.From, direction, length, count, out var joint)
+				|| joint!.Returned.Length != 0) return null;
+			result.Add(joint);
+			var tower = board.Tower(relay);
+			var firstSplit = SameColors(tower[^x.Cargo.Length..], x.Cargo) ? x
+				: SameColors(tower[^y.Cargo.Length..], y.Cargo) ? y : null;
+			if (firstSplit == null) return null;
+			var secondSplit = ReferenceEquals(firstSplit, x) ? y : x;
+			foreach (var split in new[] { firstSplit, secondSplit }) {
+				if (!TryStraight(board, relay, split.To, split.Cargo.Length, out direction, out length)
+					|| !board.Capture(relay, direction, length, split.Cargo.Length, out var moved)) return null;
+				result.Add(moved!);
+			}
+			for (int index = first + 1; index < steps.Count; index++) {
+				if (selected[index] || index == second || index == left || index == right) continue;
+				if (board.Apply(steps[index])) result.Add(steps[index]);
+				else if (board.ApplyCompatible(steps[index], out var compatible)) result.Add(compatible!);
+				else return null;
+			}
+			return board.SameState(finalBoard) ? result : null;
+		}
+
+		private List<Transport>? TryRebuildRide(List<Transport> steps, int first, int second,
+			int[][] dependencies, List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var a = steps[first];
+			var b = steps[second];
+			var selected = new bool[steps.Count];
+			var pending = new Stack<int>(dependencies[second]);
+			var preparation = new List<int>();
+			while (pending.TryPop(out int index)) {
+				if (index < first || selected[index]) continue;
+				if (index == first || index >= second) return null;
+				if (steps[index].Cargo.Any(id => Array.IndexOf(a.Cargo, id) >= 0)
+					|| steps[index].Returned.Any(id => Array.IndexOf(a.Cargo, id) >= 0)) return null;
+				selected[index] = true;
+				preparation.Add(index);
+				foreach (int required in dependencies[index]) pending.Push(required);
+			}
+			preparation.Sort();
+			var board = checkpoints[first / CheckpointInterval].Copy();
+			for (int index = first / CheckpointInterval * CheckpointInterval; index < first; index++)
+				if (!board.Apply(steps[index])) return null;
+			var result = new List<Transport>(steps.Count - 1);
+			for (int index = 0; index < first; index++) result.Add(steps[index]);
+			foreach (int index in preparation) {
+				if (!board.Apply(steps[index])) return null;
+				result.Add(steps[index]);
+			}
+			int count = a.Cargo.Length + b.Cargo.Length;
+			if (board.Heights[a.From] < count) return null;
+			var actual = board.Tower(a.From)[^count..].ToArray();
+			Array.Sort(actual);
+			var expected = a.Cargo.Concat(b.Cargo).Order().ToArray();
+			if (!actual.AsSpan().SequenceEqual(expected)) return null;
+			if (!board.Capture(a.From, a.Direction, a.Length, count, out var joint)
+				|| joint!.To != b.To || joint.Returned.Length != 0) return null;
+			result.Add(joint);
+			for (int index = first + 1; index < steps.Count; index++) {
+				if (selected[index] || index == second) continue;
+				if (board.Apply(steps[index])) result.Add(steps[index]);
+				else if (board.ApplyCompatible(steps[index], out var compatible)) result.Add(compatible!);
+				else return null;
+			}
+			if (!board.SameState(finalBoard)) return null;
+			return result;
+		}
+
+		private List<Transport>? TryRebuildDetour(List<Transport> steps, int first, int next, int other,
+			int[][] dependencies, List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var a = steps[first];
+			var b = steps[other];
+			var c = steps[next];
+			var selected = new bool[steps.Count];
+			var pending = new Stack<int>(dependencies[other]);
+			var preparation = new List<int>();
+			while (pending.TryPop(out int index)) {
+				if (index < first || selected[index]) continue;
+				if (index == first || index == next || index >= other) return null;
+				if (steps[index].Cargo.Any(id => Array.IndexOf(a.Cargo, id) >= 0)
+					|| steps[index].Returned.Any(id => Array.IndexOf(a.Cargo, id) >= 0)) return null;
+				selected[index] = true;
+				preparation.Add(index);
+				foreach (int required in dependencies[index]) pending.Push(required);
+			}
+			preparation.Sort();
+			var board = checkpoints[first / CheckpointInterval].Copy();
+			for (int index = first / CheckpointInterval * CheckpointInterval; index < first; index++)
+				if (!board.Apply(steps[index])) return null;
+			var result = new List<Transport>(steps.Count - 1);
+			for (int index = 0; index < first; index++) result.Add(steps[index]);
+			foreach (int index in preparation) {
+				if (!board.Apply(steps[index])) return null;
+				result.Add(steps[index]);
+			}
+			int count = a.Cargo.Length + b.Cargo.Length;
+			if (board.Heights[a.From] < count) return null;
+			var actual = board.Tower(a.From)[^count..].ToArray();
+			Array.Sort(actual);
+			var expected = a.Cargo.Concat(b.Cargo).Order().ToArray();
+			if (!actual.AsSpan().SequenceEqual(expected)) return null;
+			if (!board.Capture(a.From, a.Direction, a.Length, count, out var joint)
+				|| joint!.Returned.Length != 0) return null;
+			result.Add(joint);
+			if (!board.Capture(c.From, c.Direction, c.Length, count, out joint)) return null;
+			result.Add(joint!);
+			for (int index = first + 1; index < steps.Count; index++) {
+				if (selected[index] || index == other || index == next) continue;
+				if (board.Apply(steps[index])) result.Add(steps[index]);
+				else if (board.ApplyCompatible(steps[index], out var compatible)) result.Add(compatible!);
+				else return null;
+			}
+			return board.SameState(finalBoard) ? result : null;
+		}
+
+		private List<Transport>? TryRebuildBranch(List<Transport> steps, int first, int second, int left, int right,
+			int[][] dependencies, List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var a = steps[first];
+			var b = steps[second];
+			var x = steps[left];
+			var y = steps[right];
+			var selected = new bool[steps.Count];
+			var pending = new Stack<int>(dependencies[second]);
+			var preparation = new List<int>();
+			while (pending.TryPop(out int index)) {
+				if (index < first || selected[index]) continue;
+				if (index == first || index == left || index >= second) return null;
+				if (steps[index].Cargo.Any(id => Array.IndexOf(a.Cargo, id) >= 0)
+					|| steps[index].Returned.Any(id => Array.IndexOf(a.Cargo, id) >= 0)) return null;
+				selected[index] = true;
+				preparation.Add(index);
+				foreach (int required in dependencies[index]) pending.Push(required);
+			}
+			preparation.Sort();
+			var board = checkpoints[first / CheckpointInterval].Copy();
+			for (int index = first / CheckpointInterval * CheckpointInterval; index < first; index++)
+				if (!board.Apply(steps[index])) return null;
+			var result = new List<Transport>(steps.Count - 1);
+			for (int index = 0; index < first; index++) result.Add(steps[index]);
+			foreach (int index in preparation) {
+				if (!board.Apply(steps[index])) return null;
+				result.Add(steps[index]);
+			}
+			int count = a.Cargo.Length + b.Cargo.Length;
+			if (board.Heights[a.From] < count) return null;
+			var actual = board.Tower(a.From)[^count..].ToArray();
+			Array.Sort(actual);
+			var expected = a.Cargo.Concat(b.Cargo).Order().ToArray();
+			if (!actual.AsSpan().SequenceEqual(expected)) return null;
+			if (!board.Capture(a.From, a.Direction, a.Length, count, out var joint)
+				|| joint!.Returned.Length != 0) return null;
+			result.Add(joint);
+			var top = board.Tower(a.To);
+			var firstSplit = SameColors(top[^x.Cargo.Length..], x.Cargo) ? x
+				: SameColors(top[^y.Cargo.Length..], y.Cargo) ? y : null;
+			if (firstSplit == null) return null;
+			var secondSplit = ReferenceEquals(firstSplit, x) ? y : x;
+			if (!board.Capture(firstSplit.From, firstSplit.Direction, firstSplit.Length,
+				firstSplit.Cargo.Length, out var split)) return null;
+			result.Add(split!);
+			if (!board.Capture(secondSplit.From, secondSplit.Direction, secondSplit.Length,
+				secondSplit.Cargo.Length, out split)) return null;
+			result.Add(split!);
+			for (int index = first + 1; index < steps.Count; index++) {
+				if (selected[index] || index == second || index == left || index == right) continue;
+				if (board.Apply(steps[index])) result.Add(steps[index]);
+				else if (board.ApplyCompatible(steps[index], out var compatible)) result.Add(compatible!);
+				else return null;
+			}
+			return board.SameState(finalBoard) ? result : null;
+		}
+
+		private List<Candidate> FindCandidates(List<Transport> steps)
+		{
+			var byEdge = new Dictionary<(int, int), List<int>>();
+			var result = new List<Candidate>();
+			for (int second = 0; second < steps.Count && CanSearch; second++) {
+				var b = steps[second];
+				if (b.Color < 0 || b.Cargo.Length >= 8 || b.Returned.Length != 0) continue;
+				var key = (b.From, b.To);
+				if (!byEdge.TryGetValue(key, out var earlier)) byEdge[key] = earlier = [];
+				for (int index = earlier.Count - 1; index >= Math.Max(0, earlier.Count - 64); index--) {
+					int first = earlier[index];
+					var a = steps[first];
+					if (a.Color == b.Color || a.Cargo.Length + b.Cargo.Length > 8) continue;
+					int length = 0;
+					while (length < 32 && first + length < second && second + length < steps.Count) {
+						var x = steps[first + length];
+						var y = steps[second + length];
+						if (x.From != y.From || x.To != y.To || x.Returned.Length != 0 || y.Returned.Length != 0
+							|| !SameGroup(a, x) || !SameGroup(b, y)) break;
+						if (length > 0 && steps[first + length - 1].To != x.From) break;
+						length++;
+					}
+					if (length >= 2) result.Add(new Candidate(first, second, length));
+				}
+				earlier.Add(second);
+			}
+			result.Sort((a, b) => a.Length != b.Length ? b.Length.CompareTo(a.Length)
+				: a.First != b.First ? a.First.CompareTo(b.First) : a.Second.CompareTo(b.Second));
+			return result;
+		}
+
+		private void BuildIndex(List<Transport> steps, out int[][] dependencies,
+			out int[][] supportDependencies, out List<ReplayBoard> checkpoints)
+		{
+			dependencies = new int[steps.Count][];
+			supportDependencies = new int[steps.Count][];
+			checkpoints = [];
+			var board = new ReplayBoard(this);
+			var lastMove = Enumerable.Repeat(-1, colors.Length).ToArray();
+			for (int index = 0; index < steps.Count; index++) {
+				if (index % CheckpointInterval == 0) checkpoints.Add(board.Copy());
+				var step = steps[index];
+				var required = new HashSet<int>();
+				foreach (int id in step.Cargo) if (lastMove[id] >= 0) required.Add(lastMove[id]);
+				foreach (int id in step.Returned) if (lastMove[id] >= 0) required.Add(lastMove[id]);
+				dependencies[index] = required.ToArray();
+				// 足場を用意した操作も必要になる場合は、こちらの依存関係で再試行する。
+				foreach (int id in board.Tower(step.From)) if (lastMove[id] >= 0) required.Add(lastMove[id]);
+				foreach (int id in board.Tower(step.To)) if (lastMove[id] >= 0) required.Add(lastMove[id]);
+				supportDependencies[index] = required.ToArray();
+				if (!board.Apply(step)) throw new InvalidOperationException("Plan9: trace replay mismatch.");
+				foreach (int id in step.Cargo) lastMove[id] = index;
+				foreach (int id in step.Returned) lastMove[id] = index;
+			}
+		}
+
+		private List<Transport>? TryCombine(List<Transport> steps, Candidate candidate,
+			int[][] dependencies, List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			int first = candidate.First;
+			int second = candidate.Second;
+			int length = candidate.Length;
+			var a = steps[first];
+			var b = steps[second];
+			var selected = new bool[steps.Count];
+			var pending = new Stack<int>(dependencies[second]);
+			var preparation = new List<int>();
+			while (pending.TryPop(out int index)) {
+				if (index < first || selected[index]) continue;
+				if (index < first + length || index >= second) return null;
+				// 先発便の個体を動かさないまま、後発便の集荷だけを前倒しする。
+				foreach (int id in steps[index].Cargo) if (Array.IndexOf(a.Cargo, id) >= 0) return null;
+				foreach (int id in steps[index].Returned) if (Array.IndexOf(a.Cargo, id) >= 0) return null;
+				selected[index] = true;
+				preparation.Add(index);
+				foreach (int dependency in dependencies[index]) pending.Push(dependency);
+			}
+			preparation.Sort();
+			var board = checkpoints[first / CheckpointInterval].Copy();
+			for (int index = first / CheckpointInterval * CheckpointInterval; index < first; index++) {
+				if (!board.Apply(steps[index])) return null;
+			}
+			var result = new List<Transport>(steps.Count - length);
+			for (int index = 0; index < first; index++) result.Add(steps[index]);
+			foreach (int index in preparation) {
+				if (!board.Apply(steps[index])) return null;
+				result.Add(steps[index]);
+			}
+			int count = a.Cargo.Length + b.Cargo.Length;
+			if (board.Heights[a.From] < count) return null;
+			var jointIds = board.Tower(a.From)[^count..].ToArray();
+			Array.Sort(jointIds);
+			var expected = a.Cargo.Concat(b.Cargo).Order().ToArray();
+			if (!jointIds.AsSpan().SequenceEqual(expected)) return null;
+			for (int offset = 0; offset < length; offset++) {
+				var step = steps[first + offset];
+				if (!board.Capture(step.From, step.Direction, step.Length, count, out var joint)
+					|| joint!.Returned.Length != 0) return null;
+				result.Add(joint);
+			}
+			// 混色を分離する後続操作も含めて全て検証する。元の集約を妨げる積み順・容量なら棄却する。
+			for (int index = first + length; index < steps.Count; index++) {
+				if ((index & 63) == 0 && !CanSearch) return null;
+				if (selected[index] || (index >= second && index < second + length)) continue;
+				if (!board.Apply(steps[index])) return null;
+				result.Add(steps[index]);
+			}
+			if (result.Count >= steps.Count || !board.SameState(finalBoard)) return null;
+			return result;
+		}
+
+		private List<RideCandidate> FindRideCandidates(List<Transport> steps)
+		{
+			var nextUse = Enumerable.Repeat(-1, colors.Length).ToArray();
+			var nextMove = Enumerable.Repeat(-1, steps.Count).ToArray();
+			for (int index = steps.Count - 1; index >= 0; index--) {
+				foreach (int id in steps[index].Cargo) {
+					int next = nextUse[id];
+					if (next >= 0 && (nextMove[index] < 0 || next < nextMove[index])) nextMove[index] = next;
+				}
+				foreach (int id in steps[index].Cargo) nextUse[id] = index;
+				foreach (int id in steps[index].Returned) nextUse[id] = index;
+			}
+			var cache = new Journey?[steps.Count];
+			var bySource = new Dictionary<int, List<int>>();
+			var result = new List<RideCandidate>();
+			for (int second = 0; second < steps.Count && CanSearch; second++) {
+				var b = steps[second];
+				if (b.Color < 0 || b.Cargo.Length >= 8 || b.Returned.Length != 0) continue;
+				if (!bySource.TryGetValue(b.From, out var earlier)) bySource[b.From] = earlier = [];
+				var right = GetJourney(second);
+				for (int index = earlier.Count - 1; index >= Math.Max(0, earlier.Count - 64) && CanSearch; index--) {
+					int first = earlier[index];
+					var a = steps[first];
+					if (a.Color == b.Color || a.Cargo.Length + b.Cargo.Length > 8) continue;
+					var left = GetJourney(first);
+					int shared = 0;
+					while (shared + 1 < left.Cells.Length && shared + 1 < right.Cells.Length
+						&& left.Cells[shared + 1] == right.Cells[shared + 1]) shared++;
+					if (shared < 2) continue;
+					var ends = new List<int>();
+					int saving = 0;
+					for (int x = 0; x < left.Legs.Length; x++) {
+						var leg = left.Legs[x];
+						if (leg.End > shared || leg.Index >= second) break;
+						int y = Array.FindIndex(right.Legs, item => item.End == leg.End);
+						if (y < 0 || x + y + 2 < 3) continue;
+						ends.Add(leg.End);
+						saving = Math.Max(saving, Math.Min(x + 1, y + 1));
+					}
+					if (ends.Count == 0) continue;
+					ends.Reverse();
+					result.Add(new RideCandidate(left, right, ends.ToArray(), saving));
+				}
+				earlier.Add(second);
+			}
+			result.Sort((a, b) => a.Saving != b.Saving ? b.Saving.CompareTo(a.Saving)
+				: a.First.Legs[0].Index != b.First.Legs[0].Index
+					? a.First.Legs[0].Index.CompareTo(b.First.Legs[0].Index)
+					: a.Second.Legs[0].Index.CompareTo(b.Second.Legs[0].Index));
+			return result;
+
+			Journey GetJourney(int start)
+			{
+				if (cache[start] != null) return cache[start]!;
+				var cells = new List<int> { steps[start].From };
+				var legs = new List<Leg>();
+				int color = steps[start].Color;
+				int previous = -1;
+				for (int index = start; index >= 0; index = nextMove[index]) {
+					var step = steps[index];
+					if (step.Color != color || step.Returned.Length != 0 || step.From != cells[^1]
+						|| cells.Count + step.Length > 33) break;
+					if (previous >= 0 && steps[previous].Cargo.Any(id => Array.IndexOf(step.Cargo, id) < 0)) break;
+					int offset = cells.Count - 1;
+					for (int distance = 1; distance <= step.Length; distance++) {
+						var (i, j) = step.Direction.Move(step.From / n, step.From % n, distance);
+						cells.Add(i * n + j);
+					}
+					legs.Add(new Leg(index, offset, cells.Count - 1));
+					previous = index;
+				}
+				return cache[start] = new Journey(color, cells.ToArray(), legs.ToArray());
+			}
+		}
+
+		private List<Transport>? TryRide(List<Transport> steps, RideCandidate candidate, int end,
+			int[][] dependencies, List<ReplayBoard> checkpoints, ReplayBoard finalBoard)
+		{
+			var left = candidate.First.Legs.Where(leg => leg.End <= end).ToArray();
+			var right = candidate.Second.Legs.Where(leg => leg.End <= end).ToArray();
+			int first = left[0].Index;
+			var removed = new Dictionary<int, int>();
+			foreach (var leg in left) removed[leg.Index] = leg.End;
+			foreach (var leg in right) removed[leg.Index] = leg.End;
+			int budget = removed.Count - 2;
+			var selected = new bool[steps.Count];
+			var board = checkpoints[first / CheckpointInterval].Copy();
+			for (int index = first / CheckpointInterval * CheckpointInterval; index < first; index++) {
+				if (!board.Apply(steps[index])) return null;
+			}
+			var result = new List<Transport>(steps.Count);
+			for (int index = 0; index < first; index++) result.Add(steps[index]);
+			int position = candidate.First.Cells[0];
+			int[] active = board.Tower(position)[^steps[first].Cargo.Length..].ToArray();
+			int offset = 0;
+			int jointMoves = 0;
+			int a = 0;
+			int b = 0;
+			while (offset < end && CanSearch) {
+				while (left[a].End <= offset) a++;
+				while (right[b].End <= offset) b++;
+				if (!Prepare(left[a].Index) || !Prepare(right[b].Index)) return null;
+				int countA = steps[left[a].Index].Cargo.Length;
+				int countB = steps[right[b].Index].Cargo.Length;
+				int count = countA + countB;
+				if (count > 8 || board.Heights[position] < count) return null;
+				var cargo = board.Tower(position)[^count..].ToArray();
+				if (cargo.Count(id => colors[id] == candidate.First.Color) != countA
+					|| cargo.Count(id => colors[id] == candidate.Second.Color) != countB) return null;
+				int stop = end;
+				// 次の同色合流地点は飛び越さず、そこで人数と準備操作を更新する。
+				foreach (var leg in left) if (leg.Start > offset && steps[leg.Index].Cargo.Length > countA) stop = Math.Min(stop, leg.Start);
+				foreach (var leg in right) if (leg.Start > offset && steps[leg.Index].Cargo.Length > countB) stop = Math.Min(stop, leg.Start);
+				int next = candidate.First.Cells[offset + 1];
+				Direction4 direction = directions.First(d => d.Move(position / n, position % n) == (next / n, next % n));
+				int maxLength = Math.Min(stop - offset, board.Heights[position] - count + 1);
+				for (int length = 2; length <= maxLength; length++) {
+					var (i, j) = direction.Move(position / n, position % n, length);
+					if (i * n + j == candidate.First.Cells[offset + length]) continue;
+					maxLength = length - 1;
+					break;
+				}
+				bool moved = false;
+				for (int length = maxLength; length >= 1; length--) {
+					int to = candidate.First.Cells[offset + length];
+					var joint = new Transport(position, to, direction, length, cargo, [], colors);
+					if (!board.Apply(joint)) continue;
+					result.Add(joint);
+					active = cargo;
+					position = to;
+					offset += length;
+					jointMoves++;
+					if (jointMoves > 1 && --budget < 0) return null;
+					moved = true;
+					break;
+				}
+				if (!moved) return null;
+			}
+			if (offset != end) return null;
+			for (int index = first; index < steps.Count; index++) {
+				if ((index & 63) == 0 && !CanSearch) return null;
+				if (selected[index] || removed.ContainsKey(index)) continue;
+				if (!AppendWithRepair(ref board, steps[index], result, ref budget)) return null;
+			}
+			if (result.Count >= steps.Count || !board.SameState(finalBoard)) return null;
+			return result;
+
+			bool Prepare(int target)
+			{
+				var pending = new Stack<int>(dependencies[target]);
+				var preparation = new HashSet<int>();
+				while (pending.TryPop(out int index)) {
+					if (index < first || selected[index] || preparation.Contains(index)) continue;
+					if (removed.TryGetValue(index, out int completedAt)) {
+						if (completedAt > offset) return false;
+						continue;
+					}
+					preparation.Add(index);
+					foreach (int dependency in dependencies[index]) pending.Push(dependency);
+				}
+				foreach (int index in preparation.Order()) {
+					var step = steps[index];
+					if (step.From == position && board.Tower(position).ToArray().TakeLast(step.Cargo.Length).Any(id => Array.IndexOf(active, id) >= 0)) return false;
+					if (!AppendWithRepair(ref board, step, result, ref budget)) return false;
+					if (active.Any(id => !board.Tower(position).Contains(id))) return false;
+					selected[index] = true;
+				}
+				return true;
+			}
+		}
+
+		private bool AppendWithRepair(ref ReplayBoard board, Transport step, List<Transport> result, ref int budget, bool uncover = true)
+		{
+			if (board.Apply(step)) {
+				result.Add(step);
+				return true;
+			}
+			// 同色内の個体順だけが反転した場合は、実際のIDを記録し直して後続へ引き継ぐ。
+			if (board.ApplyCompatible(step, out var compatible)) {
+				result.Add(compatible!);
+				return true;
+			}
+			if (budget <= 0 || !CanSearch) return false;
+			if (TryRepairRoute(ref board, step, result, ref budget)) return true;
+			if (!uncover || budget < 2) return false;
+			var source = board.Tower(step.From).ToArray();
+			for (int start = source.Length - step.Cargo.Length - 1; start >= 0; start--) {
+				if (!SameColors(source.AsSpan(start, step.Cargo.Length), step.Cargo)) continue;
+				int blockers = source.Length - start - step.Cargo.Length;
+				foreach (Direction4 direction in directions) {
+					var (i, j) = direction.Move(step.From / n, step.From % n);
+					if ((uint)i >= (uint)n || (uint)j >= (uint)n || input.Map[i, j] == -2) continue;
+					int temporary = i * n + j;
+					if (temporary == step.To || board.Heights[temporary] + blockers > 8) continue;
+					var trial = board.Copy();
+					var local = new List<Transport>();
+					int remainingBudget = budget - 2;
+					var peel = new Transport(step.From, temporary, direction, 1, source[^blockers..], [], colors);
+					if (!trial.Apply(peel)) continue;
+					local.Add(peel);
+					if (!AppendWithRepair(ref trial, step, local, ref remainingBudget, uncover: false)) continue;
+					var back = directions.First(d => d.Move(i, j) == (step.From / n, step.From % n));
+					var restore = new Transport(temporary, step.From, back, 1, trial.Tower(temporary)[^blockers..].ToArray(), [], colors);
+					if (!trial.Apply(restore)) continue;
+					local.Add(restore);
+					board = trial;
+					budget = remainingBudget;
+					result.AddRange(local);
+					return true;
+				}
+			}
+			return false;
+		}
+
+		private bool SameColors(ReadOnlySpan<int> a, ReadOnlySpan<int> b)
+		{
+			if (a.Length != b.Length) return false;
+			for (int index = 0; index < a.Length; index++) if (colors[a[index]] != colors[b[index]]) return false;
+			return true;
+		}
+
+		private bool TryRepairRoute(ref ReplayBoard board, Transport step, List<Transport> result, ref int budget)
+		{
+			int count = step.Cargo.Length;
+			if (board.Heights[step.From] < count || !SameColors(board.Tower(step.From)[^count..], step.Cargo)) return false;
+			int[] cargo = board.Tower(step.From)[^count..].ToArray();
+			bool symmetric = SameColors(cargo, cargo.Reverse().ToArray());
+			int size = n * n * 2;
+			var distances = Enumerable.Repeat(-1, size).ToArray();
+			var parents = Enumerable.Repeat(-1, size).ToArray();
+			var incoming = new RouteHop[size];
+			var queue = new Queue<int>();
+			int root = step.From * 2;
+			distances[root] = 0;
+			queue.Enqueue(root);
+			int goal = -1;
+			int maxMoves = Math.Min(8, budget + 1);
+			while (queue.TryDequeue(out int index) && goal < 0 && CanSearch) {
+				if (distances[index] >= maxMoves) continue;
+				int cell = index / 2;
+				int parity = 1 - index % 2;
+				int topColor = colors[parity == 0 ? cargo[^1] : cargo[0]];
+				int foot = board.Heights[cell] - (cell == step.From ? count : 0);
+				foreach (Direction4 direction in directions) {
+					for (int length = 1; length <= foot + 1; length++) {
+						var (i, j) = direction.Move(cell / n, cell % n, length);
+						if ((uint)i >= (uint)n || (uint)j >= (uint)n || input.Map[i, j] == -2) break;
+						int to = i * n + j;
+						if (to == step.From || board.Heights[to] + count > 8) continue;
+						bool finished = to == step.To && (parity == 1 || symmetric);
+						if (!finished && input.Map[i, j] == topColor) continue;
+						int next = to * 2 + parity;
+						if (distances[next] >= 0) continue;
+						distances[next] = distances[index] + 1;
+						parents[next] = index;
+						incoming[next] = new RouteHop(cell, direction, length);
+						if (finished) { goal = next; break; }
+						queue.Enqueue(next);
+					}
+					if (goal >= 0) break;
+				}
+			}
+			if (goal < 0) return false;
+			var route = new List<RouteHop>();
+			for (int index = goal; index != root; index = parents[index]) route.Add(incoming[index]);
+			route.Reverse();
+			var trial = board.Copy();
+			var local = new List<Transport>();
+			var homed = new List<int>();
+			foreach (var hop in route) {
+				if (!trial.Capture(hop.Cell, hop.Direction, hop.Length, count, out var moved)) return false;
+				local.Add(moved!);
+				homed.AddRange(moved!.Returned);
+			}
+			if (!SameColors(homed.ToArray(), step.Returned)) return false;
+			budget -= local.Count - 1;
+			board = trial;
+			result.AddRange(local);
+			return true;
+		}
+
+		private sealed class ReplayBoard
+		{
+			private readonly Plan9Optimizer owner;
+			private readonly int[] towers;
+			public int[] Heights { get; }
+			private int remaining;
+
+			public ReplayBoard(Plan9Optimizer owner)
+			{
+				this.owner = owner;
+				Heights = new int[owner.n * owner.n];
+				towers = new int[Heights.Length * 8];
+				remaining = owner.colors.Length;
+				for (int id = 0; id < owner.origins.Length; id++) {
+					int cell = owner.origins[id];
+					Heights[cell] = 1;
+					towers[cell * 8] = id;
+				}
+			}
+
+			private ReplayBoard(ReplayBoard other)
+			{
+				owner = other.owner;
+				Heights = (int[])other.Heights.Clone();
+				towers = (int[])other.towers.Clone();
+				remaining = other.remaining;
+			}
+
+			public ReplayBoard Copy() => new(this);
+			public ReadOnlySpan<int> Tower(int cell) => towers.AsSpan(cell * 8, Heights[cell]);
+			public bool Apply(Transport step)
+				=> Move(step.From, step.Direction, step.Length, step.Cargo.Length, step, false, out _);
+			public bool ApplyCompatible(Transport step, out Transport? recorded)
+				=> Move(step.From, step.Direction, step.Length, step.Cargo.Length, step, true, out recorded);
+			public bool Capture(int from, Direction4 direction, int length, int count, out Transport? recorded)
+				=> Move(from, direction, length, count, null, false, out recorded);
+
+			private bool Move(int from, Direction4 direction, int length, int count, Transport? expected, bool matchColors, out Transport? recorded)
+			{
+				recorded = null;
+				if ((uint)from >= (uint)Heights.Length || count <= 0 || count > Heights[from]) return false;
+				int left = Heights[from] - count;
+				if (length < 1 || length > left + 1) return false;
+				int to = -1;
+				for (int distance = 1; distance <= length; distance++) {
+					var (i, j) = direction.Move(from / owner.n, from % owner.n, distance);
+					if ((uint)i >= (uint)owner.n || (uint)j >= (uint)owner.n || owner.input.Map[i, j] == -2) return false;
+					to = i * owner.n + j;
+				}
+				if (to == from || Heights[to] + count > 8) return false;
+				Span<int> cargo = stackalloc int[8];
+				Tower(from)[left..].CopyTo(cargo);
+				if (expected != null && (expected.To != to || !(matchColors
+					? owner.SameColors(cargo[..count], expected.Cargo)
+					: cargo[..count].SequenceEqual(expected.Cargo)))) return false;
+				int sourceHeight = Heights[from];
+				int destinationHeight = Heights[to];
+				int previousRemaining = remaining;
+				Span<int> sourceBefore = stackalloc int[8];
+				Span<int> destinationBefore = stackalloc int[8];
+				Tower(from).CopyTo(sourceBefore);
+				Tower(to).CopyTo(destinationBefore);
+				Heights[from] = left;
+				for (int index = count - 1; index >= 0; index--) towers[to * 8 + Heights[to]++] = cargo[index];
+				Span<int> returned = stackalloc int[16];
+				int homeCount = ReturnHome(from, returned);
+				homeCount += ReturnHome(to, returned[homeCount..]);
+				if (expected != null) {
+					bool matched = matchColors ? owner.SameColors(returned[..homeCount], expected.Returned)
+						: returned[..homeCount].SequenceEqual(expected.Returned);
+					if (!matched) {
+						// 失敗した試行の盤面を戻し、短経路や一時退避による修復を同じ状態から試す。
+						Heights[from] = sourceHeight;
+						Heights[to] = destinationHeight;
+						remaining = previousRemaining;
+						sourceBefore[..sourceHeight].CopyTo(towers.AsSpan(from * 8));
+						destinationBefore[..destinationHeight].CopyTo(towers.AsSpan(to * 8));
+						return false;
+					}
+					if (!matchColors) return true;
+				}
+				recorded = new Transport(from, to, direction, length, cargo[..count].ToArray(), returned[..homeCount].ToArray(), owner.colors);
+				return true;
+			}
+
+			private int ReturnHome(int cell, Span<int> returned)
+			{
+				int color = owner.input.Map[cell / owner.n, cell % owner.n];
+				int count = 0;
+				while (Heights[cell] > 0) {
+					int id = towers[cell * 8 + Heights[cell] - 1];
+					if (owner.colors[id] != color) break;
+					Heights[cell]--;
+					remaining--;
+					returned[count++] = id;
+				}
+				return count;
+			}
+
+			public bool SameState(ReplayBoard other)
+			{
+				if (remaining != other.remaining || !Heights.AsSpan().SequenceEqual(other.Heights)) return false;
+				for (int cell = 0; cell < Heights.Length; cell++) if (!Tower(cell).SequenceEqual(other.Tower(cell))) return false;
+				return true;
+			}
+			public bool SameColorState(ReplayBoard other)
+			{
+				if (remaining != other.remaining || !Heights.AsSpan().SequenceEqual(other.Heights)) return false;
+				for (int cell = 0; cell < Heights.Length; cell++)
+					if (!owner.SameColors(Tower(cell), other.Tower(cell))) return false;
+				return true;
+			}
+		}
 	}
 
 	static State DoPlan8(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
@@ -663,719 +2527,6 @@ public class Program
 			if (bestI < 0 && preferredColor >= 0) return TryFindProgressMove();
 			if (bestI < 0) return false;
 			return TryDoMove(bestI, bestJ, 1, bestDirection, 1);
-		}
-	}
-
-	static State DoPlan8Previous(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		int n = input.N;
-		var colorCounts = new int[input.K];
-		foreach (string row in input.C) {
-			foreach (char cell in row) {
-				if (cell >= 'a' && cell < 'a' + input.K) {
-					colorCounts[cell - 'a']++;
-				}
-			}
-		}
-
-		var colorOrder = Enumerable.Range(0, input.K).ToArray();
-		Array.Sort(colorOrder, (a, b) => {
-			int compare = colorCounts[a].CompareTo(colorCounts[b]);
-			return compare != 0 ? compare : a.CompareTo(b);
-		});
-		int cellCount = n * n;
-		var allDistances = new int[cellCount, cellCount];
-		for (int sourceI = 0; sourceI < n; sourceI++) {
-			for (int sourceJ = 0; sourceJ < n; sourceJ++) {
-				int source = sourceI * n + sourceJ;
-				for (int cell = 0; cell < cellCount; cell++) {
-					allDistances[source, cell] = -1;
-				}
-				var queue = new Queue<(int i, int j)>();
-				allDistances[source, source] = 0;
-				queue.Enqueue((sourceI, sourceJ));
-				while (queue.Count > 0) {
-					var (i, j) = queue.Dequeue();
-					foreach (var (ni, nj) in Helper.Adjacence4(i, j, n, n)) {
-						int next = ni * n + nj;
-						if (input.Map[ni, nj] == -2 || allDistances[source, next] >= 0) {
-							continue;
-						}
-						allDistances[source, next] = allDistances[source, i * n + j] + 1;
-						queue.Enqueue((ni, nj));
-					}
-				}
-			}
-		}
-
-		var nestDistances = new int[input.K][,];
-		for (int color = 0; color < input.K; color++) {
-			nestDistances[color] = BuildDistanceMap(input.Dens[color].i, input.Dens[color].j);
-		}
-
-		foreach (int color in colorOrder) {
-			var (denI, denJ) = input.Dens[color];
-			while (CountColor(color) > 0 && state.Moves.Count < 100000) {
-				var mergeCandidates = new List<(long cost, int fromI, int fromJ, int toI, int toJ, int moved)>();
-				var denDistance = nestDistances[color];
-
-				for (int fromI = 0; fromI < n; fromI++) {
-					for (int fromJ = 0; fromJ < n; fromJ++) {
-						var source = state.Slimes[fromI, fromJ];
-						int sourceRun = TopRunLength(source, color);
-						int sourceDistance = denDistance[fromI, fromJ];
-						if (sourceRun == 0 || sourceDistance == 0 || sourceDistance == int.MaxValue) {
-							continue;
-						}
-
-						for (int toI = 0; toI < n; toI++) {
-							for (int toJ = 0; toJ < n; toJ++) {
-								if (fromI == toI && fromJ == toJ) {
-									continue;
-								}
-								var target = state.Slimes[toI, toJ];
-								int targetRun = TopRunLength(target, color);
-								if (targetRun == 0 || target.Count >= 8) {
-									continue;
-								}
-
-								int moved = Math.Min(7, Math.Min(sourceRun, 8 - target.Count));
-								int sourceToTarget = FloorDistance(fromI, fromJ, toI, toJ);
-								int targetToNest = denDistance[toI, toJ];
-								if (moved == 0 || sourceToTarget == int.MaxValue
-									|| targetToNest == int.MaxValue) {
-									continue;
-								}
-
-								int detour = sourceToTarget + targetToNest - sourceDistance;
-								long cost = (long)detour * moved * 1000
-									+ (long)targetToNest * 10
-									+ sourceToTarget;
-								mergeCandidates.Add((cost, fromI, fromJ, toI, toJ, moved));
-							}
-						}
-					}
-				}
-
-				mergeCandidates.Sort((a, b) => a.cost.CompareTo(b.cost));
-				bool movedThisTurn = false;
-				foreach (var candidate in mergeCandidates) {
-					if (!TryFindRoute(candidate.fromI, candidate.fromJ,
-						candidate.toI, candidate.toJ, candidate.moved,
-						out Direction4 direction, out int length)) {
-						continue;
-					}
-
-					int sourceHeight = state.Slimes[candidate.fromI, candidate.fromJ].Count;
-					state.Move(candidate.fromI, candidate.fromJ,
-						sourceHeight - candidate.moved, direction, length);
-					movedThisTurn = true;
-					break;
-				}
-
-				if (!movedThisTurn) {
-					int bestI = -1;
-					int bestJ = -1;
-					int bestDistance = -1;
-					for (int i = 0; i < n; i++) {
-						for (int j = 0; j < n; j++) {
-							int run = TopRunLength(state.Slimes[i, j], color);
-							int distance = denDistance[i, j];
-							if (run == 0 || distance <= bestDistance || distance == int.MaxValue) {
-								continue;
-							}
-
-							int moved = Math.Min(7, run);
-							if (!TryFindRoute(i, j, denI, denJ, moved,
-								out _, out _)) {
-								continue;
-							}
-							bestI = i;
-							bestJ = j;
-							bestDistance = distance;
-						}
-					}
-
-					if (bestI < 0 || !TryFindRoute(bestI, bestJ, denI, denJ,
-						Math.Min(7, TopRunLength(state.Slimes[bestI, bestJ], color)),
-						out Direction4 homeDirection, out int homeLength)) {
-						break;
-					}
-
-					int homeMoved = Math.Min(7, TopRunLength(state.Slimes[bestI, bestJ], color));
-					state.Move(bestI, bestJ,
-						state.Slimes[bestI, bestJ].Count - homeMoved,
-						homeDirection, homeLength);
-				}
-			}
-
-			if (CountColor(color) > 0) {
-				return state;
-			}
-		}
-
-		return state;
-
-		int[,] BuildDistanceMap(int targetI, int targetJ)
-		{
-			var map = new int[n, n];
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					map[i, j] = int.MaxValue;
-				}
-			}
-
-			var queue = new Queue<(int i, int j)>();
-			map[targetI, targetJ] = 0;
-			queue.Enqueue((targetI, targetJ));
-			while (queue.Count > 0) {
-				var (i, j) = queue.Dequeue();
-				foreach (var (ni, nj) in Helper.Adjacence4(i, j, n, n)) {
-					if (input.Map[ni, nj] == -2 || map[ni, nj] != int.MaxValue) {
-						continue;
-					}
-					map[ni, nj] = map[i, j] + 1;
-					queue.Enqueue((ni, nj));
-				}
-			}
-			return map;
-		}
-
-		int FloorDistance(int fromI, int fromJ, int toI, int toJ)
-		{
-			var map = BuildDistanceMap(toI, toJ);
-			return map[fromI, fromJ] == int.MaxValue ? -1 : map[fromI, fromJ];
-		}
-
-		int CountColor(int color)
-		{
-			int count = 0;
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					count += state.Slimes[i, j].Count(slime => slime == color);
-				}
-			}
-			return count;
-		}
-
-		int TopRunLength(Stack<int> tower, int color)
-		{
-			int count = 0;
-			foreach (int slime in tower) {
-				if (slime != color) {
-					break;
-				}
-				count++;
-			}
-			return count;
-		}
-
-		bool TryFindRoute(
-			int fromI, int fromJ, int targetI, int targetJ, int moved,
-			out Direction4 firstDirection, out int firstLength)
-		{
-			firstDirection = Direction4.N;
-			firstLength = 0;
-			if (fromI == targetI && fromJ == targetJ) {
-				return false;
-			}
-
-			var visited = new bool[n, n];
-			var firstDirections = new Direction4[n, n];
-			var firstLengths = new int[n, n];
-			var queue = new Queue<(int i, int j)>();
-			visited[fromI, fromJ] = true;
-			queue.Enqueue((fromI, fromJ));
-
-			while (queue.Count > 0) {
-				var (i, j) = queue.Dequeue();
-				int baseHeight = state.Slimes[i, j].Count - moved;
-				int maxLength = Math.Max(1, baseHeight + 1);
-				foreach (var direction in Direction4Extensions.ForEach4()) {
-					for (int length = 1; length <= maxLength; length++) {
-						var (ni, nj) = direction.Move(i, j, length);
-						if ((uint)ni >= (uint)n || (uint)nj >= (uint)n
-							|| input.Map[ni, nj] == -2) {
-							break;
-						}
-						if (visited[ni, nj]
-							|| state.Slimes[ni, nj].Count + moved > 8) {
-							continue;
-						}
-
-						visited[ni, nj] = true;
-						firstDirections[ni, nj] = i == fromI && j == fromJ
-							? direction : firstDirections[i, j];
-						firstLengths[ni, nj] = i == fromI && j == fromJ
-							? length : firstLengths[i, j];
-						if (ni == targetI && nj == targetJ) {
-							firstDirection = firstDirections[ni, nj];
-							firstLength = firstLengths[ni, nj];
-							return true;
-						}
-						queue.Enqueue((ni, nj));
-					}
-				}
-			}
-			return false;
-		}
-	}
-
-	static State DoPlan8Legacy(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		int n = input.N;
-		var colorCounts = new int[input.K];
-		foreach (string row in input.C) {
-			foreach (char cell in row) {
-				if (cell >= 'a' && cell < 'a' + input.K) {
-					colorCounts[cell - 'a']++;
-				}
-			}
-		}
-
-		var colorOrder = new int[input.K];
-		for (int c = 0; c < input.K; c++) {
-			colorOrder[c] = c;
-		}
-
-		Array.Sort(colorOrder, (a, b) => {
-			int compare = colorCounts[a].CompareTo(colorCounts[b]);
-			return compare != 0 ? compare : a.CompareTo(b);
-		});
-
-		var distances = new int[input.K][,];
-		int cellCount = n * n;
-		var allDistances = new int[cellCount, cellCount];
-		for (int targetI = 0; targetI < n; targetI++) {
-			for (int targetJ = 0; targetJ < n; targetJ++) {
-				int targetCell = targetI * n + targetJ;
-				for (int cell = 0; cell < cellCount; cell++) {
-					allDistances[targetCell, cell] = -1;
-				}
-
-				var queue = new Queue<(int i, int j)>();
-				allDistances[targetCell, targetCell] = 0;
-				queue.Enqueue((targetI, targetJ));
-				while (queue.Count > 0) {
-					var (i, j) = queue.Dequeue();
-					foreach (var (ni, nj) in Helper.Adjacence4(i, j, n, n)) {
-						int nextCell = ni * n + nj;
-						if (input.Map[ni, nj] == -2
-							|| allDistances[targetCell, nextCell] >= 0) {
-							continue;
-						}
-						allDistances[targetCell, nextCell] =
-							allDistances[targetCell, i * n + j] + 1;
-						queue.Enqueue((ni, nj));
-					}
-				}
-			}
-		}
-
-		for (int color = 0; color < input.K; color++) {
-			distances[color] = BuildDistanceMap(input.Dens[color].i, input.Dens[color].j);
-		}
-
-		foreach (int color in colorOrder) {
-			var (denI, denJ) = input.Dens[color];
-			while (CountColor(color) > 0 && state.Moves.Count < 100000) {
-				if (!FindBestMerge(color, denI, denJ,
-					out int sourceI, out int sourceJ, out int moved,
-					out int targetI, out int targetJ)) {
-					return state;
-				}
-
-				var routeDistances = BuildDistanceMap(targetI, targetJ);
-				if (!TryFindProgressMove(sourceI, sourceJ, targetI, targetJ,
-					routeDistances, moved, out Direction4 direction, out int jump)) {
-					return state;
-				}
-
-				int sourceHeight = state.Slimes[sourceI, sourceJ].Count;
-				state.Move(sourceI, sourceJ, sourceHeight - moved, direction, jump);
-			}
-		}
-
-		return state;
-
-		int[,] BuildDistanceMap(int targetI, int targetJ)
-		{
-			var map = new int[n, n];
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					map[i, j] = int.MaxValue;
-				}
-			}
-
-			var queue = new Queue<(int i, int j)>();
-			map[targetI, targetJ] = 0;
-			queue.Enqueue((targetI, targetJ));
-			while (queue.Count > 0) {
-				var (i, j) = queue.Dequeue();
-				foreach (var (ni, nj) in Helper.Adjacence4(i, j, n, n)) {
-					if (input.Map[ni, nj] == -2 || map[ni, nj] != int.MaxValue) {
-						continue;
-					}
-
-					map[ni, nj] = map[i, j] + 1;
-					queue.Enqueue((ni, nj));
-				}
-			}
-
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					if (map[i, j] < 0 && input.Map[i, j] != -2) {
-						map[i, j] = int.MaxValue;
-					}
-				}
-			}
-
-			return map;
-		}
-
-		bool FindBestMerge(
-			int color, int denI, int denJ,
-			out int bestSourceI, out int bestSourceJ,
-			out int bestMoved, out int bestTargetI, out int bestTargetJ)
-		{
-			bestSourceI = bestSourceJ = bestTargetI = bestTargetJ = -1;
-			bestMoved = 0;
-			long bestCost = long.MaxValue;
-			bool hasMergeTarget = false;
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					if (TopRunLength(state.Slimes[i, j], color) > 0
-						&& distances[color][i, j] > 0) {
-						hasMergeTarget = true;
-					}
-				}
-			}
-
-			for (int sourceI = 0; sourceI < n; sourceI++) {
-				for (int sourceJ = 0; sourceJ < n; sourceJ++) {
-					var source = state.Slimes[sourceI, sourceJ];
-					int sourceRun = TopRunLength(source, color);
-					if (sourceRun == 0 || distances[color][sourceI, sourceJ] == 0) {
-						continue;
-					}
-
-					for (int targetI = 0; targetI < n; targetI++) {
-						for (int targetJ = 0; targetJ < n; targetJ++) {
-							if (targetI == sourceI && targetJ == sourceJ) {
-								continue;
-							}
-							var target = state.Slimes[targetI, targetJ];
-							int targetRun = TopRunLength(target, color);
-							bool isDen = targetI == denI && targetJ == denJ;
-							if (hasMergeTarget ? targetRun == 0 : !isDen) {
-								continue;
-							}
-							int moved = Math.Min(7, sourceRun);
-							moved = Math.Min(moved, 8 - target.Count);
-							if (moved <= 0) {
-								continue;
-							}
-
-							int sourceToTarget = allDistances[
-								targetI * n + targetJ, sourceI * n + sourceJ];
-							if (sourceToTarget < 0 || distances[color][targetI, targetJ] == int.MaxValue) {
-								continue;
-							}
-							long cost = hasMergeTarget
-								? (long)sourceToTarget + distances[color][targetI, targetJ]
-								: sourceToTarget;
-							if (cost >= bestCost) {
-								continue;
-							}
-
-							bestCost = cost;
-							bestSourceI = sourceI;
-							bestSourceJ = sourceJ;
-							bestMoved = moved;
-							bestTargetI = targetI;
-							bestTargetJ = targetJ;
-						}
-					}
-				}
-			}
-
-			return bestSourceI >= 0;
-		}
-
-		int CountColor(int color)
-		{
-			int count = 0;
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					count += state.Slimes[i, j].Count(slime => slime == color);
-				}
-			}
-			return count;
-		}
-
-		int TopRunLength(Stack<int> tower, int color)
-		{
-			int count = 0;
-			foreach (int slime in tower) {
-				if (slime != color) {
-					break;
-				}
-				count++;
-			}
-			return count;
-		}
-
-		bool TryFindProgressMove(
-			int fromI, int fromJ, int goalI, int goalJ, int[,] routeDistances,
-			int moved, out Direction4 direction, out int jump)
-		{
-			direction = Direction4.N;
-			jump = 0;
-			int height = state.Slimes[fromI, fromJ].Count;
-			int maxJump = height - moved + 1;
-			int bestDistance = routeDistances[fromI, fromJ];
-
-			foreach (var dir in Direction4Extensions.ForEach4()) {
-				for (int length = maxJump; length >= 1; length--) {
-					bool clear = true;
-					for (int step = 1; step <= length; step++) {
-						var (i, j) = dir.Move(fromI, fromJ, step);
-						if ((uint)i >= (uint)n || (uint)j >= (uint)n
-							|| input.Map[i, j] == -2) {
-							clear = false;
-							break;
-						}
-					}
-					if (!clear) {
-						break;
-					}
-
-					var (destI, destJ) = dir.Move(fromI, fromJ, length);
-					if (state.Slimes[destI, destJ].Count + moved > 8
-						|| routeDistances[destI, destJ] >= bestDistance) {
-						continue;
-					}
-
-					bestDistance = routeDistances[destI, destJ];
-					direction = dir;
-					jump = length;
-				}
-			}
-
-			return jump > 0;
-		}
-	}
-
-	static State DoPlan3(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var colorCounts = new int[input.K];
-		foreach (string row in input.C) {
-			foreach (char cell in row) {
-				if (cell >= 'a' && cell < 'a' + input.K) {
-					colorCounts[cell - 'a']++;
-				}
-			}
-		}
-
-		var colorOrder = new int[input.K];
-		for (int c = 0; c < input.K; c++) {
-			colorOrder[c] = c;
-		}
-
-		Array.Sort(colorOrder, (a, b) => {
-			int compare = colorCounts[a].CompareTo(colorCounts[b]);
-			return compare != 0 ? compare : a.CompareTo(b);
-		});
-
-		return DoPlanByColorOrder(isLocal, sw, rnd, input, info, colorOrder);
-	}
-
-	static State DoPlan4(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		return DoPlan4Core(isLocal, sw, rnd, input, info, requireNonWorsening: false);
-	}
-
-	static State DoPlan5(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		return DoPlan4Core(isLocal, sw, rnd, input, info, requireNonWorsening: true);
-	}
-
-	static State DoPlan6(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		return DoPlan4Core(
-			isLocal, sw, rnd, input, info,
-			requireNonWorsening: true, useTwoStepLookahead: true);
-	}
-
-	static State DoPlan7(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		int n = input.N;
-		var dists = new int[input.K, n, n];
-
-		for (int c = 0; c < input.K; c++) {
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					dists[c, i, j] = int.MaxValue;
-				}
-			}
-
-			var queue = new Queue<(int i, int j, int d)>();
-			var (si, sj) = input.Dens[c];
-			dists[c, si, sj] = 0;
-			queue.Enqueue((si, sj, 0));
-			while (queue.Count > 0) {
-				var (i, j, d) = queue.Dequeue();
-				int nd = d + 1;
-				foreach (var (ii, jj) in Helper.Adjacence4(i, j, n, n)) {
-					if (input.Map[ii, jj] == -2 || dists[c, ii, jj] <= nd) {
-						continue;
-					}
-
-					dists[c, ii, jj] = nd;
-					queue.Enqueue((ii, jj, nd));
-				}
-			}
-		}
-
-		var paths = new List<List<(int i, int j, Direction4 dir)>>();
-		for (int i = 0; i < n; i++) {
-			for (int j = 0; j < n; j++) {
-				int color = input.C[i][j] - 'a';
-				if ((uint)color >= (uint)input.K) {
-					continue;
-				}
-
-				var path = new List<(int i, int j, Direction4 dir)>();
-				int ci = i;
-				int cj = j;
-				while (dists[color, ci, cj] > 0) {
-					bool foundNext = false;
-					foreach (var (ni, nj, dir) in Direction4Extensions.Adjacence4(ci, cj, n, n)) {
-						if (input.Map[ni, nj] == -2
-							|| dists[color, ni, nj] != dists[color, ci, cj] - 1) {
-							continue;
-						}
-
-						path.Add((ci, cj, dir));
-						ci = ni;
-						cj = nj;
-						foundNext = true;
-						break;
-					}
-
-					if (!foundNext) {
-						break;
-					}
-				}
-
-				paths.Add(path);
-			}
-		}
-
-		var reservedHeights = new int[n, n];
-		var claimed = new bool[n, n];
-		const int maxScaffoldHeight = 5;
-		const int minScaffoldHeight = 4;
-		const int maxScaffoldCount = 3;
-
-		for (int scaffoldIndex = 0; scaffoldIndex < maxScaffoldCount; scaffoldIndex++) {
-			int bestI = -1;
-			int bestJ = -1;
-			int bestHeight = 0;
-			int bestDonorCount = 0;
-			long bestNetBenefit = 0;
-			var bestDonors = new List<(int i, int j, Direction4 dir)>();
-
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					if (claimed[i, j] || input.Map[i, j] < -1) {
-						continue;
-					}
-					if (input.Map[i, j] >= 0) {
-						continue;
-					}
-
-					int baseHeight = state.Slimes[i, j].Count;
-					var donors = new List<(int i, int j, Direction4 dir)>();
-					foreach (var (di, dj, dirFromCenter) in Direction4Extensions.Adjacence4(i, j, n, n)) {
-						if (input.Map[di, dj] != -2 && !claimed[di, dj]
-							&& state.Slimes[di, dj].Count > 0) {
-							donors.Add((di, dj, dirFromCenter));
-						}
-					}
-
-					int height = Math.Min(maxScaffoldHeight, baseHeight + donors.Count);
-					if (height < minScaffoldHeight) {
-						continue;
-					}
-
-					long expectedSavings = EstimateScaffoldSavings(i, j, height);
-					int donorCount = height - baseHeight;
-					long netBenefit = expectedSavings - 2L * donorCount;
-					if (netBenefit > bestNetBenefit) {
-						bestI = i;
-						bestJ = j;
-						bestHeight = height;
-						bestDonorCount = donorCount;
-						bestNetBenefit = netBenefit;
-						bestDonors = donors;
-					}
-				}
-			}
-
-			if (bestI < 0) {
-				break;
-			}
-
-			for (int donorIndex = 0; donorIndex < bestDonorCount; donorIndex++) {
-				var (di, dj, dirFromCenter) = bestDonors[donorIndex];
-				state.Move(di, dj, 0, dirFromCenter.Reverse(), 1);
-				claimed[di, dj] = true;
-			}
-
-			claimed[bestI, bestJ] = true;
-			reservedHeights[bestI, bestJ] = bestHeight;
-		}
-
-		if (reservedHeights.Cast<int>().Any(height => height > 0)) {
-			state = DoPlan4Core(
-				isLocal, sw, rnd, input, info, requireNonWorsening: true,
-				useTwoStepLookahead: true, initialState: state,
-				reservedHeights: reservedHeights);
-
-			Array.Clear(reservedHeights);
-		}
-
-		return DoPlan4Core(
-			isLocal, sw, rnd, input, info, requireNonWorsening: true,
-			useTwoStepLookahead: true, initialState: state);
-
-		long EstimateScaffoldSavings(int siteI, int siteJ, int height)
-		{
-			long savings = 0;
-			int maxJump = height + 1;
-			foreach (var path in paths) {
-				for (int index = 0; index < path.Count; index++) {
-					if (path[index].i != siteI || path[index].j != siteJ) {
-						continue;
-					}
-
-					Direction4 dir = path[index].dir;
-					int straightSteps = 0;
-					for (int next = index; next < path.Count
-						&& next - index < maxJump
-						&& path[next].dir == dir; next++) {
-						straightSteps++;
-					}
-
-					savings += Math.Max(0, straightSteps - 1);
-				}
-			}
-
-			return savings;
 		}
 	}
 
@@ -2692,6 +3843,7 @@ public class HeuristicHelper
 		long loopSum = 0;
 		long upSum = 0;
 		long elapsedSum = 0;
+		long elapsedMax = 0;
 		long scoreMin = long.MaxValue;
 		long scoreMax = long.MinValue;
 		int errorCount = 0;
@@ -2717,6 +3869,7 @@ public class HeuristicHelper
 					loopSum += loop;
 					upSum += up;
 					elapsedSum += elapsed;
+					elapsedMax = Math.Max(elapsedMax, elapsed);
 					scoreMin = Math.Min(score, scoreMin);
 					scoreMax = Math.Max(score, scoreMax);
 				}
@@ -2743,6 +3896,7 @@ public class HeuristicHelper
 		Console.WriteLine($"loop ave.: {loopSum / (double)localTestCaseRunCount:f3}");
 		Console.WriteLine($"up ave.: {upSum / (double)localTestCaseRunCount:f3}");
 		Console.WriteLine($"elpased ave.: {elapsedSum / (double)localTestCaseRunCount:f3}");
+		Console.WriteLine($"elpased max.: {elapsedMax}");
 
 		addOutput?.Invoke(judgePreTestCaseCount, localTestCaseRunCount);
 
