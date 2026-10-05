@@ -65,7 +65,7 @@ public class Program
 			}
 		}
 
-		var best = DoPlan11(isLocal, sw, rnd, input, info);
+		var best = DoPlan12(isLocal, sw, rnd, input, info);
 
 		input.Output(best);
 		if (isLocal) {
@@ -83,42 +83,585 @@ public class Program
 		return (input, info);
 	}
 
+	// 他色の塔を踏み台にした移動手数で木を作り、合流の各移動は最新盤面で探索する。
+	static State DoPlan15(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+		=> DoTreeBase(isLocal, sw, rnd, input, info);
 
+	// 開始時の先行移動と、初期位置の通過回数による全色横断のグループ選択を組み合わせる。
+	static State DoPlan19(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+		=> DoAdvanceBase(isLocal, sw, rnd, input, info);
 
-	static State DoPlan3(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	static State DoAdvanceBase(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
+		var prediction = DoPlan15(isLocal, sw, rnd, input, new Information());
+		int n = input.N, cells = n * n;
+		var identities = CreateTreeIdentities(input);
+		var visitors = new HashSet<int>[cells];
+		var prefixes = new List<(int src, int dst, Direction4 dir)>[cells];
+		var closed = new bool[cells];
+		foreach (var (i, j, keep, dir, len) in prediction.Moves) {
+			var source = identities[i, j];
+			var cargo = source.Take(source.Count - keep).ToArray();
+			for (int step = 1; step <= len; step++) {
+				var (pi, pj) = dir.Move(i, j, step);
+				var users = visitors[pi * n + pj] ??= [];
+				foreach (int id in cargo) users.Add(id);
+			}
+			var (li, lj) = dir.Move(i, j, len);
+			if (source.Count == 1 && cargo.Length == 1 && !closed[cargo[0]]
+				&& len == 1 && identities[li, lj].Count == 0 && input.Map[li, lj] < 0) {
+				(prefixes[cargo[0]] ??= []).Add((i * n + j, li * n + lj, dir));
+			} else {
+				foreach (int id in cargo) closed[id] = true;
+			}
+			foreach (int id in identities[li, lj]) closed[id] = true;
+			MoveTreeIdentities(input, identities, i, j, keep, dir, len);
+		}
+		var state = new State(isLocal, input);
+		identities = CreateTreeIdentities(input);
+		var positions = Enumerable.Range(0, cells).ToArray();
+		var progress = new int[cells];
+		var excluded = new bool[cells];
+		int replayed = 0;
+		Advance(state);
+		return DoTreeBase(isLocal, sw, rnd, input, info,
+			usage: CountInitialPassages(input, prediction), initialState: state);
+
+		void Advance(State board)
+		{
+			// 前回からの操作を再生し、単独のまま残っている個体だけを追跡する。
+			while (replayed < board.Moves.Count) {
+				var (i, j, keep, dir, len) = board.Moves[replayed++];
+				var (li, lj) = dir.Move(i, j, len);
+				var cargo = identities[i, j].Take(identities[i, j].Count - keep).ToArray();
+				if (identities[i, j].Count != 1 || identities[li, lj].Count > 0) {
+					foreach (int id in cargo) excluded[id] = true;
+					foreach (int id in identities[li, lj]) excluded[id] = true;
+				}
+				MoveTreeIdentities(input, identities, i, j, keep, dir, len);
+				foreach (int id in cargo) {
+					positions[id] = li * n + lj;
+					if (identities[li, lj].Count == 0) excluded[id] = true;
+				}
+			}
+			for (int id = 0; id < cells; id++) {
+				if (excluded[id] || prefixes[id] == null || UsedByOthers(id, id)) continue;
+				int target = prefixes[id].FindIndex(move => UsedByOthers(move.dst, id));
+				if (target < progress[id]) continue;
+				int first = progress[id];
+				int pos = positions[id];
+				if (prefixes[id][first].src != pos || identities[pos / n, pos % n].Count != 1
+					|| identities[pos / n, pos % n].Peek() != id) continue;
+				// 途中がまだ占有されていれば、次の帰巣後まで待つ。
+				bool clear = true;
+				for (int k = first; k <= target; k++) {
+					int dst = prefixes[id][k].dst;
+					if (board.Slimes[dst / n, dst % n].Count != 0) { clear = false; break; }
+				}
+				if (!clear || board.Moves.Count + target - first + 1 > 100000) continue;
+				for (int k = first; k <= target; k++) {
+					var (src, dst, dir) = prefixes[id][k];
+					board.Move(src / n, src % n, 0, dir, 1);
+					MoveTreeIdentities(input, identities, src / n, src % n, 0, dir, 1);
+					positions[id] = dst;
+					replayed++;
+				}
+				progress[id] = target + 1;
+			}
+		}
+
+		bool UsedByOthers(int cell, int id) => visitors[cell] != null && visitors[cell].Any(other => other != id);
+	}
+
+	static int[] CountInitialPassages(Input input, State prediction)
+	{
+		var identities = CreateTreeIdentities(input);
+		var usage = new int[input.N * input.N];
+		foreach (var (i, j, keep, dir, len) in prediction.Moves) {
+			var cargo = identities[i, j].Take(identities[i, j].Count - keep).ToArray();
+			// 現在の占有状態ではなく、初期位置に対する通過を数える。自分だけの移動は除外する。
+			for (int step = 1; step <= len; step++) {
+				var (pi, pj) = dir.Move(i, j, step);
+				int cell = pi * input.N + pj;
+				if (input.C[pi][pj] >= 'a' && input.C[pi][pj] <= 'l' && cargo.Any(id => id != cell)) usage[cell]++;
+			}
+			MoveTreeIdentities(input, identities, i, j, keep, dir, len);
+		}
+		return usage;
+	}
+
+	static Stack<int>[,] CreateTreeIdentities(Input input)
+		=> Helper.Array2(input.N, input.N, (i, j) => {
+			var ids = new Stack<int>();
+			if (input.C[i][j] >= 'a' && input.C[i][j] <= 'l') ids.Push(i * input.N + j);
+			return ids;
+		});
+
+	static void MoveTreeIdentities(Input input, Stack<int>[,] ids, int i, int j, int keep, Direction4 dir, int len)
+	{
+		var (li, lj) = dir.Move(i, j, len);
+		int count = ids[i, j].Count - keep;
+		for (int k = 0; k < count; k++) ids[li, lj].Push(ids[i, j].Pop());
+		Return(i, j);
+		Return(li, lj);
+
+		void Return(int ri, int rj)
+		{
+			int color = input.Map[ri, rj];
+			while (color >= 0 && ids[ri, rj].Count > 0) {
+				int id = ids[ri, rj].Peek();
+				if (input.C[id / input.N][id % input.N] - 'a' != color) break;
+				ids[ri, rj].Pop();
+			}
+		}
+	}
+
+	static State DoTreeBase(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info, int[] usage = null, State initialState = null)
+	{
+		var state = initialState ?? new State(isLocal, input);
+		int n = input.N;
+		int cells = n * n;
+		var identities = usage == null ? null : CreateTreeIdentities(input);
+		// 先行移動後も、通過評価は個体の初期位置に結び付けて扱う。
+		if (identities != null && initialState != null) {
+			foreach (var (i, j, keep, dir, len) in initialState.Moves)
+				MoveTreeIdentities(input, identities, i, j, keep, dir, len);
+		}
+
+		// 色は少ない順に処理する (Plan8 と同じ)。
 		var colorCounts = new int[input.K];
 		foreach (string row in input.C) {
-			foreach (char cell in row) {
-				if (cell >= 'a' && cell < 'a' + input.K) {
-					colorCounts[cell - 'a']++;
+			foreach (char ch in row) {
+				if (ch >= 'a' && ch < 'a' + input.K) colorCounts[ch - 'a']++;
+			}
+		}
+		var order = Enumerable.Range(0, input.K).ToArray();
+		Array.Sort(order, (a, b) => colorCounts[a] != colorCounts[b]
+			? colorCounts[a].CompareTo(colorCounts[b]) : a.CompareTo(b));
+
+		var denCells = new int[input.K];
+		for (int c = 0; c < input.K; c++) denCells[c] = input.Dens[c].i * n + input.Dens[c].j;
+
+		// 床だけを歩く全点対距離 (木を作るときの最短経路と、木に乗れない場合の迂回にだけ使う)。
+		var floor = new int[cells, cells];
+		for (int s = 0; s < cells; s++) {
+			for (int t = 0; t < cells; t++) floor[s, t] = int.MaxValue;
+			if (input.Map[s / n, s % n] == -2) continue;
+			var queue = new Queue<int>();
+			floor[s, s] = 0;
+			queue.Enqueue(s);
+			while (queue.Count > 0) {
+				int u = queue.Dequeue();
+				foreach (var (ni, nj) in Helper.Adjacence4(u / n, u % n, n, n)) {
+					int v = ni * n + nj;
+					if (input.Map[ni, nj] == -2 || floor[s, v] != int.MaxValue) continue;
+					floor[s, v] = floor[s, u] + 1;
+					queue.Enqueue(v);
 				}
 			}
 		}
 
-		var colorOrder = new int[input.K];
-		for (int c = 0; c < input.K; c++) {
-			colorOrder[c] = c;
+		// 現在の色の木。treeParent は根 (巣) 方向の親マス、treeDepth は根からの深さ。
+		var treeParent = new int[cells];
+		var treeDepth = new int[cells];
+		var inTree = new bool[cells];
+
+		// 確定したグループ。edges は (運ぶ元, 運ぶ先) を実行順 (深い方から) に並べたもので、root はグループ最上位の一団のいるマス。
+		var groups = new List<(List<(int src, int dst)> edges, int root)>();
+		while (state.SlimeCount > 0 && state.Moves.Count < 100000) {
+			int roundStart = state.Moves.Count;
+			if (usage != null) {
+				int selectedColor = -1, selectedScore = int.MaxValue;
+				(List<(int src, int dst)> edges, int root) selected = default;
+				foreach (int color in order) {
+					if (!HasTop(color) || !BuildGroups(color)) continue;
+					// 各色で Plan15 が最初に処理する候補だけを比較する。
+					var group = groups[0];
+					var sources = new HashSet<int> { group.root };
+					foreach (var (src, dst) in group.edges) sources.Add(src);
+					int score = 0;
+					foreach (int src in sources) {
+						foreach (int id in identities[src / n, src % n]) {
+							if (input.C[id / n][id % n] - 'a' != color) break;
+							score += usage[id];
+						}
+					}
+					if (score >= selectedScore) continue;
+					selectedScore = score;
+					selectedColor = color;
+					selected = group;
+				}
+				if (selectedColor < 0) break;
+				foreach (var (src, dst) in selected.edges) Carry(selectedColor, src, dst);
+				CarryHome(selectedColor, selected.root);
+				if (state.Moves.Count == roundStart) break;
+				continue;
+			}
+			foreach (int color in order) {
+				while (state.Moves.Count < 100000 && HasTop(color)) {
+					int before = state.Moves.Count;
+					if (!BuildGroups(color)) break;
+					// 最も深いグループだけを実行し、置いていかれたスライムを含めてグルーピングをやり直す。
+					var group = groups[0];
+					foreach (var (src, dst) in group.edges) Carry(color, src, dst);
+					CarryHome(color, group.root);
+					if (state.Moves.Count == before) break;
+				}
+			}
+			if (state.Moves.Count == roundStart) break;
 		}
 
-		Array.Sort(colorOrder, (a, b) => {
-			int compare = colorCounts[a].CompareTo(colorCounts[b]);
-			return compare != 0 ? compare : a.CompareTo(b);
-		});
+		return state;
 
-		return DoPlanByColorOrder(isLocal, sw, rnd, input, info, colorOrder);
-	}
+		void Move(int i, int j, int keep, Direction4 dir, int len)
+		{
+			if (identities != null) MoveTreeIdentities(input, identities, i, j, keep, dir, len);
+			state.Move(i, j, keep, dir, len);
+		}
 
-	static State DoPlan6(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		return DoPlan4Core(
-			isLocal, sw, rnd, input, info,
-			requireNonWorsening: true, useTwoStepLookahead: true);
+		int TopRun(Stack<int> tower, int c)
+		{
+			int count = 0;
+			foreach (int x in tower) {
+				if (x != c) break;
+				count++;
+			}
+
+			return count;
+		}
+
+		bool HasTop(int c)
+		{
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					if (state.Slimes[i, j].Count > 0 && state.Slimes[i, j].Peek() == c) return true;
+				}
+			}
+
+			return false;
+		}
+
+		// 最小全域木を作り、深い方から根へ 1 マスずつ合流させてグループを確定する。
+		// 合流後の塔の高さは 8 以下とし、高さ 8 または巣の手前でグループを確定する。
+		bool BuildGroups(int c)
+		{
+			int denCell = denCells[c];
+			Array.Fill(inTree, false);
+			Array.Fill(treeParent, -1);
+			var treeCells = new List<int> { denCell };
+			inTree[denCell] = true;
+			treeDepth[denCell] = 0;
+
+			var terminals = new List<int>();
+			for (int i = 0; i < n; i++) {
+				for (int j = 0; j < n; j++) {
+					int cell = i * n + j;
+					if (cell == denCell || floor[denCell, cell] == int.MaxValue) continue;
+					if (state.Slimes[i, j].Count == 0 || state.Slimes[i, j].Peek() != c) continue;
+					terminals.Add(cell);
+				}
+			}
+			if (terminals.Count == 0) return false;
+
+			// Prim 法: 木にまだつながっていない塔のうち、木のマスに最も近いものを、その最短経路ごと木につなぐ。
+			var pending = new List<int>(terminals);
+			var path = new List<int>();
+			while (pending.Count > 0) {
+				int bestTerminal = -1, bestTreeCell = -1, bestDistance = int.MaxValue;
+				{
+					foreach (int t in pending) {
+						var connection = FindJumpConnection(c, t);
+						if (connection.Count == 0 || connection.Count - 1 >= bestDistance) continue;
+						bestDistance = connection.Count - 1;
+						bestTerminal = t;
+						bestTreeCell = connection[^1];
+						path.Clear();
+						path.AddRange(connection.Take(connection.Count - 1));
+					}
+					if (bestTerminal < 0) return false;
+					for (int k = path.Count - 1; k >= 0; k--) {
+						int parentCell = k + 1 < path.Count ? path[k + 1] : bestTreeCell;
+						treeParent[path[k]] = parentCell;
+						treeDepth[path[k]] = treeDepth[parentCell] + 1;
+						inTree[path[k]] = true;
+						treeCells.Add(path[k]);
+					}
+					pending.RemoveAll(t => inTree[t]);
+					continue;
+				}
+
+			}
+
+			var isTerminal = new bool[cells];
+			foreach (int t in terminals) isTerminal[t] = true;
+			var kids = new List<int>[cells];
+			foreach (int x in treeCells) {
+				if (x != denCell) (kids[treeParent[x]] ??= []).Add(x);
+			}
+			var byDepth = treeCells.Where(x => x != denCell).OrderByDescending(x => treeDepth[x]).ToList();
+
+			// 各マスに「そこまで上がってきた一団」を持つ (合流できなかった一団は確定させず、そのまま根へ向かって進める)。
+			// position は一団が実際にいるマス (合流するまで動かさない)。maxDepth は一団に含まれる最も深い塔の深さ。
+			var bundlesAt = new List<(int load, int baseHeight, int position, int maxDepth, List<(int src, int dst)> edges)>[cells];
+			groups.Clear();
+			foreach (int x in byDepth) {
+				var incoming = new List<(int load, int baseHeight, int position, int maxDepth, List<(int src, int dst)> edges)>();
+				if (kids[x] != null) {
+					foreach (int k in kids[x]) {
+						if (bundlesAt[k] != null) incoming.AddRange(bundlesAt[k]);
+					}
+				}
+
+				// 深い葉を持つ一団から先に合流させる。
+				incoming.Sort((b1, b2) => b2.maxDepth != b1.maxDepth
+					? b2.maxDepth.CompareTo(b1.maxDepth) : b2.load.CompareTo(b1.load));
+
+				var current = new List<(int load, int baseHeight, int position, int maxDepth, List<(int src, int dst)> edges)>();
+				if (isTerminal[x]) {
+					var tower = state.Slimes[x / n, x % n];
+					int run = TopRun(tower, c);
+					current.Add((run, tower.Count - run, x, treeDepth[x], []));
+				}
+
+				// 合流後の高さが 8 以下になる最初の一団へ合流させる。合流先が無ければ別の一団として残す。
+				foreach (var bundle in incoming) {
+					// 準備時は一団内の既存の塔を集合先にし、別グループと分岐マスを共有しない。
+					int meeting = x;
+					int target = -1;
+					for (int m = 0; m < current.Count; m++) {
+						int targetBase = current[m].position == meeting ? current[m].baseHeight
+							: state.Slimes[meeting / n, meeting % n].Count;
+						int height = targetBase + current[m].load + bundle.load;
+						if (height <= 8) {
+							target = m;
+							break;
+						}
+					}
+					if (target < 0) {
+						current.Add(bundle);
+						continue;
+					}
+
+					var (load, baseHeight, position, maxDepth, edges) = current[target];
+					if (position != meeting) {
+						edges.Add((position, meeting));
+						position = meeting;
+						baseHeight = state.Slimes[meeting / n, meeting % n].Count;
+					}
+					edges.AddRange(bundle.edges);
+					edges.Add((bundle.position, meeting));
+					current[target] = (load + bundle.load, baseHeight, position, Math.Max(maxDepth, bundle.maxDepth), edges);
+				}
+
+				// 高さが 8 に達した一団、または巣に着いた一団はここで確定する。それ以外は根へ向かって進む。
+				var rest = new List<(int load, int baseHeight, int position, int maxDepth, List<(int src, int dst)> edges)>();
+				foreach (var bundle in current) {
+					int height = (bundle.position == x ? bundle.baseHeight : 0) + bundle.load;
+					if (height >= 8
+						|| treeParent[x] == denCell) {
+						groups.Add((bundle.edges, bundle.position));
+					} else {
+						rest.Add(bundle);
+					}
+				}
+				if (rest.Count > 0) bundlesAt[x] = rest;
+			}
+
+			return groups.Count > 0;
+		}
+
+		// 運ぶ匹数を固定し、他色の土台は動かさず、既存の木までの最短手数を求める。
+		List<int> FindJumpConnection(int c, int src)
+		{
+			int load = TopRun(state.Slimes[src / n, src % n], c);
+			var previous = new int[cells];
+			Array.Fill(previous, -1);
+			var queue = new Queue<int>();
+			previous[src] = src;
+			queue.Enqueue(src);
+			while (queue.Count > 0) {
+				int pos = queue.Dequeue();
+				var tower = state.Slimes[pos / n, pos % n];
+				int pad = pos == src ? tower.Count - load : tower.Count;
+				foreach (var dir in Direction4Extensions.ForEach4()) {
+					for (int len = 1; len <= pad + 1; len++) {
+						var (li, lj) = dir.Move(pos / n, pos % n, len);
+						if ((uint)li >= (uint)n || (uint)lj >= (uint)n || input.Map[li, lj] == -2) break;
+						int land = li * n + lj;
+						if (previous[land] >= 0) continue;
+						var landing = state.Slimes[li, lj];
+						if (landing.Count + load > 8) continue;
+						if (inTree[land]) {
+							var result = new List<int> { land };
+							for (int x = pos; ; x = previous[x]) {
+								result.Add(x);
+								if (x == src) break;
+							}
+							result.Reverse();
+							return result;
+						}
+						if (input.Map[li, lj] == c || TopRun(landing, c) > 0) continue;
+						previous[land] = pos;
+						queue.Enqueue(land);
+					}
+				}
+			}
+			return [];
+		}
+
+		void CarryHome(int c, int src)
+		{
+			CarryRoute(c, src, denCells[c], true);
+		}
+
+		// 合流後は木から離れ、位置と同色の匹数を状態にした BFS で帰巣経路を探す。
+		bool CarryRoute(int c, int src, int den, bool home)
+		{
+			var source = state.Slimes[src / n, src % n];
+			int run = TopRun(source, c);
+			if (run == 0) return true;
+			if (src == den) return true;
+			int start = src * 9 + run;
+			var previous = new int[cells * 9];
+			Array.Fill(previous, -1);
+			var moves = new (int keep, Direction4 dir, int len)[cells * 9];
+			var queue = new Queue<int>();
+			previous[start] = start;
+			queue.Enqueue(start);
+			int goal = -1;
+			while (queue.Count > 0 && goal < 0) {
+				int node = queue.Dequeue();
+				int pos = node / 9, count = node % 9;
+				var tower = state.Slimes[pos / n, pos % n];
+				int baseHeight = tower.Count - TopRun(tower, c);
+				int height = baseHeight + count;
+				for (int carry = count; carry >= (height == 8 && count == 8 ? 7 : count); carry--) {
+					int keep = height - carry;
+					foreach (var dir in Direction4Extensions.ForEach4()) {
+						for (int len = 1; len <= keep + 1; len++) {
+							var (li, lj) = dir.Move(pos / n, pos % n, len);
+							if ((uint)li >= (uint)n || (uint)lj >= (uint)n || input.Map[li, lj] == -2) break;
+							int land = li * n + lj;
+							var landing = state.Slimes[li, lj];
+							if (landing.Count + carry > 8) continue;
+							if (!home && land != den && (TopRun(landing, c) > 0 || input.Map[li, lj] == c)) continue;
+							if (!home && carry != count) continue;
+							if (carry < count && landing.Count != 1) continue;
+							// 通過済みのマスには戻らない。これにより残した土台と元盤面の相違を経路に持ち込まない。
+							bool visited = false;
+							for (int ancestor = node; ; ancestor = previous[ancestor]) {
+								if (ancestor / 9 == land) { visited = true; break; }
+								if (ancestor == start) break;
+							}
+							if (visited) continue;
+							int nextCount = carry + TopRun(landing, c);
+							int next = land * 9 + nextCount;
+							if (previous[next] >= 0) continue;
+							previous[next] = node;
+							moves[next] = (keep, dir, len);
+							if (land == den) { goal = next; break; }
+							queue.Enqueue(next);
+						}
+						if (goal >= 0) break;
+					}
+					if (goal >= 0) break;
+				}
+			}
+			if (goal < 0) {
+				int pos = src;
+				Walk(c, ref pos, den, false);
+				return false;
+			}
+			var route = new List<int>();
+			for (int node = goal; node != start; node = previous[node]) route.Add(node);
+			route.Reverse();
+			foreach (int node in route) {
+				if (state.Moves.Count >= 100000) break;
+				int pos = previous[node] / 9;
+				var (keep, dir, len) = moves[node];
+				Move(pos / n, pos % n, keep, dir, len);
+			}
+			return state.Moves.Count < 100000;
+		}
+
+		// src の最上段の同色一団を tgt
+		void Carry(int c, int src, int tgt) => CarryRoute(c, src, tgt, false);
+
+		bool Walk(int c, ref int pos, int tgt, bool force)
+		{
+			var dist = new int[cells];
+			var queue = new Queue<int>();
+			while (pos != tgt && state.Moves.Count < 100000) {
+				int si = pos / n, sj = pos % n;
+				var tower = state.Slimes[si, sj];
+				if (tower.Count == 0 || tower.Peek() != c) return false;
+				int run = TopRun(tower, c);
+				int keep = tower.Count - run;
+
+				bool useTowers = force;
+				while (true) {
+					Array.Fill(dist, int.MaxValue);
+					dist[tgt] = 0;
+					queue.Clear();
+					queue.Enqueue(tgt);
+					while (queue.Count > 0) {
+						int u = queue.Dequeue();
+						foreach (var (ni2, nj2) in Helper.Adjacence4(u / n, u % n, n, n)) {
+							int v = ni2 * n + nj2;
+							if (input.Map[ni2, nj2] == -2 || dist[v] != int.MaxValue) continue;
+							if (v != pos && !useTowers) {
+								if (state.Slimes[ni2, nj2].Count > 0) continue;
+								if (input.Map[ni2, nj2] >= 0 && input.Map[ni2, nj2] != c) continue;
+							}
+							dist[v] = dist[u] + 1;
+							queue.Enqueue(v);
+						}
+					}
+					if (dist[pos] != int.MaxValue || useTowers) break;
+					useTowers = true;
+				}
+				if (dist[pos] == int.MaxValue) return false;
+
+				// まず一団を丸ごと運ぶ。動けない場合だけ、上から運ぶ匹数を減らして (残す匹数を増やして) 探す。
+				Direction4 bestDir = Direction4.N;
+				int bestLen = 0;
+				for (int carry = run; carry >= 1 && bestLen == 0; carry--) {
+					int keepCount = tower.Count - carry;
+					long best = long.MaxValue;
+					foreach (var dir in Direction4Extensions.ForEach4()) {
+						for (int len = 1; len <= keepCount + 1; len++) {
+							var (li, lj) = dir.Move(si, sj, len);
+							if ((uint)li >= (uint)n || (uint)lj >= (uint)n || input.Map[li, lj] == -2) break;
+							int land = li * n + lj;
+							if (state.Slimes[li, lj].Count + carry > 8) continue;
+							if (land != tgt && !useTowers) {
+								if (state.Slimes[li, lj].Count > 0) continue;
+								if (input.Map[li, lj] >= 0 && input.Map[li, lj] != c) continue;
+							}
+							if (dist[land] >= dist[pos]) continue;
+							long score = dist[land] * 100L + len;
+							if (score < best) {
+								best = score;
+								bestDir = dir;
+								bestLen = len;
+							}
+						}
+					}
+					keep = keepCount;
+				}
+				if (bestLen == 0) return false;
+				Move(si, sj, keep, bestDir, bestLen);
+				var (ni, nj) = bestDir.Move(si, sj, bestLen);
+				pos = ni * n + nj;
+			}
+
+			return pos == tgt;
+		}
 	}
 
 	static State DoPlan9(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
-		var baseline = DoPlan8(isLocal, sw, rnd, input, info);
+		var baseline = DoPlan19(isLocal, sw, rnd, input, info);
 		var optimizer = new Plan9Optimizer(isLocal, sw, input, info);
 		baseline = optimizer.OptimizeSameColorMerges(baseline);
 		return optimizer.Optimize(baseline);
@@ -136,9 +679,37 @@ public class Program
 		return new Plan9Optimizer(isLocal, sw, input, info).OptimizeRebuiltRides(baseline);
 	}
 
+	static State DoPlan12(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var baseline = DoPlan19(isLocal, sw, rnd, input, info);
+		var optimizer = new Plan9Optimizer(isLocal, sw, input, info, 1200);
+		baseline = optimizer.OptimizeSameColorMerges(baseline);
+		baseline = optimizer.Optimize(baseline);
+		baseline = optimizer.OptimizeJumpSupports(baseline);
+		baseline = optimizer.OptimizeRebuiltRides(baseline);
+		return optimizer.OptimizeBeamIntervals(baseline);
+	}
+
+	static State DoPlan20(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var baseline = DoPlan19(isLocal, sw, rnd, input, info);
+		return new Plan9Optimizer(isLocal, sw, input, info).SearchWholeBoard(baseline);
+	}
+
 	private sealed class Plan9Optimizer
 	{
+		private readonly int searchDeadline;
 		private const int SearchMilliseconds = 1200;
+		private const int BeamDeadlineMilliseconds = 1900;
+		private const int WholeBeamWidth = 48;
+		private const double WholeDistanceWeight = 0.25;
+		private const double WholeRemainingWeight = 6;
+		private const double WholeLateRemainingWeight = 12;
+		private const double WholeTransportWeight = 2;
+		private const double WholeRoutePadWeight = 1;
+		private const double WholeOverlapWeight = 0.15;
+		private const double WholeSameColorWeight = 0.25;
+		private const int BranchStageMilliseconds = 1900;
 		private const int CheckpointInterval = 32;
 		private const int MaxTrialsPerRound = 1200;
 		private readonly bool isLocal;
@@ -182,8 +753,9 @@ public class Program
 			}
 		}
 
-		public Plan9Optimizer(bool isLocal, Stopwatch sw, Input input, Information info)
+		public Plan9Optimizer(bool isLocal, Stopwatch sw, Input input, Information info, int searchDeadline = int.MaxValue)
 		{
+			this.searchDeadline = searchDeadline;
 			this.isLocal = isLocal;
 			this.input = input;
 			this.info = info;
@@ -203,7 +775,9 @@ public class Program
 			colors = slimeColors.ToArray();
 		}
 
-		private bool CanSearch => stopwatch.ElapsedMilliseconds < SearchMilliseconds;
+		private bool CanSearch => stopwatch.ElapsedMilliseconds < Math.Min(SearchMilliseconds, searchDeadline);
+		private bool WithinStage(Stopwatch timer, int limit)
+			=> timer.ElapsedMilliseconds < limit && stopwatch.ElapsedMilliseconds < searchDeadline;
 		private static bool SameGroup(Transport a, Transport b)
 			=> a.SortedCargo.AsSpan().SequenceEqual(b.SortedCargo);
 
@@ -311,7 +885,7 @@ public class Program
 			foreach (var (i, j, k, direction, length) in baseline.Moves) {
 				int from = i * n + j;
 				if (!board.Capture(from, direction, length, board.Heights[from] - k, out var step))
-					throw new InvalidOperationException("Plan9: invalid Plan8 operation.");
+					throw new InvalidOperationException("Plan9: invalid Plan19 operation.");
 				best.Add(step!);
 			}
 			var finalBoard = board;
@@ -889,7 +1463,7 @@ public class Program
 			foreach (var (i, j, k, direction, length) in baseline.Moves) {
 				int from = i * n + j;
 				if (!board.Capture(from, direction, length, board.Heights[from] - k, out var step)) {
-					throw new InvalidOperationException("Plan9: invalid Plan8 operation.");
+					throw new InvalidOperationException("Plan9: invalid Plan19 operation.");
 				}
 				best.Add(step!);
 			}
@@ -970,7 +1544,7 @@ public class Program
 			}
 			var finalBoard = board;
 			var timer = Stopwatch.StartNew();
-			for (int round = 0; round < 64 && timer.ElapsedMilliseconds < 1200; round++) {
+			for (int round = 0; round < 64 && WithinStage(timer, 1200); round++) {
 				BuildIndex(best, out var dependencies, out var supportDependencies, out var checkpoints);
 				var routes = new Dictionary<(int From, int To), List<int>>();
 				var candidates = new List<(int First, int Second)>();
@@ -991,7 +1565,7 @@ public class Program
 				bool improved = false;
 				int trials = 0;
 				foreach (var (first, second) in candidates) {
-					if (timer.ElapsedMilliseconds >= 1200 || trials++ >= 500) break;
+					if (!WithinStage(timer, 1200) || trials++ >= 500) break;
 					info.Loop++;
 					var replacement = TryRebuildRide(best, first, second, dependencies, checkpoints, finalBoard);
 					if (replacement == null) continue;
@@ -1002,7 +1576,7 @@ public class Program
 				}
 				if (!improved) break;
 			}
-			for (int round = 0; round < 32 && timer.ElapsedMilliseconds < 1600; round++) {
+			for (int round = 0; round < 32 && WithinStage(timer, 1600); round++) {
 				BuildIndex(best, out var dependencies, out _, out var checkpoints);
 				var byRoute = new Dictionary<(int From, int To), List<int>>();
 				for (int index = 0; index < best.Count; index++) {
@@ -1014,7 +1588,7 @@ public class Program
 				}
 				bool improved = false;
 				int trials = 0;
-				for (int first = 0; first < best.Count && !improved && timer.ElapsedMilliseconds < 1600; first++) {
+				for (int first = 0; first < best.Count && !improved && WithinStage(timer, 1600); first++) {
 					var a = best[first];
 					if (a.Color < 0 || a.Returned.Length != 0 || a.Cargo.Length >= 8) continue;
 					// 中継点を越える直行便を、集荷済みの別色と中継点で合流する経路に変更する。
@@ -1030,7 +1604,7 @@ public class Program
 							foreach (int other in direct) {
 								if (other <= first || other == next || best[other].Color == a.Color
 									|| best[other].Cargo.Length + a.Cargo.Length > 8) continue;
-								if (++trials > 400 || timer.ElapsedMilliseconds >= 1600) break;
+								if (++trials > 400 || !WithinStage(timer, 1600)) break;
 								info.Loop++;
 								var replacement = TryRebuildDetour(best, first, next, other, dependencies, checkpoints, finalBoard);
 								if (replacement == null) continue;
@@ -1062,7 +1636,7 @@ public class Program
 
 		private List<Transport> OptimizeBranches(List<Transport> best, ReplayBoard finalBoard, Stopwatch timer)
 		{
-			for (int round = 0; round < 24 && timer.ElapsedMilliseconds < 1900; round++) {
+			for (int round = 0; round < 24 && WithinStage(timer, BranchStageMilliseconds); round++) {
 				BuildIndex(best, out var dependencies, out _, out var checkpoints);
 				var byRoute = new Dictionary<(int From, int To), List<int>>();
 				var bySource = new Dictionary<int, List<int>>();
@@ -1077,7 +1651,7 @@ public class Program
 				}
 				bool improved = false;
 				int trials = 0;
-				for (int first = 0; first < best.Count && !improved && timer.ElapsedMilliseconds < 1900; first++) {
+				for (int first = 0; first < best.Count && !improved && WithinStage(timer, BranchStageMilliseconds); first++) {
 					var a = best[first];
 					if (a.Color < 0 || a.Returned.Length != 0 || a.Cargo.Length >= 8
 						|| !byRoute.TryGetValue((a.From, a.To), out var same)
@@ -1092,7 +1666,7 @@ public class Program
 								var y = best[right];
 								if (right <= second || right == left || !SameGroup(b, y)
 									|| b.Cargo.Length != y.Cargo.Length || x.To == y.To) continue;
-								if (++trials > 350 || timer.ElapsedMilliseconds >= 1900) break;
+								if (++trials > 350 || !WithinStage(timer, BranchStageMilliseconds)) break;
 								info.Loop++;
 								var replacement = TryRebuildBranch(best, first, second, left, right,
 									dependencies, checkpoints, finalBoard);
@@ -1114,7 +1688,7 @@ public class Program
 
 		private List<Transport> OptimizeNewRelays(List<Transport> best, ReplayBoard finalBoard, Stopwatch timer)
 		{
-			for (int round = 0; round < 24 && timer.ElapsedMilliseconds < 2200; round++) {
+			for (int round = 0; round < 24 && WithinStage(timer, 2200); round++) {
 				BuildIndex(best, out var dependencies, out _, out var checkpoints);
 				var bySource = new Dictionary<int, List<int>>();
 				var nextUse = Enumerable.Repeat(-1, colors.Length).ToArray();
@@ -1134,7 +1708,7 @@ public class Program
 				}
 				bool improved = false;
 				int trials = 0;
-				for (int first = 0; first < best.Count && !improved && timer.ElapsedMilliseconds < 2200; first++) {
+				for (int first = 0; first < best.Count && !improved && WithinStage(timer, 2200); first++) {
 					var a = best[first];
 					int left = next[first];
 					if (a.Color < 0 || a.Returned.Length != 0 || left <= first || a.Cargo.Length >= 8
@@ -1154,7 +1728,7 @@ public class Program
 							if ((cell / n != a.From / n && cell % n != a.From % n)
 								|| (cell / n != x.To / n && cell % n != x.To % n)
 								|| (cell / n != y.To / n && cell % n != y.To % n)) continue;
-							if (++trials > 350 || timer.ElapsedMilliseconds >= 2200) break;
+							if (++trials > 350 || !WithinStage(timer, 2200)) break;
 							info.Loop++;
 							var replacement = TryNewRelay(best, first, second, left, right, cell,
 								dependencies, checkpoints, finalBoard);
@@ -1173,7 +1747,7 @@ public class Program
 
 		private List<Transport> OptimizeRelayNetworks(List<Transport> best, ReplayBoard finalBoard, Stopwatch timer)
 		{
-			for (int round = 0; round < 24 && timer.ElapsedMilliseconds < 2600; round++) {
+			for (int round = 0; round < 24 && WithinStage(timer, 2600); round++) {
 				BuildIndex(best, out var dependencies, out _, out var checkpoints);
 				var bySource = new Dictionary<int, List<int>>();
 				var nextUse = Enumerable.Repeat(-1, colors.Length).ToArray();
@@ -1194,7 +1768,7 @@ public class Program
 				}
 				bool improved = false;
 				int trials = 0;
-				for (int first = 0; first < best.Count && !improved && timer.ElapsedMilliseconds < 2600; first++) {
+				for (int first = 0; first < best.Count && !improved && WithinStage(timer, 2600); first++) {
 					var a = best[first];
 					int a1 = next[first];
 					if (a.Color < 0 || a.Returned.Length != 0 || a.Cargo.Length >= 8 || a1 < 0
@@ -1219,7 +1793,7 @@ public class Program
 								int relay1 = s == 0 ? a.From / n * n + relay2 % n : relay2 / n * n + a.From % n;
 								if (relay1 == a.From || relay1 == relay2 || relay1 == endA || relay1 == endB
 									|| input.Map[relay1 / n, relay1 % n] == -2) continue;
-								if (++trials > 400 || timer.ElapsedMilliseconds >= 2600) break;
+								if (++trials > 400 || !WithinStage(timer, 2600)) break;
 								info.Loop++;
 								var replacement = TryRelayNetwork(best, first, second, a1, a2, b1, b2,
 									relay1, relay2, dependencies, checkpoints, finalBoard);
@@ -1906,6 +2480,489 @@ public class Program
 			return true;
 		}
 
+		private sealed record BeamNode(ReplayBoard Board, BeamNode? Parent, Transport? Move, double Score, WholeEvaluation? Evaluation = null, WholeStateKey Key = default);
+
+		private readonly record struct WholeStateKey(ulong First, ulong Second)
+		{
+			public static WholeStateKey operator ^(WholeStateKey a, WholeStateKey b) => new(a.First ^ b.First, a.Second ^ b.Second);
+		}
+
+		private static ulong MixWholeStateKey(ulong value)
+		{
+			unchecked {
+				value = (value ^ (value >> 30)) * 0xBF58476D1CE4E5B9UL;
+				value = (value ^ (value >> 27)) * 0x94D049BB133111EBUL;
+				return value ^ (value >> 31);
+			}
+		}
+
+		private WholeStateKey WholeCellKey(ReplayBoard board, int cell, WholeStateKey[] tokens)
+		{
+			var key = default(WholeStateKey);
+			var tower = board.Tower(cell);
+			for (int level = 0; level < tower.Length; level++) key ^= tokens[(cell * 8 + level) * input.K + colors[tower[level]]];
+			return key;
+		}
+
+		private sealed record WholeEvaluation(int Distance, int Overlap, int SameColor, int RoutePotential,
+			int[] RemainingByColor, int[] ReturnCostByColor, int EstimatedReturnCost);
+
+		private int EstimateColorReturnCost(ReplayBoard board, int color, int[][] distances, int[][] floor)
+		{
+			Span<int> cells = stackalloc int[n * n];
+			Span<int> counts = stackalloc int[n * n];
+			int occupied = 0, total = 0, individualCost = 0;
+			for (int cell = 0; cell < n * n; cell++) {
+				int count = 0;
+				foreach (int id in board.Tower(cell)) if (colors[id] == color) count++;
+				if (count == 0) continue;
+				cells[occupied] = cell;
+				counts[occupied++] = count;
+				total += count;
+				individualCost += count * distances[color][cell];
+			}
+			if (occupied <= 1) return individualCost;
+
+			int mergedCost = int.MaxValue;
+			for (int representative = 0; representative < occupied; representative++) {
+				// 既存の塔を維持したまま集約する場合の高さ上限を超える候補は使わない。
+				if (board.Heights[cells[representative]] + total - counts[representative] > 8) continue;
+				int gatherCost = 0;
+				for (int source = 0; source < occupied; source++) {
+					if (source != representative) gatherCost += floor[cells[source]][cells[representative]];
+				}
+				int cost = gatherCost + total * distances[color][cells[representative]];
+				mergedCost = Math.Min(mergedCost, cost);
+			}
+			return Math.Min(individualCost, mergedCost);
+		}
+
+		private readonly record struct RoutePad(int Color, int Load, int Landing, int Saving);
+
+		private List<RoutePad>[] BuildRoutePads(State baseline)
+		{
+			var replay = new ReplayBoard(this);
+			var steps = new List<Transport>();
+			foreach (var (i, j, keep, dir, len) in baseline.Moves) {
+				if (!replay.Capture(i * n + j, dir, len, replay.Heights[i * n + j] - keep, out var step))
+					throw new InvalidOperationException("Plan20: invalid route prediction.");
+				steps.Add(step!);
+			}
+			var pads = new List<RoutePad>[n * n * 9];
+			// 帰巣する集団の最後の連続輸送を遡り、同じ貨物の帰巣ルートだけを記録する。
+			for (int home = 0; home < steps.Count; home++) {
+				if (stopwatch.ElapsedMilliseconds >= BeamDeadlineMilliseconds) return pads;
+				var last = steps[home];
+				if (last.Color < 0 || !last.Returned.Order().SequenceEqual(last.SortedCargo)) continue;
+				int first = home;
+				while (first > 0 && steps[first - 1].To == steps[first].From
+					&& steps[first - 1].Returned.Length == 0 && SameGroup(steps[first - 1], last)) first--;
+				for (int start = first; start < home; start++) {
+					int distance = 0;
+					for (int end = start; end <= home; end++) {
+						if (steps[end].Direction != steps[start].Direction) break;
+						distance += steps[end].Length;
+						if (distance > 8) break;
+						int saving = end - start;
+						if (saving <= 0) continue;
+						for (int height = distance - 1; height + last.Cargo.Length <= 8; height++) {
+							int key = steps[start].From * 9 + height;
+							var entry = new RoutePad(last.Color, last.Cargo.Length, steps[end].To, saving);
+							var list = pads[key] ??= [];
+							if (!list.Contains(entry)) list.Add(entry);
+						}
+					}
+				}
+			}
+			return pads;
+		}
+
+		public State SearchWholeBoard(State baseline)
+		{
+			var distances = new int[input.K][];
+			for (int color = 0; color < input.K; color++) {
+				if (stopwatch.ElapsedMilliseconds >= BeamDeadlineMilliseconds) return baseline;
+				var distance = Enumerable.Repeat(n * n, n * n).ToArray();
+				int den = input.Dens[color].i * n + input.Dens[color].j;
+				var queue = new Queue<int>();
+				distance[den] = 0;
+				queue.Enqueue(den);
+				while (queue.TryDequeue(out int cell)) {
+					foreach (var (i, j) in Helper.Adjacence4(cell / n, cell % n, n, n)) {
+						int next = i * n + j;
+						if (input.Map[i, j] == -2 || distance[next] <= distance[cell] + 1) continue;
+						distance[next] = distance[cell] + 1;
+						queue.Enqueue(next);
+					}
+				}
+				distances[color] = distance;
+			}
+			// 壁を考慮した個体間距離は探索前に計算し、候補評価では表を参照する。
+			var floor = new int[n * n][];
+			for (int source = 0; source < n * n; source++) {
+				if (stopwatch.ElapsedMilliseconds >= BeamDeadlineMilliseconds) return baseline;
+				var distance = Enumerable.Repeat(n * n, n * n).ToArray();
+				floor[source] = distance;
+				if (input.Map[source / n, source % n] == -2) continue;
+				var queue = new Queue<int>();
+				distance[source] = 0;
+				queue.Enqueue(source);
+				while (queue.TryDequeue(out int cell)) {
+					foreach (var (i, j) in Helper.Adjacence4(cell / n, cell % n, n, n)) {
+						int next = i * n + j;
+						if (input.Map[i, j] == -2 || distance[next] <= distance[cell] + 1) continue;
+						distance[next] = distance[cell] + 1;
+						queue.Enqueue(next);
+					}
+				}
+			}
+			var pads = BuildRoutePads(baseline);
+			var landingDependencies = Enumerable.Range(0, n * n).Select(_ => new HashSet<int>()).ToArray();
+			var colorDependencies = Enumerable.Range(0, input.K).Select(_ => new HashSet<int>()).ToArray();
+			for (int key = 0; key < pads.Length; key++) {
+				if (pads[key] == null) continue;
+				foreach (var pad in pads[key]) {
+					landingDependencies[pad.Landing].Add(key / 9);
+					colorDependencies[pad.Color].Add(key / 9);
+				}
+			}
+			var landingCells = landingDependencies.Select(set => set.ToArray()).ToArray();
+			var colorCells = colorDependencies.Select(set => set.ToArray()).ToArray();
+			var start = new ReplayBoard(this);
+			var initialEvaluation = CreateWholeEvaluation(start, distances, pads, floor);
+			// 位置・段・色に固定の乱数を割り当て、同色個体IDには依存しないキーを作る。
+			var keyTokens = new WholeStateKey[n * n * 8 * input.K];
+			for (int index = 0; index < keyTokens.Length; index++) {
+				ulong value = (ulong)index + 1;
+				keyTokens[index] = new(MixWholeStateKey(value + 0x9E3779B97F4A7C15UL), MixWholeStateKey(value + 0xD1B54A32D192ED03UL));
+			}
+			var initialKey = default(WholeStateKey);
+			for (int cell = 0; cell < n * n; cell++) initialKey ^= WholeCellKey(start, cell, keyTokens);
+			var beam = new List<BeamNode> { new(start, null, null, ScoreWholeEvaluation(initialEvaluation, start.Remaining, 0), initialEvaluation, initialKey) };
+			var seen = new HashSet<WholeStateKey> { initialKey };
+			State best = baseline;
+			int reachedDepth = 0, finished = 0;
+			long expanded = 0;
+			// 途中解は出力しない。元の完成解より短い深さだけを探索する。
+			for (int depth = 1; depth < best.Moves.Count && stopwatch.ElapsedMilliseconds < BeamDeadlineMilliseconds; depth++) {
+				double progress = (double)depth / baseline.Moves.Count;
+				var candidates = new PriorityQueue<BeamNode, double>();
+				bool timedOut = false;
+				foreach (var node in beam) {
+					for (int source = 0; source < n * n; source++) {
+						var tower = node.Board.Tower(source);
+						var sourceKey = WholeCellKey(node.Board, source, keyTokens);
+						for (int count = 1; count <= tower.Length; count++) {
+							foreach (var dir in directions) {
+								for (int len = 1; len <= tower.Length - count + 1; len++) {
+									if (stopwatch.ElapsedMilliseconds >= BeamDeadlineMilliseconds) { timedOut = true; break; }
+									var (i, j) = dir.Move(source / n, source % n, len);
+									if ((uint)i >= (uint)n || (uint)j >= (uint)n || input.Map[i, j] == -2) break;
+									if (node.Board.Heights[i * n + j] + count > 8) continue;
+									var next = node.Board.Copy();
+									if (!next.Capture(source, dir, len, count, out var move)) continue;
+									expanded++;
+									if (next.Remaining == 0) {
+										var route = new List<Transport> { move! };
+										for (var parent = node; parent.Move != null; parent = parent.Parent!) route.Add(parent.Move);
+										route.Reverse();
+										best = new State(isLocal, input);
+										foreach (var step in route)
+											best.Move(step.From / n, step.From % n, best.Slimes[step.From / n, step.From % n].Count - step.Cargo.Length, step.Direction, step.Length);
+										finished++;
+										break;
+									}
+									// 同色内の個体IDは区別せず、色の積み順が同じ盤面を統合する。
+									var key = node.Key ^ sourceKey ^ WholeCellKey(node.Board, move!.To, keyTokens)
+										^ WholeCellKey(next, source, keyTokens) ^ WholeCellKey(next, move.To, keyTokens);
+									if (!seen.Add(key)) continue;
+									var evaluation = UpdateWholeEvaluation(node.Board, next, node.Evaluation!, move!, distances, floor, pads, landingCells, colorCells);
+									double score = ScoreWholeEvaluation(evaluation, next.Remaining, progress);
+									candidates.Enqueue(new BeamNode(next, node, move, score, evaluation, key), -score);
+									if (candidates.Count > WholeBeamWidth) candidates.Dequeue();
+								}
+								if (timedOut || finished > 0) break;
+							}
+							if (timedOut || finished > 0) break;
+						}
+						if (timedOut || finished > 0) break;
+					}
+					if (timedOut || finished > 0) break;
+				}
+				reachedDepth = depth;
+				if (finished > 0 || timedOut) break;
+				beam = candidates.UnorderedItems.Select(item => item.Element).OrderBy(node => node.Score).ToList();
+				if (beam.Count == 0) break;
+			}
+			if (isLocal) Console.Error.WriteLine($"WHOLE20 depth={reachedDepth} expanded={expanded} finished={finished} baseline={baseline.Moves.Count} best={best.Moves.Count}");
+			if (best.SlimeCount != 0) throw new InvalidOperationException("Plan20: incomplete whole beam result.");
+			return best;
+		}
+
+		private (int Distance, int Overlap, int SameColor) WholeCellEvaluation(ReplayBoard board, int cell, int[][] distances)
+		{
+			var tower = board.Tower(cell);
+			int distance = 0, sameColor = 0;
+			for (int index = 0; index < tower.Length; index++) {
+				int color = colors[tower[index]];
+				distance += distances[color][cell];
+				if (index > 0 && colors[tower[index - 1]] == color) sameColor++;
+			}
+			return (distance, Math.Max(0, tower.Length - 1), sameColor);
+		}
+
+		private int WholeCellRoutePotential(ReplayBoard board, int cell, int[] remainingByColor, List<RoutePad>[] pads)
+		{
+			int height = board.Heights[cell];
+			if (height == 0 || pads[cell * 9 + height] == null) return 0;
+			int bestSaving = 0;
+			var tower = board.Tower(cell);
+			foreach (var pad in pads[cell * 9 + height]) {
+				if (remainingByColor[pad.Color] < pad.Load || input.Map[cell / n, cell % n] == pad.Color
+					|| board.Heights[pad.Landing] + pad.Load > 8) continue;
+				int localCount = 0;
+				foreach (int id in tower) if (colors[id] == pad.Color) localCount++;
+				if (remainingByColor[pad.Color] - localCount >= pad.Load) bestSaving = Math.Max(bestSaving, pad.Saving);
+			}
+			return bestSaving;
+		}
+
+		private WholeEvaluation CreateWholeEvaluation(ReplayBoard board, int[][] distances, List<RoutePad>[] pads, int[][] floor)
+		{
+			int distance = 0, overlap = 0, sameColor = 0, routePotential = 0;
+			var remainingByColor = new int[input.K];
+			var returnCostByColor = new int[input.K];
+			for (int cell = 0; cell < n * n; cell++) {
+				var value = WholeCellEvaluation(board, cell, distances);
+				distance += value.Distance;
+				overlap += value.Overlap;
+				sameColor += value.SameColor;
+				foreach (int id in board.Tower(cell)) remainingByColor[colors[id]]++;
+			}
+			for (int cell = 0; cell < n * n; cell++) routePotential += WholeCellRoutePotential(board, cell, remainingByColor, pads);
+			int estimatedReturnCost = 0;
+			for (int color = 0; color < input.K; color++)
+				estimatedReturnCost += returnCostByColor[color] = EstimateColorReturnCost(board, color, distances, floor);
+			return new(distance, overlap, sameColor, routePotential, remainingByColor, returnCostByColor, estimatedReturnCost);
+		}
+
+		private WholeEvaluation UpdateWholeEvaluation(ReplayBoard before, ReplayBoard after, WholeEvaluation previous,
+			Transport move, int[][] distances, int[][] floor, List<RoutePad>[] pads, int[][] landingCells, int[][] colorCells)
+		{
+			int distance = previous.Distance, overlap = previous.Overlap, sameColor = previous.SameColor;
+			var remainingByColor = previous.RemainingByColor;
+			Span<bool> marked = stackalloc bool[n * n];
+			marked.Clear();
+			Span<int> affected = stackalloc int[n * n];
+			int affectedCount = 0;
+			// 移動セルだけでなく、着地容量と帰巣済み色数に依存する足場も更新する。
+			for (int endpoint = 0; endpoint < 2; endpoint++) {
+				int cell = endpoint == 0 ? move.From : move.To;
+				var oldValue = WholeCellEvaluation(before, cell, distances);
+				var newValue = WholeCellEvaluation(after, cell, distances);
+				distance += newValue.Distance - oldValue.Distance;
+				overlap += newValue.Overlap - oldValue.Overlap;
+				sameColor += newValue.SameColor - oldValue.SameColor;
+				if (!marked[cell]) { marked[cell] = true; affected[affectedCount++] = cell; }
+				foreach (int dependent in landingCells[cell]) {
+					if (!marked[dependent]) { marked[dependent] = true; affected[affectedCount++] = dependent; }
+				}
+			}
+			if (move.Returned.Length > 0) {
+				remainingByColor = (int[])remainingByColor.Clone();
+				foreach (int id in move.Returned) {
+					int color = colors[id];
+					remainingByColor[color]--;
+					foreach (int dependent in colorCells[color]) {
+						if (!marked[dependent]) { marked[dependent] = true; affected[affectedCount++] = dependent; }
+					}
+				}
+			}
+			int routePotential = previous.RoutePotential;
+			for (int index = 0; index < affectedCount; index++) {
+				int cell = affected[index];
+				routePotential += WholeCellRoutePotential(after, cell, remainingByColor, pads)
+					- WholeCellRoutePotential(before, cell, previous.RemainingByColor, pads);
+			}
+			var returnCostByColor = (int[])previous.ReturnCostByColor.Clone();
+			int estimatedReturnCost = previous.EstimatedReturnCost;
+			Span<bool> changedColors = stackalloc bool[input.K];
+			changedColors.Clear();
+			for (int endpoint = 0; endpoint < 2; endpoint++) {
+				int cell = endpoint == 0 ? move.From : move.To;
+				foreach (int id in before.Tower(cell)) changedColors[colors[id]] = true;
+				foreach (int id in after.Tower(cell)) changedColors[colors[id]] = true;
+			}
+			if (move.Returned.Length > 0) foreach (int id in move.Returned) changedColors[colors[id]] = true;
+			for (int color = 0; color < input.K; color++) {
+				if (!changedColors[color]) continue;
+				estimatedReturnCost -= returnCostByColor[color];
+				returnCostByColor[color] = EstimateColorReturnCost(after, color, distances, floor);
+				estimatedReturnCost += returnCostByColor[color];
+			}
+			return new(distance, overlap, sameColor, routePotential, remainingByColor, returnCostByColor, estimatedReturnCost);
+		}
+
+		private double ScoreWholeEvaluation(WholeEvaluation evaluation, int remaining, double progress)
+		{
+			double remainingWeight = WholeRemainingWeight + WholeLateRemainingWeight * progress * progress;
+			return (WholeDistanceWeight + WholeTransportWeight) * evaluation.EstimatedReturnCost + remainingWeight * remaining
+				- WholeRoutePadWeight * evaluation.RoutePotential
+				- (1 - progress) * (WholeOverlapWeight * evaluation.Overlap + WholeSameColorWeight * evaluation.SameColor);
+		}
+
+		private double EvaluateWholeBoard(ReplayBoard board, int[][] distances, List<RoutePad>[] pads, double progress = 0)
+		{
+			int totalDistance = 0, overlap = 0, sameColor = 0;
+			Span<int> remainingByColor = stackalloc int[input.K];
+			remainingByColor.Clear();
+			for (int cell = 0; cell < n * n; cell++) {
+				var tower = board.Tower(cell);
+				if (tower.Length == 0) continue;
+				overlap += tower.Length - 1;
+				for (int index = 0; index < tower.Length; index++) {
+					int color = colors[tower[index]];
+					remainingByColor[color]++;
+					totalDistance += distances[color][cell];
+					if (index > 0 && colors[tower[index - 1]] == color) sameColor++;
+				}
+			}
+			double routePotential = 0;
+			// 莠域ｸｬ萓ｿ縺ｮ濶ｲ縺悟ｸｰ蟾｣貂医∩縺ｪ繧牙ｱ驟ｬ繧呈ｶ医＠縲∫樟蝨ｨ縺ｮ蝪碑・霄ｫ縺ｯ蛻ｩ逕ｨ萓ｿ縺ｫ謨ｰ縺医↑縺・・
+			for (int cell = 0; cell < n * n; cell++) {
+				int height = board.Heights[cell];
+				if (height == 0 || pads[cell * 9 + height] == null) continue;
+				int bestSaving = 0;
+				foreach (var pad in pads[cell * 9 + height]) {
+					if (remainingByColor[pad.Color] < pad.Load || input.Map[cell / n, cell % n] == pad.Color
+						|| board.Heights[pad.Landing] + pad.Load > 8) continue;
+					int localCount = 0;
+					foreach (int id in board.Tower(cell)) if (colors[id] == pad.Color) localCount++;
+					if (remainingByColor[pad.Color] - localCount < pad.Load) continue;
+					bestSaving = Math.Max(bestSaving, pad.Saving);
+				}
+				routePotential += bestSaving;
+			}
+			double remainingWeight = WholeRemainingWeight + WholeLateRemainingWeight * progress * progress;
+			return (WholeDistanceWeight + WholeTransportWeight) * totalDistance + remainingWeight * board.Remaining
+				- WholeRoutePadWeight * routePotential
+				- (1 - progress) * (WholeOverlapWeight * overlap + WholeSameColorWeight * sameColor);
+		}
+
+		public State OptimizeBeamIntervals(State baseline)
+		{
+			var board = new ReplayBoard(this);
+			var best = new List<Transport>();
+			foreach (var (i, j, keep, dir, len) in baseline.Moves) {
+				if (!board.Capture(i * n + j, dir, len, board.Heights[i * n + j] - keep, out var step))
+					throw new InvalidOperationException("Plan12: invalid baseline.");
+				best.Add(step!);
+			}
+			// 跳躍の潜在価値を過小評価しないよう、距離は床距離と帰巣可能数を併用する。
+			var floor = new int[n * n][];
+			for (int source = 0; source < n * n && stopwatch.ElapsedMilliseconds < BeamDeadlineMilliseconds; source++) {
+				floor[source] = Enumerable.Repeat(n * n, n * n).ToArray();
+				var queue = new Queue<int>();
+				floor[source][source] = 0;
+				queue.Enqueue(source);
+				while (queue.TryDequeue(out int cell)) {
+					foreach (var (i, j) in Helper.Adjacence4(cell / n, cell % n, n, n)) {
+						int next = i * n + j;
+						if (input.Map[i, j] == -2 || floor[source][next] <= floor[source][cell] + 1) continue;
+						floor[source][next] = floor[source][cell] + 1;
+						queue.Enqueue(next);
+					}
+				}
+			}
+			int trials = 0, accepted = 0;
+			for (int round = 0; round < 8 && stopwatch.ElapsedMilliseconds < BeamDeadlineMilliseconds; round++) {
+				BuildIndex(best, out _, out _, out var checkpoints);
+				bool improved = false;
+				foreach (int length in new[] { 12, 20, 32, 48 }) {
+					for (int first = 0; first + 3 < best.Count && stopwatch.ElapsedMilliseconds < BeamDeadlineMilliseconds; first += 4) {
+						int end = Math.Min(best.Count, first + length);
+						var ids = best.Skip(first).Take(end - first).SelectMany(s => s.Cargo.Concat(s.Returned)).ToHashSet();
+						if (ids.Count > 20 || ids.Select(id => colors[id]).Distinct().Count() < 2) continue;
+						var start = checkpoints[first / CheckpointInterval].Copy();
+						for (int index = first / CheckpointInterval * CheckpointInterval; index < first; index++) start.Apply(best[index]);
+						var target = start.Copy();
+						for (int index = first; index < end; index++) target.Apply(best[index]);
+						trials++;
+						var replacement = SearchInterval(start, target, ids, end - first, floor, Math.Min(BeamDeadlineMilliseconds, stopwatch.ElapsedMilliseconds + 65));
+						if (replacement == null) continue;
+						best = best.Take(first).Concat(replacement).Concat(best.Skip(end)).ToList();
+						accepted++;
+						info.Up++;
+						improved = true;
+						break;
+					}
+					if (improved || stopwatch.ElapsedMilliseconds >= BeamDeadlineMilliseconds) break;
+				}
+				if (!improved) break;
+			}
+			//if (isLocal) Console.Error.WriteLine($"BEAM12 trials={trials} accepted={accepted}");
+			if (best.Count >= baseline.Moves.Count) return baseline;
+			var result = new State(isLocal, input);
+			foreach (var step in best)
+				result.Move(step.From / n, step.From % n, result.Slimes[step.From / n, step.From % n].Count - step.Cargo.Length, step.Direction, step.Length);
+			if (result.SlimeCount != baseline.SlimeCount) throw new InvalidOperationException("Plan12: incomplete beam result.");
+			return result;
+		}
+
+		private List<Transport>? SearchInterval(ReplayBoard start, ReplayBoard target, HashSet<int> ids,
+			int originalLength, int[][] floor, long deadline)
+		{
+			var destinations = Enumerable.Repeat(-1, colors.Length).ToArray();
+			for (int cell = 0; cell < n * n; cell++) foreach (int id in target.Tower(cell)) destinations[id] = cell;
+			var beam = new List<BeamNode> { new(start, null, null, 0) };
+			var seen = new HashSet<string> { start.BeamKey() };
+			for (int depth = 1; depth < originalLength && stopwatch.ElapsedMilliseconds < deadline; depth++) {
+				var candidates = new PriorityQueue<BeamNode, double>();
+				foreach (var node in beam) {
+					for (int source = 0; source < n * n && stopwatch.ElapsedMilliseconds < deadline; source++) {
+						var tower = node.Board.Tower(source);
+						for (int count = 1; count <= tower.Length; count++) {
+							if (!tower[^count..].ToArray().All(ids.Contains)) break;
+							foreach (var dir in directions) {
+								for (int len = 1; len <= tower.Length - count + 1; len++) {
+									if (stopwatch.ElapsedMilliseconds >= deadline) return null;
+									var (i, j) = dir.Move(source / n, source % n, len);
+									if ((uint)i >= (uint)n || (uint)j >= (uint)n || input.Map[i, j] == -2) break;
+									if (node.Board.Heights[i * n + j] + count > 8) continue;
+									var next = node.Board.Copy();
+									if (!next.Capture(source, dir, len, count, out var move) || move!.Returned.Any(id => !ids.Contains(id) || destinations[id] >= 0)) continue;
+									if (next.SameState(target)) {
+										var result = new List<Transport> { move };
+										for (var parent = node; parent.Move != null; parent = parent.Parent!) result.Add(parent.Move);
+										result.Reverse();
+										return result;
+									}
+									if (!seen.Add(next.BeamKey())) continue;
+									double score = 0;
+									for (int cell = 0; cell < n * n; cell++) {
+										var contents = next.Tower(cell);
+										var loads = new Dictionary<int, int>();
+										foreach (int id in contents) {
+											if (!ids.Contains(id)) continue;
+											int goal = destinations[id] >= 0 ? destinations[id] : input.Dens[colors[id]].i * n + input.Dens[colors[id]].j;
+											loads.TryGetValue(goal, out int load);
+											loads[goal] = load + 1;
+										}
+										foreach (var (goal, load) in loads) score += floor[cell][goal] * (0.35 + load * 0.1) + load * 0.7;
+									}
+									candidates.Enqueue(new BeamNode(next, node, move, score), -score);
+									if (candidates.Count > 48) candidates.Dequeue();
+								}
+							}
+						}
+					}
+				}
+				beam = candidates.UnorderedItems.Select(item => item.Element).OrderBy(node => node.Score).ToList();
+				if (beam.Count == 0) break;
+			}
+			return null;
+		}
+
 		private sealed class ReplayBoard
 		{
 			private readonly Plan9Optimizer owner;
@@ -1935,6 +2992,29 @@ public class Program
 			}
 
 			public ReplayBoard Copy() => new(this);
+			public int Remaining => remaining;
+			public string BeamColorKey()
+			{
+				var key = new StringBuilder();
+				for (int cell = 0; cell < Heights.Length; cell++) {
+					if (Heights[cell] == 0) continue;
+					key.Append(cell).Append(':');
+					foreach (int id in Tower(cell)) key.Append((char)('a' + owner.colors[id]));
+					key.Append(';');
+				}
+				return key.ToString();
+			}
+			public string BeamKey()
+			{
+				var key = new StringBuilder();
+				for (int cell = 0; cell < Heights.Length; cell++) {
+					if (Heights[cell] == 0) continue;
+					key.Append(cell).Append(':');
+					foreach (int id in Tower(cell)) key.Append(id).Append(',');
+					key.Append(';');
+				}
+				return key.ToString();
+			}
 			public ReadOnlySpan<int> Tower(int cell) => towers.AsSpan(cell * 8, Heights[cell]);
 			public bool Apply(Transport step)
 				=> Move(step.From, step.Direction, step.Length, step.Cargo.Length, step, false, out _);
@@ -2020,984 +3100,6 @@ public class Program
 			}
 		}
 	}
-
-	static State DoPlan8(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var state = new State(isLocal, input);
-		int n = input.N;
-		var colorCounts = new int[input.K];
-		foreach (string row in input.C) {
-			foreach (char cell in row) {
-				if (cell >= 'a' && cell < 'a' + input.K) colorCounts[cell - 'a']++;
-			}
-		}
-		var order = Enumerable.Range(0, input.K).ToArray();
-		Array.Sort(order, (a, b) => colorCounts[a] != colorCounts[b]
-			? colorCounts[a].CompareTo(colorCounts[b]) : a.CompareTo(b));
-		var nestDistances = new int[input.K][,];
-		for (int c = 0; c < input.K; c++) nestDistances[c] = BuildDistance(input.Dens[c].i, input.Dens[c].j);
-		var floorDistances = BuildAllFloorDistances();
-		var previousColorBoards = Enumerable.Range(0, input.K)
-			.Select(_ => new HashSet<(ulong, ulong)>()).ToArray();
-		var preferredCell = Enumerable.Repeat(-1, input.K).ToArray();
-		bool hasPreviousMove = false;
-		int previousFromI = -1;
-		int previousFromJ = -1;
-		int previousToI = -1;
-		int previousToJ = -1;
-		int previousMoved = 0;
-		while (state.SlimeCount > 0 && state.Moves.Count < 100000) {
-			int movesAtStart = state.Moves.Count;
-			foreach (int color in order) {
-				var (denI, denJ) = input.Dens[color];
-				while (CountColor(color) > 0 && state.Moves.Count < 100000) {
-					if (!previousColorBoards[color].Add(GetBoardKey(color))) {
-						if (TryFindProgressMove(color)) continue;
-						break;
-					}
-					// 帰巣搬送中に受け渡した塔は、次の反復で他の塔より先に処理する。
-					if (preferredCell[color] >= 0) {
-						int cell = preferredCell[color];
-						preferredCell[color] = -1;
-						int pi = cell / n;
-						int pj = cell % n;
-						int run = TopRun(state.Slimes[pi, pj], color);
-						if (run > 0 && FindPriorityMove(pi, pj, color, denI, denJ,
-							out int preferredMoved, out Direction4 preferredDir, out int preferredLen)) {
-							if (TryDoMove(pi, pj, preferredMoved, preferredDir, preferredLen)) continue;
-						}
-					}
-
-					// 高さ7の塔は、合流対象ではなく巣への搬送を先に計画する。
-					if (FindTallestHomeMove(color, denI, denJ,
-						out int tallI, out int tallJ, out int tallCount,
-						out Direction4 tallDir, out int tallLen, out int receiver)) {
-						if (TryDoMove(tallI, tallJ, tallCount, tallDir, tallLen)) {
-							if (receiver >= 0) preferredCell[color] = receiver;
-							continue;
-						}
-					}
-
-					if (FindPair(color, denI, denJ, out int si, out int sj, out int ti, out int tj, out int moved)) {
-						if (FindMove(si, sj, ti, tj, moved, out Direction4 pairDir, out int pairLen, out int pairMoved)
-							&& TryDoMove(si, sj, pairMoved, pairDir, pairLen)) continue;
-					}
-
-					// 合流できる相手・経路が見つからない場合にだけ、帰巣可能な塔を整理する。
-					if (FindUrgentHomeMove(color, denI, denJ,
-						out int homeI, out int homeJ, out int homeCount,
-						out Direction4 homeDir, out int homeLen)
-						&& TryDoMove(homeI, homeJ, homeCount, homeDir, homeLen)) {
-						continue;
-					}
-
-					// 合流できる相手がない場合は、進行可能な最遠塔を巣へ送る。
-					if (FindPair(color, denI, denJ, out si, out sj, out ti, out tj, out moved)
-						&& (ti == denI && tj == denJ)
-						&& FindMove(si, sj, ti, tj, moved, out Direction4 homePairDir, out int homePairLen, out int homePairMoved)
-						&& TryDoMove(si, sj, homePairMoved, homePairDir, homePairLen)) {
-						continue;
-					}
-					if (TryFindProgressMove(color)) continue;
-					break;
-				}
-			}
-			if (state.Moves.Count == movesAtStart
-				&& !TryFindProgressMove()) break;
-		}
-		return state;
-
-		bool TryDoMove(int i, int j, int moved, Direction4 direction, int length)
-		{
-			var (ni, nj) = direction.Move(i, j, length);
-			if (IsImmediateReverse(i, j, ni, nj, moved)) return false;
-			state.Move(i, j, state.Slimes[i, j].Count - moved, direction, length);
-			hasPreviousMove = true;
-			previousFromI = i;
-			previousFromJ = j;
-			previousToI = ni;
-			previousToJ = nj;
-			previousMoved = moved;
-			return true;
-		}
-
-		bool IsImmediateReverse(int fromI, int fromJ, int toI, int toJ, int moved)
-		{
-			return hasPreviousMove
-				&& fromI == previousToI && fromJ == previousToJ
-				&& toI == previousFromI && toJ == previousFromJ
-				&& moved == previousMoved;
-		}
-
-		int CountColor(int c)
-		{
-			int count = 0;
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					foreach (int slime in state.Slimes[i, j]) if (slime == c) count++;
-				}
-			}
-			return count;
-		}
-		(ulong, ulong) GetBoardKey(int color)
-		{
-			ulong first = 14695981039346656037UL;
-			ulong second = 7809847782465536322UL;
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					foreach (int slime in state.Slimes[i, j]) AddToken((uint)slime + 1);
-					AddToken(0);
-				}
-			}
-			return (first, second);
-
-			void AddToken(uint token)
-			{
-				first = (first ^ token) * 1099511628211UL;
-				second ^= token + 0x9e3779b97f4a7c15UL + (second << 6) + (second >> 2);
-			}
-		}
-		int TopRun(Stack<int> tower, int c) { int count = 0; foreach (int x in tower) { if (x != c) break; count++; } return count; }
-		int[,] BuildDistance(int ti, int tj) { var d = new int[n, n]; for (int i = 0; i < n; i++) for (int j = 0; j < n; j++) d[i, j] = int.MaxValue; var q = new Queue<(int i, int j)>(); d[ti, tj] = 0; q.Enqueue((ti, tj)); while (q.Count > 0) { var (i, j) = q.Dequeue(); foreach (var (ni, nj) in Helper.Adjacence4(i, j, n, n)) { if (input.Map[ni, nj] == -2 || d[ni, nj] != int.MaxValue) continue; d[ni, nj] = d[i, j] + 1; q.Enqueue((ni, nj)); } } return d; }
-		int[,] BuildAllFloorDistances()
-		{
-			var distances = new int[n * n, n * n];
-			for (int si = 0; si < n; si++) {
-				for (int sj = 0; sj < n; sj++) {
-					int source = si * n + sj;
-					for (int cell = 0; cell < n * n; cell++) distances[source, cell] = int.MaxValue;
-					distances[source, source] = 0;
-					var queue = new Queue<(int i, int j)>();
-					queue.Enqueue((si, sj));
-					while (queue.Count > 0) {
-						var (i, j) = queue.Dequeue();
-						foreach (var (ni, nj) in Helper.Adjacence4(i, j, n, n)) {
-							int next = ni * n + nj;
-							if (input.Map[ni, nj] == -2 || distances[source, next] != int.MaxValue) continue;
-							distances[source, next] = distances[source, i * n + j] + 1;
-							queue.Enqueue((ni, nj));
-						}
-					}
-				}
-			}
-			return distances;
-		}
-		bool FindTallestHomeMove(int c, int denI, int denJ, out int sourceI, out int sourceJ, out int moved, out Direction4 direction, out int length, out int receiver)
-		{
-			sourceI = sourceJ = moved = length = 0;
-			direction = Direction4.N;
-			receiver = -1;
-			int nestCapacity = 8 - state.Slimes[denI, denJ].Count;
-			if (nestCapacity <= 0) return false;
-
-			int bestTowerHeight = 6;
-			int bestProgress = int.MaxValue;
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					Stack<int> source = state.Slimes[i, j];
-					int run = TopRun(source, c);
-					if (source.Count < 7 || run == 0 || nestDistances[c][i, j] == int.MaxValue) continue;
-					int countToNest = Math.Min(Math.Min(7, run), nestCapacity);
-					if (FindMove(i, j, denI, denJ, countToNest, out Direction4 homeDirection, out int homeLength, out int homeMoved)) {
-						var (homeI, homeJ) = homeDirection.Move(i, j, homeLength);
-						int blockedReceiver = -1;
-						for (int step = 1; step < homeLength; step++) {
-							var (pathI, pathJ) = homeDirection.Move(i, j, step);
-							if (TopRun(state.Slimes[pathI, pathJ], c) > 0
-								&& state.Slimes[pathI, pathJ].Count < 8) {
-								blockedReceiver = pathI * n + pathJ;
-								break;
-							}
-						}
-						if (blockedReceiver >= 0) {
-							var (receiverI, receiverJ) = (blockedReceiver / n, blockedReceiver % n);
-							int handoffCount = Math.Min(Math.Min(7, run), 8 - state.Slimes[receiverI, receiverJ].Count);
-							int handoffLength = floorDistances[i * n + j, blockedReceiver];
-							if (handoffCount > 0 && handoffLength > 0
-								&& handoffLength <= source.Count - handoffCount + 1
-								&& (source.Count > bestTowerHeight
-									|| (source.Count == bestTowerHeight && nestDistances[c][receiverI, receiverJ] < bestProgress))) {
-								bestTowerHeight = source.Count;
-								bestProgress = nestDistances[c][receiverI, receiverJ];
-								sourceI = i;
-								sourceJ = j;
-								moved = handoffCount;
-								direction = homeDirection;
-								length = handoffLength;
-								receiver = blockedReceiver;
-							}
-							continue;
-						}
-						int progress = nestDistances[c][homeI, homeJ];
-						if (source.Count > bestTowerHeight || (source.Count == bestTowerHeight && progress < bestProgress)) {
-							bestTowerHeight = source.Count;
-							bestProgress = progress;
-							sourceI = i;
-							sourceJ = j;
-							moved = homeMoved;
-							direction = homeDirection;
-							length = homeLength;
-							receiver = -1;
-						}
-					}
-
-					// 巣への直行経路が塞がる/容量不足なら、経路上の同色塔へ運べる分を渡す。
-					foreach (Direction4 dir in Direction4Extensions.ForEach4()) {
-						int maxLength = source.Count - Math.Min(7, run) + 1;
-						for (int len = 1; len <= maxLength; len++) {
-							var (ni, nj) = dir.Move(i, j, len);
-							if ((uint)ni >= (uint)n || (uint)nj >= (uint)n || input.Map[ni, nj] == -2) break;
-							if (input.Map[ni, nj] == c || nestDistances[c][ni, nj] >= nestDistances[c][i, j]) continue;
-							int receiverRun = TopRun(state.Slimes[ni, nj], c);
-							if (receiverRun == 0) continue;
-							int count = Math.Min(Math.Min(7, run), 8 - state.Slimes[ni, nj].Count);
-							if (count <= 0) continue;
-							if (floorDistances[i * n + j, ni * n + nj] + nestDistances[c][ni, nj]
-								!= nestDistances[c][i, j]) continue;
-							int progress = nestDistances[c][ni, nj];
-							if (source.Count < bestTowerHeight
-								|| (source.Count == bestTowerHeight && progress >= bestProgress)) continue;
-							bestTowerHeight = source.Count;
-							bestProgress = progress;
-							sourceI = i;
-							sourceJ = j;
-							moved = count;
-							direction = dir;
-							length = len;
-							receiver = ni * n + nj;
-						}
-					}
-				}
-			}
-			return sourceI >= 0 && bestTowerHeight >= 7;
-		}
-		bool FindPriorityMove(int si, int sj, int c, int denI, int denJ, out int moved, out Direction4 direction, out int length)
-		{
-			moved = 0;
-			direction = Direction4.N;
-			length = 0;
-			Stack<int> source = state.Slimes[si, sj];
-			int run = TopRun(source, c);
-			if (run == 0) return false;
-			if (source.Count >= 7) return FindMove(si, sj, denI, denJ, Math.Min(7, run), out direction, out length, out moved) && moved > 0;
-
-			long best = long.MaxValue;
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					int targetRun = TopRun(state.Slimes[i, j], c);
-					if (targetRun == 0 || (i == si && j == sj) || state.Slimes[i, j].Count >= 8) continue;
-					int count = Math.Min(7, Math.Min(run, 8 - state.Slimes[i, j].Count));
-					if (!FindMove(si, sj, i, j, count, out Direction4 dir, out int len, out _)) continue;
-					long score = (long)floorDistances[si * n + sj, i * n + j] * 10 - Math.Min(count, targetRun);
-					if (score >= best) continue;
-					best = score;
-					moved = count;
-					direction = dir;
-					length = len;
-				}
-			}
-			return moved > 0 || (FindMove(si, sj, denI, denJ, Math.Min(7, run), out direction, out length, out moved) && moved > 0);
-		}
-		bool FindUrgentHomeMove(int c, int denI, int denJ, out int sourceI, out int sourceJ, out int moved, out Direction4 direction, out int length)
-		{
-			sourceI = sourceJ = moved = length = 0;
-			direction = Direction4.N;
-			int[,] distances = nestDistances[c];
-			int nestCapacity = 8 - state.Slimes[denI, denJ].Count;
-			if (nestCapacity <= 0) return false;
-
-			// 高さ7では空きが1段しかなくなるため、積み上げや移動経路を塞ぐ前に帰巣させる。
-			// 次に巣の隣の塔を帰巣させ、巣周辺の合流先を空ける。
-			for (int priority = 0; priority < 2; priority++) {
-				for (int i = 0; i < n; i++) {
-					for (int j = 0; j < n; j++) {
-						Stack<int> tower = state.Slimes[i, j];
-						int run = TopRun(tower, c);
-						if (run == 0 || distances[i, j] == 0 || distances[i, j] == int.MaxValue) continue;
-						bool urgent = priority == 0 ? tower.Count >= 7 : distances[i, j] == 1;
-						if (!urgent) continue;
-
-						int count = Math.Min(Math.Min(7, run), nestCapacity);
-						if (count == 0 || !FindMove(i, j, denI, denJ, count, out Direction4 dir, out int len, out int homeMoved)) continue;
-						var (destI, destJ) = dir.Move(i, j, len);
-						if (state.Slimes[destI, destJ].Count + count > 8) continue;
-
-						sourceI = i;
-						sourceJ = j;
-						moved = homeMoved;
-						direction = dir;
-						length = len;
-						return true;
-					}
-				}
-			}
-			return false;
-		}
-		bool FindPair(int c, int di, int dj, out int bi, out int bj, out int btI, out int btJ, out int bm)
-		{
-			bi = bj = btI = btJ = -1;
-			bm = 0;
-			var d = nestDistances[c];
-			int farthest = -1;
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					int run = TopRun(state.Slimes[i, j], c);
-					if (run > 0 && d[i, j] < int.MaxValue) farthest = Math.Max(farthest, d[i, j]);
-				}
-			}
-
-			// 最遠の供給元から順に、巣へ向かう最短経路上の合流先を探す。
-			for (int sourceDistance = farthest; sourceDistance > 0; sourceDistance--) {
-				long bestSourceCost = long.MaxValue;
-				for (int i = 0; i < n; i++) {
-					for (int j = 0; j < n; j++) {
-						int run = TopRun(state.Slimes[i, j], c);
-						if (run == 0 || d[i, j] != sourceDistance) continue;
-						long sourceDistanceToReceiver = long.MaxValue;
-						int sourceTargetRun = 0;
-						int sourceCount = 0;
-						int sourceTargetI = -1;
-						int sourceTargetJ = -1;
-						for (int y = 0; y < n; y++) {
-							for (int x = 0; x < n; x++) {
-								if ((i == y && j == x) || d[y, x] > sourceDistance) continue;
-								int targetRun = TopRun(state.Slimes[y, x], c);
-								int targetHeight = state.Slimes[y, x].Count;
-								if (targetRun == 0 || targetHeight >= 8) continue;
-								int count = Math.Min(7, Math.Min(run, 8 - targetHeight));
-								int sep = floorDistances[i * n + j, y * n + x];
-								// 同距離の塔も候補に含め、近場で合流できる機会を逃さない。
-								if (count <= 0 || sep == int.MaxValue
-								|| !FindMove(i, j, y, x, count, out _, out _, out _)) continue;
-								int sourceJump = Math.Max(1, state.Slimes[i, j].Count - count + 1);
-								int directTargetJump = Math.Max(1, targetHeight + 1);
-								int mergedTargetJump = Math.Max(1, Math.Min(8, targetHeight + count) + 1);
-								int directMoves = EstimateMoves(sourceDistance, sourceJump)
-									+ EstimateMoves(d[y, x], directTargetJump);
-								int mergeMoves = EstimateMoves(sep, sourceJump)
-									+ EstimateMoves(d[y, x], mergedTargetJump);
-								int remainingSource = run - count;
-								int splitMoves = remainingSource > 0
-									? EstimateMoves(Math.Max(0, sourceDistance - sep), Math.Max(1, state.Slimes[i, j].Count - remainingSource + 1))
-									: 0;
-								mergeMoves += splitMoves;
-								// 合流で移動操作数が増える候補は採らず、個別帰巣に任せる。
-								if (mergeMoves > directMoves) continue;
-								long detour = (long)sep + d[y, x] - sourceDistance;
-								long candidateCost = (long)sep * 10000
-									+ (long)mergeMoves * 1000
-									+ Math.Max(0, detour) * 50
-									- (long)Math.Min(count, targetRun) * 10;
-								if (candidateCost >= sourceDistanceToReceiver) continue;
-								sourceDistanceToReceiver = (int)candidateCost;
-								sourceTargetRun = targetRun;
-								sourceCount = count;
-								sourceTargetI = y;
-								sourceTargetJ = x;
-							}
-						}
-						if (sourceTargetI < 0) continue;
-						long sourceCost = (long)sourceDistanceToReceiver * 1000
-							- (long)Math.Min(sourceCount, sourceTargetRun) * 10;
-						if (sourceCost >= bestSourceCost) continue;
-						bestSourceCost = sourceCost;
-						bi = i;
-						bj = j;
-						btI = sourceTargetI;
-						btJ = sourceTargetJ;
-						bm = sourceCount;
-					}
-				}
-				if (bi >= 0) return true;
-			}
-
-			// 最短経路上に合流先がない場合は、合流せず最遠の塔を巣へ近づける。
-			bi = bj = -1;
-			bm = 0;
-			long bestHomeScore = long.MaxValue;
-			int farthestRun = -1;
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					int run = TopRun(state.Slimes[i, j], c);
-					if (run == 0 || d[i, j] == 0 || d[i, j] == int.MaxValue) continue;
-					int count = Math.Min(7, run);
-					if (!FindMove(i, j, di, dj, count, out _, out _, out _)) continue;
-					long score = -d[i, j] * 1000L - count;
-					if (score >= bestHomeScore) continue;
-					bestHomeScore = score;
-					farthestRun = run;
-					bi = i;
-					bj = j;
-				}
-			}
-			if (bi < 0) return false;
-			btI = di;
-			btJ = dj;
-			bm = Math.Min(Math.Min(7, farthestRun), 8 - state.Slimes[di, dj].Count);
-			if (bm <= 0) return false;
-			return true;
-
-			int EstimateMoves(int distance, int jumpLength)
-			{
-				return (distance + jumpLength - 1) / jumpLength;
-			}
-		}
-		bool FindMove(int si, int sj, int ti, int tj, int moved, out Direction4 bestDir, out int bestLen, out int bestMoved)
-		{
-			bestDir = Direction4.N;
-			bestLen = 0;
-			bestMoved = 0;
-			int current = floorDistances[si * n + sj, ti * n + tj];
-			if (current == int.MaxValue) return false;
-			long best = long.MaxValue;
-			int sourceHeight = state.Slimes[si, sj].Count;
-			int sourceColor = state.Slimes[si, sj].Peek();
-			int sourceRun = TopRun(state.Slimes[si, sj], sourceColor);
-			int max = sourceHeight - moved + 1;
-			foreach (var dir in Direction4Extensions.ForEach4()) {
-				for (int len = 1; len <= max; len++) {
-					bool clear = true;
-					for (int step = 1; step <= len; step++) {
-						var (i, j) = dir.Move(si, sj, step);
-						if ((uint)i >= (uint)n || (uint)j >= (uint)n || input.Map[i, j] == -2) {
-							clear = false;
-							break;
-						}
-					}
-					if (!clear) break;
-
-					var (ni, nj) = dir.Move(si, sj, len);
-					bool isTarget = ni == ti && nj == tj;
-					int destinationCapacity = 8 - state.Slimes[ni, nj].Count;
-					int actualMoved = isTarget
-						? moved
-						: Math.Min(sourceRun, destinationCapacity);
-					if (actualMoved <= 0 || (isTarget && destinationCapacity < moved)) continue;
-					if (len > sourceHeight - actualMoved + 1) continue;
-					if (IsImmediateReverse(si, sj, ni, nj, actualMoved)) continue;
-					int nextDistance = floorDistances[ni * n + nj, ti * n + tj];
-					if (nextDistance >= current) continue;
-					long score = nextDistance * 100L + len - (isTarget ? 10000 : 0);
-					if (score < best) {
-						best = score;
-						bestDir = dir;
-						bestLen = len;
-						bestMoved = actualMoved;
-					}
-				}
-			}
-			return bestLen > 0;
-		}
-		bool TryFindProgressMove(int preferredColor = -1)
-		{
-			int bestI = -1;
-			int bestJ = -1;
-			int bestDistance = -1;
-			int bestDestI = -1;
-			int bestDestJ = -1;
-			Direction4 bestDirection = Direction4.N;
-
-			// 通常の合流・帰巣計画が止まった場合だけ、最上段を巣に近づく隣接マスへ1匹ずつ運ぶ。
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					Stack<int> tower = state.Slimes[i, j];
-					if (tower.Count == 0) continue;
-					int color = tower.Peek();
-					if (preferredColor >= 0 && color != preferredColor) continue;
-					int distance = nestDistances[color][i, j];
-					if (distance <= bestDistance || distance == int.MaxValue) continue;
-					foreach (Direction4 direction in Direction4Extensions.ForEach4()) {
-						var (ni, nj) = direction.Move(i, j);
-						if ((uint)ni >= (uint)n || (uint)nj >= (uint)n
-							|| input.Map[ni, nj] == -2
-							|| state.Slimes[ni, nj].Count >= 8
-						|| IsImmediateReverse(i, j, ni, nj, 1)
-							|| nestDistances[color][ni, nj] >= distance) continue;
-						bestI = i;
-						bestJ = j;
-						bestDistance = distance;
-						bestDestI = ni;
-						bestDestJ = nj;
-						bestDirection = direction;
-						break;
-					}
-				}
-			}
-
-			if (bestI < 0 && preferredColor >= 0) return TryFindProgressMove();
-			if (bestI < 0) return false;
-			return TryDoMove(bestI, bestJ, 1, bestDirection, 1);
-		}
-	}
-
-	static State DoPlan4Core(
-		bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
-		bool requireNonWorsening, bool useTwoStepLookahead = false,
-		State? initialState = null, int[,]? reservedHeights = null)
-	{
-		var state = initialState ?? new State(isLocal, input);
-		int n = input.N;
-		var dists = new int[input.K, n, n];
-
-		// 各色の巣からの距離を個別に計算する。
-		for (int c = 0; c < input.K; c++) {
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					dists[c, i, j] = int.MaxValue;
-				}
-			}
-
-			var que = new Queue<(int i, int j, int d)>();
-			var (si, sj) = input.Dens[c];
-			dists[c, si, sj] = 0;
-			que.Enqueue((si, sj, 0));
-
-			while (que.Count > 0) {
-				var (i, j, d) = que.Dequeue();
-				int nd = d + 1;
-				foreach (var (ii, jj) in Helper.Adjacence4(i, j, n, n)) {
-					if (input.Map[ii, jj] == -2 || dists[c, ii, jj] <= nd) {
-						continue;
-					}
-
-					dists[c, ii, jj] = nd;
-					que.Enqueue((ii, jj, nd));
-				}
-			}
-		}
-
-		var pque = new HeapQueue<
-			(int i, int j, (int special, int distance) priority, int version),
-			(int special, int distance)>(
-			x => x.priority, reverses: false);
-		var versions = new int[n, n];
-
-		void Enqueue(int i, int j)
-		{
-			if (state.Slimes[i, j].Count == 0) {
-				return;
-			}
-
-			int topColor = state.Slimes[i, j].Peek();
-			int nestColor = input.Map[i, j];
-			bool blocksNest = nestColor >= 0 && topColor != nestColor;
-			bool isHeightLimit = state.Slimes[i, j].Count == 8;
-			int special = blocksNest || isHeightLimit ? 1 : 0;
-			var priority = (special, dists[topColor, i, j]);
-			int version = ++versions[i, j];
-			pque.Enqueue((i, j, priority, version));
-		}
-
-		for (int i = 0; i < n; i++) {
-			for (int j = 0; j < n; j++) {
-				Enqueue(i, j);
-			}
-		}
-
-		var deferred = new List<(int i, int j)>();
-		while (true) {
-			bool changedSinceRetry = false;
-			while (pque.Count > 0 && state.Moves.Count < 100000) {
-				var (i, j, _, version) = pque.Dequeue();
-				if (version != versions[i, j] || state.Slimes[i, j].Count == 0) {
-					continue;
-				}
-
-				if (!TryFindBestMove(i, j,
-					out int k, out Direction4 dir, out int l,
-					out int ni, out int nj)) {
-					deferred.Add((i, j));
-					continue;
-				}
-
-				state.Move(i, j, k, dir, l);
-				changedSinceRetry = true;
-				Enqueue(i, j);
-				Enqueue(ni, nj);
-			}
-
-			if (state.Moves.Count >= 100000 || deferred.Count == 0 || !changedSinceRetry) {
-				break;
-			}
-
-			foreach (var (i, j) in deferred) {
-				Enqueue(i, j);
-			}
-			deferred.Clear();
-		}
-
-		return state;
-
-		bool TryFindBestMove(
-			int i, int j,
-			out int bestK, out Direction4 bestDir, out int bestL,
-			out int bestNi, out int bestNj)
-		{
-			bestK = 0;
-			bestDir = Direction4.N;
-			bestL = 0;
-			bestNi = 0;
-			bestNj = 0;
-
-			int h = state.Slimes[i, j].Count;
-			int[] stack = state.Slimes[i, j].ToArray();
-			long bestScore = 0;
-			long bestImmediateImprovement = 0;
-			bool found = false;
-
-			int minRetained = reservedHeights == null
-				? 0
-				: Math.Min(reservedHeights[i, j], h);
-			for (int k = minRetained; k < h; k++) {
-				int moved = h - k;
-				long fromDistance = 0;
-				for (int index = 0; index < moved; index++) {
-					fromDistance += dists[stack[index], i, j];
-				}
-
-				foreach (var dir in Direction4Extensions.ForEach4()) {
-					for (int l = 1; l <= k + 1; l++) {
-						bool pathIsFloor = true;
-						for (int step = 1; step <= l; step++) {
-							var (ii, jj) = dir.Move(i, j, step);
-							if ((uint)ii >= (uint)n
-								|| (uint)jj >= (uint)n
-								|| input.Map[ii, jj] == -2) {
-								pathIsFloor = false;
-								break;
-							}
-						}
-
-						if (!pathIsFloor) {
-							break;
-						}
-
-						var (destI, destJ) = dir.Move(i, j, l);
-						if (state.Slimes[destI, destJ].Count + moved > 8) {
-							continue;
-						}
-
-						long toDistance = 0;
-						bool noSlimeWorsens = true;
-						for (int index = 0; index < moved; index++) {
-							int color = stack[index];
-							int from = dists[color, i, j];
-							int to = dists[color, destI, destJ];
-							toDistance += to;
-							if (to > from) {
-								noSlimeWorsens = false;
-							}
-						}
-
-						if (requireNonWorsening && !noSlimeWorsens) {
-							continue;
-						}
-
-						long improvement = fromDistance - toDistance;
-						if (improvement <= 0) {
-							continue;
-						}
-
-						long score = improvement;
-						if (useTwoStepLookahead) {
-							var sourceAfter = CopyStack(state.Slimes[i, j]);
-							var destinationAfter = CopyStack(state.Slimes[destI, destJ]);
-							for (int count = 0; count < moved; count++) {
-								destinationAfter.Push(sourceAfter.Pop());
-							}
-							ReturnHome(sourceAfter, i, j);
-							ReturnHome(destinationAfter, destI, destJ);
-
-							long nextSourceImprovement = BestNextImprovement(
-								i, j, sourceAfter,
-								i, j, sourceAfter, destI, destJ, destinationAfter);
-							long nextDestinationImprovement = BestNextImprovement(
-								destI, destJ, destinationAfter,
-								i, j, sourceAfter, destI, destJ, destinationAfter);
-							score += Math.Max(nextSourceImprovement, nextDestinationImprovement);
-						}
-
-						if (score > bestScore
-							|| (score == bestScore && improvement > bestImmediateImprovement)) {
-							bestScore = score;
-							bestImmediateImprovement = improvement;
-							bestK = k;
-							bestDir = dir;
-							bestL = l;
-							bestNi = destI;
-							bestNj = destJ;
-							found = true;
-						}
-					}
-				}
-			}
-
-			return found;
-		}
-
-		long BestNextImprovement(
-			int fromI, int fromJ, Stack<int> tower,
-			int changedSourceI, int changedSourceJ, Stack<int> changedSource,
-			int changedDestinationI, int changedDestinationJ, Stack<int> changedDestination)
-		{
-			int h = tower.Count;
-			if (h == 0) {
-				return 0;
-			}
-
-			int[] stack = tower.ToArray();
-			long bestImprovement = 0;
-			int minRetained = reservedHeights == null
-				? 0
-				: Math.Min(reservedHeights[fromI, fromJ], h);
-			for (int k = minRetained; k < h; k++) {
-				int moved = h - k;
-				long fromDistance = 0;
-				for (int index = 0; index < moved; index++) {
-					fromDistance += dists[stack[index], fromI, fromJ];
-				}
-
-				foreach (var dir in Direction4Extensions.ForEach4()) {
-					for (int l = 1; l <= k + 1; l++) {
-						bool pathIsFloor = true;
-						for (int step = 1; step <= l; step++) {
-							var (ii, jj) = dir.Move(fromI, fromJ, step);
-							if ((uint)ii >= (uint)n
-								|| (uint)jj >= (uint)n
-								|| input.Map[ii, jj] == -2) {
-								pathIsFloor = false;
-								break;
-							}
-						}
-
-						if (!pathIsFloor) {
-							break;
-						}
-
-						var (destI, destJ) = dir.Move(fromI, fromJ, l);
-						int destinationHeight =
-							GetHypotheticalHeight(destI, destJ,
-								changedSourceI, changedSourceJ, changedSource,
-								changedDestinationI, changedDestinationJ, changedDestination);
-						if (destinationHeight + moved > 8) {
-							continue;
-						}
-
-						long toDistance = 0;
-						bool noSlimeWorsens = true;
-						for (int index = 0; index < moved; index++) {
-							int color = stack[index];
-							int from = dists[color, fromI, fromJ];
-							int to = dists[color, destI, destJ];
-							toDistance += to;
-							if (to > from) {
-								noSlimeWorsens = false;
-							}
-						}
-
-						if (requireNonWorsening && !noSlimeWorsens) {
-							continue;
-						}
-
-						bestImprovement = Math.Max(bestImprovement, fromDistance - toDistance);
-					}
-				}
-			}
-
-			return bestImprovement;
-		}
-
-		int GetHypotheticalHeight(
-			int i, int j,
-			int changedSourceI, int changedSourceJ, Stack<int> changedSource,
-			int changedDestinationI, int changedDestinationJ, Stack<int> changedDestination)
-		{
-			if (i == changedSourceI && j == changedSourceJ) {
-				return changedSource.Count;
-			}
-			if (i == changedDestinationI && j == changedDestinationJ) {
-				return changedDestination.Count;
-			}
-			return state.Slimes[i, j].Count;
-		}
-
-		Stack<int> CopyStack(Stack<int> stack)
-		{
-			return new Stack<int>(stack.Reverse());
-		}
-
-		void ReturnHome(Stack<int> tower, int i, int j)
-		{
-			int denColor = input.Map[i, j];
-			while (denColor >= 0 && tower.Count > 0 && tower.Peek() == denColor) {
-				tower.Pop();
-			}
-		}
-	}
-
-	static State DoPlanByColorOrder(
-		bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
-		int[] colorOrder)
-	{
-		var state = new State(isLocal, input);
-		int n = input.N;
-
-		foreach (int c in colorOrder) {
-			var dists = new int[n, n].Fill(int.MaxValue);
-			var que = new Queue<(int i, int j, int d)>();
-			var (si, sj) = input.Dens[c];
-			dists[si, sj] = 0;
-			que.Enqueue((si, sj, 0));
-
-			while (que.Count > 0) {
-				var (i, j, d) = que.Dequeue();
-				int nd = d + 1;
-				foreach (var (ii, jj) in Helper.Adjacence4(i, j, n, n)) {
-					if (input.Map[ii, jj] == -2 || dists[ii, jj] <= nd) {
-						continue;
-					}
-
-					dists[ii, jj] = nd;
-					que.Enqueue((ii, jj, nd));
-				}
-			}
-
-			var pque = new HeapQueue<(int i, int j, int d), int>(x => x.d, reverses: false);
-			var queued = new HashSet<(int i, int j)>();
-
-			void EnqueueIfTargetExists(int i, int j)
-			{
-				if (state.Slimes[i, j].Count > 0
-					&& state.Slimes[i, j].Peek() == c
-					&& queued.Add((i, j))) {
-					pque.Enqueue((i, j, dists[i, j]));
-				}
-			}
-
-			for (int i = 0; i < n; i++) {
-				for (int j = 0; j < n; j++) {
-					EnqueueIfTargetExists(i, j);
-				}
-			}
-
-			var deferred = new List<(int i, int j)>();
-			bool retryDeferred;
-			do {
-				bool changedSinceRetry = false;
-
-				while (pque.Count > 0 && state.Moves.Count < 100000) {
-					var (i, j, _) = pque.Dequeue();
-					queued.Remove((i, j));
-
-					if (state.Slimes[i, j].Count == 0
-						|| state.Slimes[i, j].Peek() != c) {
-						continue;
-					}
-
-					if (!TryFindBestMove(i, j,
-						out int k, out Direction4 dir, out int l,
-						out int ni, out int nj)) {
-						deferred.Add((i, j));
-						continue;
-					}
-
-					state.Move(i, j, k, dir, l);
-					changedSinceRetry = true;
-					EnqueueIfTargetExists(i, j);
-					EnqueueIfTargetExists(ni, nj);
-				}
-
-				if (state.Moves.Count >= 100000) {
-					return state;
-				}
-
-				retryDeferred = deferred.Count > 0 && changedSinceRetry;
-				if (retryDeferred) {
-					foreach (var (i, j) in deferred) {
-						EnqueueIfTargetExists(i, j);
-					}
-					deferred.Clear();
-				}
-			} while (retryDeferred);
-
-			bool TryFindBestMove(
-				int i, int j,
-				out int bestK, out Direction4 bestDir, out int bestL,
-				out int bestNi, out int bestNj)
-			{
-				bestK = 0;
-				bestDir = Direction4.N;
-				bestL = 0;
-				bestNi = 0;
-				bestNj = 0;
-
-				int h = state.Slimes[i, j].Count;
-				int fromDist = dists[i, j];
-				int targetCount = 0;
-				int topTargetCount = 0;
-				bool stillCountingTop = true;
-				foreach (int slime in state.Slimes[i, j]) {
-					if (slime == c) {
-						targetCount++;
-						if (stillCountingTop) {
-							topTargetCount++;
-						}
-					} else {
-						stillCountingTop = false;
-					}
-				}
-
-				long bestTotalDistance = (long)targetCount * fromDist;
-				bool found = false;
-
-				for (int k = h - topTargetCount; k < h; k++) {
-					int moved = h - k;
-					foreach (var dir in Direction4Extensions.ForEach4()) {
-						for (int l = 1; l <= k + 1; l++) {
-							bool pathIsFloor = true;
-							for (int step = 1; step <= l; step++) {
-								var (ii, jj) = dir.Move(i, j, step);
-								if ((uint)ii >= (uint)n
-									|| (uint)jj >= (uint)n
-									|| input.Map[ii, jj] == -2) {
-									pathIsFloor = false;
-									break;
-								}
-							}
-
-							if (!pathIsFloor) {
-								break;
-							}
-
-							var (destI, destJ) = dir.Move(i, j, l);
-							int toDist = dists[destI, destJ];
-							if (toDist >= fromDist
-								|| state.Slimes[destI, destJ].Count + moved > 8) {
-								continue;
-							}
-
-							long totalDistance =
-								(long)(targetCount - moved) * fromDist
-								+ (long)moved * toDist;
-							if (totalDistance < bestTotalDistance) {
-								bestTotalDistance = totalDistance;
-								bestK = k;
-								bestDir = dir;
-								bestL = l;
-								bestNi = destI;
-								bestNj = destJ;
-								found = true;
-							}
-						}
-					}
-				}
-
-				return found;
-			}
-		}
-
-		return state;
-	}
 }
 
 public class State
@@ -3008,6 +3110,13 @@ public class State
 	public int SlimeCount { get; private set; }
 	public Stack<int>[,] Slimes { get; private set; }
 	public List<(int i, int j, int k, Direction4 d, int l)> Moves { get; private set; } = [];
+
+	public State Copy()
+		=> new State(_isLocal, _input) {
+			Slimes = Helper.Array2(_input.N, _input.N, (i, j) => new Stack<int>(Slimes[i, j].Reverse())),
+			SlimeCount = SlimeCount,
+			Moves = new List<(int i, int j, int k, Direction4 d, int l)>(Moves)
+		};
 
 	public State(bool isLocal, Input input)
 	{
