@@ -25,8 +25,10 @@ public class Program
 					var status = new List<string> {
 						$"{i:d4}:",
 						$"T={input.T:d5}",
-						$"loop={info.Loop:d8}",
-						$"up={info.Up:d4}",
+						$"loop={info.Loop:d6}",
+						$"up={info.Up:d3}",
+						$"loop2={info.Loop2:d6}",
+						$"up2={info.Up2:d3}",
 						//$"F1=({info.F1.i:d3},{info.F1.j:d3})",
 						//$"F2=({info.F2.i:d3},{info.F2.j:d3})",
 						//$"F3=({info.F3.i:d3},{info.F3.j:d3})",
@@ -59,7 +61,7 @@ public class Program
 		var input = new Input(io, isLocal);
 		var info = new Information();
 
-		var best = DoPlan5(isLocal, sw, rnd, input, info);
+		var best = DoPlan7(isLocal, sw, rnd, input, info);
 
 		input.Output(best);
 		if (isLocal) {
@@ -80,46 +82,11 @@ public class Program
 		return (input, info);
 	}
 
-	static State DoPlan4(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-
-		var best = DoGreedy4(isLocal, sw, rnd, input, info, (64, 64), (32, 96), (96, 32), 32, 32, 96, 96, out int wc0);
-		long bestScore = best.CalculateScore();
-		info.WC = wc0;
-
-		int limit = 1000;
-		while (sw.ElapsedMilliseconds < limit) {
-			++info.Loop;
-			int warpMinY = rnd.Next(30, 46);
-			int warpMaxY = rnd.Next(90, 106);
-			int warpMinX = warpMinY;
-			int warpMaxX = warpMaxY;
-
-			var temp = DoGreedy4(isLocal, sw, rnd, input, info,
-				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
-				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
-				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
-				warpMinX, warpMinY, warpMaxX, warpMaxY, out int wc);
-			long tempScore = temp.CalculateScore();
-			if (tempScore > bestScore) {
-				best = temp;
-				bestScore = tempScore;
-				++info.Up;
-				info.WC = wc;
-				info.WarpX = (warpMinX, warpMaxX);
-				info.WarpY = (warpMinY, warpMaxY);
-			}
-		}
-
-		return best;
-	}
-
 	static State DoPlan5(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 
-		var best = DoGreedy5(isLocal, sw, rnd, input, info, (64, 64), (32, 96), (96, 32), 32, 32, 96, 96, out int wc0);
+		var best = DoGreedy5(isLocal, sw, rnd, input, info, (64, 64), (32, 96), (96, 32), 32, 32, 96, 96);
 		long bestScore = best.CalculateScore();
-		info.WC = wc0;
 
 		int limit = 1000;
 		while (sw.ElapsedMilliseconds < limit) {
@@ -133,13 +100,12 @@ public class Program
 				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
 				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
 				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
-				warpMinX, warpMinY, warpMaxX, warpMaxY, out int wc);
+				warpMinX, warpMinY, warpMaxX, warpMaxY);
 			long tempScore = temp.CalculateScore();
 			if (tempScore > bestScore) {
 				best = temp;
 				bestScore = tempScore;
 				++info.Up;
-				info.WC = wc;
 				info.WarpX = (warpMinX, warpMaxX);
 				info.WarpY = (warpMinY, warpMaxY);
 			}
@@ -148,71 +114,182 @@ public class Program
 		return best;
 	}
 
-	static State DoGreedy4(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
-		(int i, int j) f1, (int i, int j) f2, (int i, int j) f3,
-		int warpMinX, int warpMinY, int warpMaxX, int warpMaxY,
-		out int wc)
+	static State DoPlan6(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
-		var state = new State(isLocal, input);
+		var best = DoGreedy5(isLocal, sw, rnd, input, info, (64, 64), (32, 96), (96, 32), 32, 32, 96, 96);
+		long bestScore = best.CalculateScore();
 
-		state.AddFirstCirce(f1.i, f1.j);
-		state.AddFirstCirce(f2.i, f2.j);
-		state.AddFirstCirce(f3.i, f3.j);
+		int limit = 1000;
+		while (sw.ElapsedMilliseconds < limit) {
+			++info.Loop;
+			int warpMinY = rnd.Next(30, 46);
+			int warpMaxY = rnd.Next(90, 106);
+			int warpMinX = warpMinY;
+			int warpMaxX = warpMaxY;
 
-		int n = input.N;
-		wc = 0;
-		for (int k = 0; k < input.M; k++) {
-			var (gi, gj) = input.G[k];
-			var (si, sj) = k == 0 ? (state.CI, state.CJ) : input.G[k - 1];
-			var (minY, minX) = (Math.Min(si, gi), Math.Min(sj, gj));
-			var (maxY, maxX) = (Math.Max(si, gi), Math.Max(sj, gj));
-			minY = Math.Max(minY, warpMinY);
-			minX = Math.Max(minX, warpMinX);
-			maxY = Math.Min(maxY, warpMaxY + 1);
-			maxX = Math.Min(maxX, warpMaxX + 1);
-
-			int minDist = Math.Abs(si - gi) + Math.Abs(sj - gj);
-			var (wi, wj) = (-1, -1);
-			int tag = -1;
-			for (int i = minY; i <= maxY; i++) {
-				for (int j = minX; j <= maxX; j++) {
-					if ((i, j) == (gi, gj)) {
-						continue;
-					}
-
-					for (int mm = 0; mm < state.Circles.Count; mm++) {
-						var (mi, mj) = state.Circles[mm];
-						var (ti, tj) = (2 * mi - i, 2 * mj - j);
-						if ((uint)ti >= n || (uint)tj >= n) {
-							continue;
-						}
-
-						int tempDist1 = Math.Abs(si - i) + Math.Abs(sj - j);
-						int tempDist2 = Math.Abs(ti - gi) + Math.Abs(tj - gj);
-						if (tempDist1 + tempDist2 + 1 < minDist) {
-							minDist = tempDist1 + tempDist2 + 1;
-							(wi, wj) = (i, j);
-							tag = mm;
-						}
-					}
-				}
-			}
-
-			if (tag == -1) {
-				state.MoveNoWarp();
-			} else {
-				var (mi, mj) = state.Circles[tag];
-				state.MoveWithWarp(wi, wj, mi, mj);
+			var temp = DoGreedy5(isLocal, sw, rnd, input, info,
+				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
+				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
+				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
+				warpMinX, warpMinY, warpMaxX, warpMaxY);
+			long tempScore = temp.CalculateScore();
+			if (tempScore > bestScore) {
+				best = temp;
+				bestScore = tempScore;
+				++info.Up;
+				info.WarpX = (warpMinX, warpMaxX);
+				info.WarpY = (warpMinY, warpMaxY);
 			}
 		}
 
-		return state;
+		limit = 1900;
+		while (sw.ElapsedMilliseconds < limit) {
+			++info.Loop2;
+			var (warpMinX, warpMaxX) = info.WarpX;
+			var (warpMinY, warpMaxY) = info.WarpY;
+
+			var temp = new State(isLocal, input);
+			temp.AddFirstCirce(best.Firsts[0].i, best.Firsts[0].j);
+			temp.AddFirstCirce(best.Firsts[1].i, best.Firsts[1].j);
+			temp.AddFirstCirce(best.Firsts[2].i, best.Firsts[2].j);
+
+			int tag = rnd.Next(0, input.M);
+			if (best.Moves[tag].wi == -1) {
+				// tagより前はそのまま実行し、tagで warp を使う。
+				// ただ、損をするワープをしてもしょうがないので、tag以降を貪欲として代理
+				for (int i = 0; i < tag; i++) {
+					if (best.Moves[i].wi == -1) {
+						temp.MoveNoWarp();
+					} else {
+						var (wi, wj, a, b) = best.Moves[i];
+						temp.MoveWithWarp(wi, wj, a, b);
+					}
+				}
+
+				DoGreedy5Core(input, temp, tag, warpMinX, warpMinY, warpMaxX, warpMaxY);
+			} else {
+				// tagより前はそのまま実行し、tag で強制的に warp を使わない。
+				// 以降を貪欲にする。
+				for (int i = 0; i < tag; i++) {
+					if (best.Moves[i].wi == -1) {
+						temp.MoveNoWarp();
+					} else {
+						var (wi, wj, a, b) = best.Moves[i];
+						temp.MoveWithWarp(wi, wj, a, b);
+					}
+				}
+
+				temp.MoveNoWarp();
+
+				DoGreedy5Core(input, temp, tag + 1, warpMinX, warpMinY, warpMaxX, warpMaxY);
+			}
+
+			long tempScore = temp.CalculateScore();
+			if (tempScore > bestScore) {
+				best = temp;
+				bestScore = tempScore;
+				++info.Up2;
+			}
+		}
+
+		return best;
+	}
+
+	static State DoPlan7(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var best = DoGreedy5(isLocal, sw, rnd, input, info, (64, 64), (32, 96), (96, 32), 32, 32, 96, 96);
+		long bestScore = best.CalculateScore();
+
+		int limit = 1000;
+		while (sw.ElapsedMilliseconds < limit) {
+			++info.Loop;
+			int warpMinY = rnd.Next(30, 46);
+			int warpMaxY = rnd.Next(90, 106);
+			int warpMinX = warpMinY;
+			int warpMaxX = warpMaxY;
+
+			var temp = DoGreedy5(isLocal, sw, rnd, input, info,
+				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
+				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
+				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
+				warpMinX, warpMinY, warpMaxX, warpMaxY);
+			long tempScore = temp.CalculateScore();
+			if (tempScore > bestScore) {
+				best = temp;
+				bestScore = tempScore;
+				++info.Up;
+				info.WarpX = (warpMinX, warpMaxX);
+				info.WarpY = (warpMinY, warpMaxY);
+			}
+		}
+
+		limit = 1900;
+		int tryCount = 10;
+		int count = 0;
+		var tempBest = best;
+		while (sw.ElapsedMilliseconds < limit) {
+			++info.Loop2;
+			var (warpMinX, warpMaxX) = info.WarpX;
+			var (warpMinY, warpMaxY) = info.WarpY;
+
+			var temp = new State(isLocal, input);
+			temp.AddFirstCirce(best.Firsts[0].i, best.Firsts[0].j);
+			temp.AddFirstCirce(best.Firsts[1].i, best.Firsts[1].j);
+			temp.AddFirstCirce(best.Firsts[2].i, best.Firsts[2].j);
+
+			int tag = rnd.Next(0, input.M);
+			if (tempBest.Moves[tag].wi == -1) {
+				// tagより前はそのまま実行し、tagで warp を使う。
+				// ただ、損をするワープをしてもしょうがないので、tag以降を貪欲として代理
+				for (int i = 0; i < tag; i++) {
+					if (tempBest.Moves[i].wi == -1) {
+						temp.MoveNoWarp();
+					} else {
+						var (wi, wj, a, b) = tempBest.Moves[i];
+						temp.MoveWithWarp(wi, wj, a, b);
+					}
+				}
+
+				DoGreedy5Core(input, temp, tag, warpMinX, warpMinY, warpMaxX, warpMaxY);
+			} else {
+				// tagより前はそのまま実行し、tag で強制的に warp を使わない。
+				// 以降を貪欲にする。
+				for (int i = 0; i < tag; i++) {
+					if (tempBest.Moves[i].wi == -1) {
+						temp.MoveNoWarp();
+					} else {
+						var (wi, wj, a, b) = tempBest.Moves[i];
+						temp.MoveWithWarp(wi, wj, a, b);
+					}
+				}
+
+				temp.MoveNoWarp();
+
+				DoGreedy5Core(input, temp, tag + 1, warpMinX, warpMinY, warpMaxX, warpMaxY);
+			}
+
+			long tempScore = temp.CalculateScore();
+			if (tempScore > bestScore) {
+				best = temp;
+				bestScore = tempScore;
+				++info.Up2;
+				count = 0;
+			} else {
+				tempBest = temp;
+				++count;
+				if (count >= tryCount) {
+					tempBest = best;
+					count = 0;
+				}
+			}
+		}
+
+		return best;
 	}
 
 	static State DoGreedy5(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
 		(int i, int j) f1, (int i, int j) f2, (int i, int j) f3,
-		int warpMinX, int warpMinY, int warpMaxX, int warpMaxY,
-		out int wc)
+		int warpMinX, int warpMinY, int warpMaxX, int warpMaxY)
 	{
 		var state = new State(isLocal, input);
 
@@ -220,9 +297,16 @@ public class Program
 		state.AddFirstCirce(f2.i, f2.j);
 		state.AddFirstCirce(f3.i, f3.j);
 
+		DoGreedy5Core(input, state, 0, warpMinX, warpMinY, warpMaxX, warpMaxY);
+
+		return state;
+	}
+
+	static State DoGreedy5Core(Input input, State state,
+		int startK, int warpMinX, int warpMinY, int warpMaxX, int warpMaxY)
+	{
 		int n = input.N;
-		wc = 0;
-		for (int k = 0; k < input.M; k++) {
+		for (int k = startK; k < input.M; k++) {
 			var (gi, gj) = input.G[k];
 			var (si, sj) = k == 0 ? (state.CI, state.CJ) : input.G[k - 1];
 			var (minY, minX) = (Math.Min(si, gi), Math.Min(sj, gj));
@@ -375,6 +459,9 @@ public class Information
 	public int Loop { get; set; } = 0;
 	public int Up { get; set; } = 0;
 	public long Elapsed { get; set; } = 0;
+
+	public int Loop2 { get; set; } = 0;
+	public int Up2 { get; set; } = 0;
 
 	public int A { get; set; } = 0;
 	public (int i, int j) F1 { get; set; } = (0, 0);
