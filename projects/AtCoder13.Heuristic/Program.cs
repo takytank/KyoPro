@@ -59,15 +59,20 @@ public class Program
 		var input = new Input(io, isLocal);
 		var info = new Information();
 
-		var best = DoPlan4(isLocal, sw, rnd, input, info);
+		var best = DoPlan5(isLocal, sw, rnd, input, info);
 
 		input.Output(best);
 		if (isLocal) {
 			info.Score = best.CalculateScore();
-			info.A = best.Moves.Count;
+			info.A = best.A;
 			info.F1 = best.Firsts[0];
 			info.F2 = best.Firsts[1];
 			info.F3 = best.Firsts[2];
+			foreach (var move in best.Moves) {
+				if (move.wi != -1) {
+					++info.WC;
+				}
+			}
 		}
 
 		info.Elapsed = sw.ElapsedMilliseconds;
@@ -75,10 +80,10 @@ public class Program
 		return (input, info);
 	}
 
-	static State DoPlan4(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	static State DoPlan5(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
 
-		var best = DoGreedy3(isLocal, sw, rnd, input, info, (64, 64), (32, 96), (96, 32), 32, 32, 96, 96, out int wc0);
+		var best = DoGreedy4(isLocal, sw, rnd, input, info, (64, 64), (32, 96), (96, 32), 32, 32, 96, 96, out int wc0);
 		long bestScore = best.CalculateScore();
 		info.WC = wc0;
 
@@ -90,7 +95,7 @@ public class Program
 			int warpMinX = warpMinY;
 			int warpMaxX = warpMaxY;
 
-			var temp = DoGreedy3(isLocal, sw, rnd, input, info,
+			var temp = DoGreedy4(isLocal, sw, rnd, input, info,
 				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
 				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
 				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
@@ -109,10 +114,10 @@ public class Program
 		return best;
 	}
 
-	static State DoGreedy3(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
-	(int i, int j) f1, (int i, int j) f2, (int i, int j) f3,
-	int warpMinX, int warpMinY, int warpMaxX, int warpMaxY,
-	out int wc)
+	static State DoGreedy4(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
+		(int i, int j) f1, (int i, int j) f2, (int i, int j) f3,
+		int warpMinX, int warpMinY, int warpMaxX, int warpMaxY,
+		out int wc)
 	{
 		var state = new State(isLocal, input);
 
@@ -124,86 +129,7 @@ public class Program
 		wc = 0;
 		for (int k = 0; k < input.M; k++) {
 			var (gi, gj) = input.G[k];
-			var (si, sj) = (state.CI, state.CJ);
-			var (minY, minX) = (Math.Min(si, gi), Math.Min(sj, gj));
-			var (maxY, maxX) = (Math.Max(si, gi), Math.Max(sj, gj));
-			minY = Math.Max(minY, warpMinY);
-			minX = Math.Max(minX, warpMinX);
-			maxY = Math.Min(maxY, warpMaxY + 1);
-			maxX = Math.Min(maxX, warpMaxX + 1);
-
-			int minDist = Math.Abs(si - gi) + Math.Abs(sj - gj);
-			var (wi, wj) = (-1, -1);
-			int tag = -1;
-			for (int i = minY; i <= maxY; i++) {
-				for (int j = minX; j <= maxX; j++) {
-					if ((i, j) == (gi, gj)) {
-						continue;
-					}
-
-					for (int mm = 0; mm < state.Circles.Count; mm++) {
-						var (mi, mj) = state.Circles[mm];
-						var (ti, tj) = (2 * mi - i, 2 * mj - j);
-						if ((uint)ti >= n || (uint)tj >= n) {
-							continue;
-						}
-
-						int tempDist1 = Math.Abs(si - i) + Math.Abs(sj - j);
-						int tempDist2 = Math.Abs(ti - gi) + Math.Abs(tj - gj);
-						if (tempDist1 + tempDist2 + 1 < minDist) {
-							minDist = tempDist1 + tempDist2 + 1;
-							(wi, wj) = (i, j);
-							tag = mm;
-						}
-					}
-				}
-			}
-
-			if (tag == -1) {
-				MoveTo(gi, gj);
-			} else {
-				++wc;
-				MoveTo(wi, wj);
-				var (mi, mj) = state.Circles[tag];
-				state.Warp(mi, mj);
-				MoveTo(gi, gj);
-			}
-
-			void MoveTo(int ti, int tj)
-			{
-				while ((state.CI, state.CJ) != (ti, tj)) {
-					if (state.CI < ti) {
-						state.Move(Direction4.D);
-					} else if (state.CI > ti) {
-						state.Move(Direction4.U);
-					} else if (state.CJ < tj) {
-						state.Move(Direction4.R);
-					} else if (state.CJ > tj) {
-						state.Move(Direction4.L);
-					}
-				}
-			}
-		}
-
-		return state;
-	}
-
-	static State2 DoGreedy4(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
-		(int i, int j) f1, (int i, int j) f2, (int i, int j) f3,
-		int warpMinX, int warpMinY, int warpMaxX, int warpMaxY,
-		out int wc)
-	{
-		var state = new State2(isLocal, input);
-
-		state.AddFirstCirce(f1.i, f1.j);
-		state.AddFirstCirce(f2.i, f2.j);
-		state.AddFirstCirce(f3.i, f3.j);
-
-		int n = input.N;
-		wc = 0;
-		for (int k = 0; k < input.M; k++) {
-			var (gi, gj) = input.G[k];
-			var (si, sj) = (state.CI, state.CJ);
+			var (si, sj) = k == 0 ? (state.CI, state.CJ) : input.G[k - 1];
 			var (minY, minX) = (Math.Min(si, gi), Math.Min(sj, gj));
 			var (maxY, maxX) = (Math.Max(si, gi), Math.Max(sj, gj));
 			minY = Math.Max(minY, warpMinY);
@@ -262,7 +188,8 @@ public class State
 
 	public List<(int i, int j)> Firsts { get; private set; }
 	public List<(int i, int j)> Circles { get; private set; }
-	public List<(Direction4 dir, int a, int b)> Moves { get; private set; }
+	public List<(int wi, int wj, int a, int b)> Moves { get; private set; }
+	public int A { get; set; }
 
 	public State(bool isLocal, Input input)
 	{
@@ -274,74 +201,8 @@ public class State
 
 		Firsts = new List<(int i, int j)>();
 		Circles = new List<(int i, int j)>();
-		Moves = new List<(Direction4 dir, int a, int b)>();
-	}
-
-	public void AddFirstCirce(int i, int j)
-	{
-		Firsts.Add((i, j));
-		Circles.Add((i, j));
-	}
-
-	public void Move(Direction4 dir)
-	{
-		(CI, CJ) = dir.Move(CI, CJ);
-		Moves.Add((dir, -1, -1));
-		if ((CI, CJ) == _input.G[Next]) {
-			++Next;
-		}
-	}
-
-	public void Warp(int a, int b)
-	{
-		Circles.Remove((a, b));
-		Circles.Add((CI, CJ));
-
-		(CI, CJ) = (2 * a - CI, 2 * b - CJ);
-		Moves.Add((Direction4.N, a, b));
-		if ((CI, CJ) == _input.G[Next]) {
-			++Next;
-		}
-	}
-
-	public long CalculateScore()
-	{
-		long score;
-		if (Next == _input.M) {
-			score = _input.M + _input.T - Moves.Count + 1;
-		} else {
-			score = Next + 1;
-		}
-
-		return score;
-	}
-}
-
-public class State2
-{
-	private readonly bool _isLocal;
-	private readonly Input _input;
-
-	public int CI { get; private set; }
-	public int CJ { get; private set; }
-
-	public int Next { get; private set; }
-
-	public List<(int i, int j)> Firsts { get; private set; }
-	public List<(int i, int j)> Circles { get; private set; }
-	public List<(int wi, int wj, int a, int b)> Moves { get; private set; }
-
-	public State2(bool isLocal, Input input)
-	{
-		_isLocal = isLocal;
-		_input = input;
-
-		(CI, CJ) = _input.S;
-		Next = 0;
-
-		Firsts = new List<(int i, int j)>();
-		Circles = new List<(int i, int j)>();
 		Moves = new List<(int wi, int wj, int a, int b)>();
+		A = 0;
 	}
 
 	public void AddFirstCirce(int i, int j)
@@ -352,26 +213,45 @@ public class State2
 
 	public void MoveNoWarp()
 	{
+		var (si, sj) = Next == 0 ? (CI, CJ) : _input.G[Next - 1];
+		var (gi, gj) = _input.G[Next];
+		AddA(si, sj, gi, gj);
+
 		Moves.Add((-1, -1, -1, -1));
 		++Next;
 	}
 
 	public void MoveWithWarp(int wi, int wj, int a, int b)
 	{
+		var (si, sj) = Next == 0 ? (CI, CJ) : _input.G[Next - 1];
+		var (gi, gj) = _input.G[Next];
+		AddA(si, sj, wi, wj);
+		var (ci, cj) = (2 * a - wi, 2 * b - wj);
+		A += 1;
+		AddA(ci, cj, gi, gj);
+
 		Moves.Add((wi, wj, a, b));
 		++Next;
+		Circles.Remove((a, b));
+		Circles.Add((wi, wj));
 	}
 
 	public long CalculateScore()
 	{
 		long score;
 		if (Next == _input.M) {
-			score = _input.M + _input.T - Moves.Count + 1;
+			score = _input.M + _input.T - A + 1;
 		} else {
 			score = Next + 1;
 		}
 
 		return score;
+	}
+
+	private void AddA(int si, int sj, int gi, int gj)
+	{
+		int dist = Math.Abs(si - gi) + Math.Abs(sj - gj);
+		A += dist;
 	}
 }
 
@@ -421,21 +301,6 @@ public class Input
 			_io.WriteLine($"{i} {j}");
 		}
 
-		foreach (var (dir, a, b) in state.Moves) {
-			if (dir == Direction4.N) {
-				_io.WriteLine($"J {a} {b}");
-			} else {
-				_io.WriteLine(dir.ToSymbol());
-			}
-		}
-	}
-
-	public void Output(State2 state)
-	{
-		foreach (var (i, j) in state.Firsts) {
-			_io.WriteLine($"{i} {j}");
-		}
-
 		var (ci, cj) = (S.i, S.j);
 		for (int k = 0; k < M; k++) {
 			var (gi, gj) = G[k];
@@ -445,6 +310,7 @@ public class Input
 			} else {
 				MoveTo(wi, wj);
 				_io.WriteLine($"J {a} {b}");
+				(ci, cj) = (2 * a - wi, 2 * b - wj);
 				MoveTo(gi, gj);
 			}
 
