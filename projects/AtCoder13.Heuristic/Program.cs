@@ -27,9 +27,11 @@ public class Program
 						$"T={input.T:d5}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
-						$"F1=({info.F1.i:d3},{info.F1.j:d3})",
-						$"F2=({info.F2.i:d3},{info.F2.j:d3})",
-						$"F3=({info.F3.i:d3},{info.F3.j:d3})",
+						//$"F1=({info.F1.i:d3},{info.F1.j:d3})",
+						//$"F2=({info.F2.i:d3},{info.F2.j:d3})",
+						//$"F3=({info.F3.i:d3},{info.F3.j:d3})",
+						$"WY=({info.WarpY.min:d3},{info.WarpY.max:d3})",
+						$"WX=({info.WarpX.min:d3},{info.WarpX.max:d3})",
 						$"WC={info.WC:d3}",
 						$"A={info.A:d5}",
 						$"score={info.Score:d5}",
@@ -57,7 +59,7 @@ public class Program
 		var input = new Input(io, isLocal);
 		var info = new Information();
 
-		var best = DoPlan2(isLocal, sw, rnd, input, info);
+		var best = DoPlan4(isLocal, sw, rnd, input, info);
 
 		input.Output(best);
 		if (isLocal) {
@@ -73,108 +75,44 @@ public class Program
 		return (input, info);
 	}
 
-	static State DoPlan0(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	static State DoPlan4(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
 	{
-		var state = new State(isLocal, input);
 
-		return state;
-	}
-
-	static State DoPlan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		return DoGreedy2(isLocal, sw, rnd, input, info, (64, 64), (32, 96), (96, 32), out int wc);
-	}
-
-	static State DoPlan2(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
-	{
-		var best = DoGreedy2(isLocal, sw, rnd, input, info, (64, 64), (32, 96), (96, 32), out int wc0);
+		var best = DoGreedy3(isLocal, sw, rnd, input, info, (64, 64), (32, 96), (96, 32), 32, 32, 96, 96, out int wc0);
 		long bestScore = best.CalculateScore();
 		info.WC = wc0;
-
-		{
-			var temp = DoGreedy2(isLocal, sw, rnd, input, info, (64, 64), (64, 64), (64, 64), out int wc);
-			long tempScore = temp.CalculateScore();
-			if (tempScore > bestScore) {
-				best = temp;
-				bestScore = tempScore;
-				++info.Up;
-				info.WC = wc;
-			}
-		}
 
 		int limit = 1000;
 		while (sw.ElapsedMilliseconds < limit) {
 			++info.Loop;
-			var temp = DoGreedy2(isLocal, sw, rnd, input, info,
-				(rnd.Next(0, input.N), rnd.Next(0, input.N)),
-				(rnd.Next(0, input.N), rnd.Next(0, input.N)),
-				(rnd.Next(0, input.N), rnd.Next(0, input.N)), out int wc);
+			int warpMinY = rnd.Next(30, 46);
+			int warpMaxY = rnd.Next(90, 106);
+			int warpMinX = warpMinY;
+			int warpMaxX = warpMaxY;
+
+			var temp = DoGreedy3(isLocal, sw, rnd, input, info,
+				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
+				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
+				(rnd.Next(warpMinY, warpMaxY), rnd.Next(warpMinX, warpMaxX)),
+				warpMinX, warpMinY, warpMaxX, warpMaxY, out int wc);
 			long tempScore = temp.CalculateScore();
 			if (tempScore > bestScore) {
 				best = temp;
 				bestScore = tempScore;
 				++info.Up;
 				info.WC = wc;
+				info.WarpX = (warpMinX, warpMaxX);
+				info.WarpY = (warpMinY, warpMaxY);
 			}
 		}
 
 		return best;
 	}
 
-	static State DoGreedy1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
-		(int i, int j) f1, (int i, int j) f2, (int i, int j) f3)
-	{
-		var state = new State(isLocal, input);
-
-		state.AddFirstCirce(f1.i, f1.j);
-		state.AddFirstCirce(f2.i, f2.j);
-		state.AddFirstCirce(f3.i, f3.j);
-
-		int n = input.N;
-		for (int i = 0; i < input.M; i++) {
-			var (gi, gj) = input.G[i];
-			while ((state.CI, state.CJ) != (gi, gj)) {
-				var (ci, cj) = (state.CI, state.CJ);
-				int minDists = int.MaxValue;
-				Direction4 d = Direction4.D;
-				int a = 0;
-				int b = 0;
-				foreach (var dir in Direction4Extensions.ForEach4()) {
-					var (ti, tj) = dir.Move(ci, cj);
-					int tempDist = Math.Abs(ti - gi) + Math.Abs(tj - gj);
-					if (tempDist < minDists) {
-						minDists = tempDist;
-						d = dir;
-					}
-				}
-
-				foreach (var (mi, mj) in state.Circles) {
-					var (ti, tj) = (2 * mi - ci, 2 * mj - cj);
-					if ((uint)ti >= n || (uint)tj >= n) {
-						continue;
-					}
-
-					int tempDist = Math.Abs(ti - gi) + Math.Abs(tj - gj);
-					if (tempDist < minDists) {
-						minDists = tempDist;
-						d = Direction4.N;
-						(a, b) = (mi, mj);
-					}
-				}
-
-				if (d == Direction4.N) {
-					state.Warp(a, b);
-				} else {
-					state.Move(d);
-				}
-			}
-		}
-
-		return state;
-	}
-
-	static State DoGreedy2(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
-	(int i, int j) f1, (int i, int j) f2, (int i, int j) f3, out int wc)
+	static State DoGreedy3(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
+	(int i, int j) f1, (int i, int j) f2, (int i, int j) f3,
+	int warpMinX, int warpMinY, int warpMaxX, int warpMaxY,
+	out int wc)
 	{
 		var state = new State(isLocal, input);
 
@@ -189,6 +127,10 @@ public class Program
 			var (si, sj) = (state.CI, state.CJ);
 			var (minY, minX) = (Math.Min(si, gi), Math.Min(sj, gj));
 			var (maxY, maxX) = (Math.Max(si, gi), Math.Max(sj, gj));
+			minY = Math.Max(minY, warpMinY);
+			minX = Math.Max(minX, warpMinX);
+			maxY = Math.Min(maxY, warpMaxY + 1);
+			maxX = Math.Min(maxX, warpMaxX + 1);
 
 			int minDist = Math.Abs(si - gi) + Math.Abs(sj - gj);
 			var (wi, wj) = (-1, -1);
@@ -240,6 +182,67 @@ public class Program
 						state.Move(Direction4.L);
 					}
 				}
+			}
+		}
+
+		return state;
+	}
+
+	static State2 DoGreedy4(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
+		(int i, int j) f1, (int i, int j) f2, (int i, int j) f3,
+		int warpMinX, int warpMinY, int warpMaxX, int warpMaxY,
+		out int wc)
+	{
+		var state = new State2(isLocal, input);
+
+		state.AddFirstCirce(f1.i, f1.j);
+		state.AddFirstCirce(f2.i, f2.j);
+		state.AddFirstCirce(f3.i, f3.j);
+
+		int n = input.N;
+		wc = 0;
+		for (int k = 0; k < input.M; k++) {
+			var (gi, gj) = input.G[k];
+			var (si, sj) = (state.CI, state.CJ);
+			var (minY, minX) = (Math.Min(si, gi), Math.Min(sj, gj));
+			var (maxY, maxX) = (Math.Max(si, gi), Math.Max(sj, gj));
+			minY = Math.Max(minY, warpMinY);
+			minX = Math.Max(minX, warpMinX);
+			maxY = Math.Min(maxY, warpMaxY + 1);
+			maxX = Math.Min(maxX, warpMaxX + 1);
+
+			int minDist = Math.Abs(si - gi) + Math.Abs(sj - gj);
+			var (wi, wj) = (-1, -1);
+			int tag = -1;
+			for (int i = minY; i <= maxY; i++) {
+				for (int j = minX; j <= maxX; j++) {
+					if ((i, j) == (gi, gj)) {
+						continue;
+					}
+
+					for (int mm = 0; mm < state.Circles.Count; mm++) {
+						var (mi, mj) = state.Circles[mm];
+						var (ti, tj) = (2 * mi - i, 2 * mj - j);
+						if ((uint)ti >= n || (uint)tj >= n) {
+							continue;
+						}
+
+						int tempDist1 = Math.Abs(si - i) + Math.Abs(sj - j);
+						int tempDist2 = Math.Abs(ti - gi) + Math.Abs(tj - gj);
+						if (tempDist1 + tempDist2 + 1 < minDist) {
+							minDist = tempDist1 + tempDist2 + 1;
+							(wi, wj) = (i, j);
+							tag = mm;
+						}
+					}
+				}
+			}
+
+			if (tag == -1) {
+				state.MoveNoWarp();
+			} else {
+				var (mi, mj) = state.Circles[tag];
+				state.MoveWithWarp(wi, wj, mi, mj);
 			}
 		}
 
@@ -314,6 +317,64 @@ public class State
 	}
 }
 
+public class State2
+{
+	private readonly bool _isLocal;
+	private readonly Input _input;
+
+	public int CI { get; private set; }
+	public int CJ { get; private set; }
+
+	public int Next { get; private set; }
+
+	public List<(int i, int j)> Firsts { get; private set; }
+	public List<(int i, int j)> Circles { get; private set; }
+	public List<(int wi, int wj, int a, int b)> Moves { get; private set; }
+
+	public State2(bool isLocal, Input input)
+	{
+		_isLocal = isLocal;
+		_input = input;
+
+		(CI, CJ) = _input.S;
+		Next = 0;
+
+		Firsts = new List<(int i, int j)>();
+		Circles = new List<(int i, int j)>();
+		Moves = new List<(int wi, int wj, int a, int b)>();
+	}
+
+	public void AddFirstCirce(int i, int j)
+	{
+		Firsts.Add((i, j));
+		Circles.Add((i, j));
+	}
+
+	public void MoveNoWarp()
+	{
+		Moves.Add((-1, -1, -1, -1));
+		++Next;
+	}
+
+	public void MoveWithWarp(int wi, int wj, int a, int b)
+	{
+		Moves.Add((wi, wj, a, b));
+		++Next;
+	}
+
+	public long CalculateScore()
+	{
+		long score;
+		if (Next == _input.M) {
+			score = _input.M + _input.T - Moves.Count + 1;
+		} else {
+			score = Next + 1;
+		}
+
+		return score;
+	}
+}
+
 public class Information
 {
 	public long Time { get; set; } = 0;
@@ -326,6 +387,9 @@ public class Information
 	public (int i, int j) F1 { get; set; } = (0, 0);
 	public (int i, int j) F2 { get; set; } = (0, 0);
 	public (int i, int j) F3 { get; set; } = (0, 0);
+
+	public (int min, int max) WarpY { get; set; } = (0, 0);
+	public (int min, int max) WarpX { get; set; } = (0, 0);
 	public int WC { get; set; } = 0;
 }
 
@@ -362,6 +426,45 @@ public class Input
 				_io.WriteLine($"J {a} {b}");
 			} else {
 				_io.WriteLine(dir.ToSymbol());
+			}
+		}
+	}
+
+	public void Output(State2 state)
+	{
+		foreach (var (i, j) in state.Firsts) {
+			_io.WriteLine($"{i} {j}");
+		}
+
+		var (ci, cj) = (S.i, S.j);
+		for (int k = 0; k < M; k++) {
+			var (gi, gj) = G[k];
+			var (wi, wj, a, b) = state.Moves[k];
+			if (wi == -1) {
+				MoveTo(gi, gj);
+			} else {
+				MoveTo(wi, wj);
+				_io.WriteLine($"J {a} {b}");
+				MoveTo(gi, gj);
+			}
+
+			void MoveTo(int ti, int tj)
+			{
+				while ((ci, cj) != (ti, tj)) {
+					if (ci < ti) {
+						_io.WriteLine("D");
+						++ci;
+					} else if (ci > ti) {
+						_io.WriteLine("U");
+						--ci;
+					} else if (cj < tj) {
+						_io.WriteLine("R");
+						++cj;
+					} else if (cj > tj) {
+						_io.WriteLine("L");
+						--cj;
+					}
+				}
 			}
 		}
 	}
