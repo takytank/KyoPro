@@ -24,9 +24,14 @@ public class Program
 				lock (locker) {
 					var status = new List<string> {
 						$"{i:d4}:",
-						//$"N={input.N:d2}",
+						$"T={input.T:d5}",
 						$"loop={info.Loop:d8}",
 						$"up={info.Up:d4}",
+						$"F1=({info.F1.i:d3},{info.F1.j:d3})",
+						$"F2=({info.F2.i:d3},{info.F2.j:d3})",
+						$"F3=({info.F3.i:d3},{info.F3.j:d3})",
+						$"WC={info.WC:d3}",
+						$"A={info.A:d5}",
 						$"score={info.Score:d5}",
 						$"elapsed={info.Elapsed:d4}",
 					};
@@ -47,16 +52,20 @@ public class Program
 		Run(int caseNumber)
 	{
 		var (isLocal, sw, rnd) = HeuristicHelper.Initialize();
-		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC070\tools\in\", caseNumber);
+		using var io = HeuristicHelper.CreateIO(@$"D:\kyopro\AtCoder\AHC073\tools\in\", caseNumber);
 
 		var input = new Input(io, isLocal);
 		var info = new Information();
 
-		var best = DoPlan0(isLocal, sw, rnd, input, info);
+		var best = DoPlan2(isLocal, sw, rnd, input, info);
 
 		input.Output(best);
 		if (isLocal) {
 			info.Score = best.CalculateScore();
+			info.A = best.Moves.Count;
+			info.F1 = best.Firsts[0];
+			info.F2 = best.Firsts[1];
+			info.F3 = best.Firsts[2];
 		}
 
 		info.Elapsed = sw.ElapsedMilliseconds;
@@ -70,6 +79,172 @@ public class Program
 
 		return state;
 	}
+
+	static State DoPlan1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		return DoGreedy2(isLocal, sw, rnd, input, info, (64, 64), (32, 96), (96, 32), out int wc);
+	}
+
+	static State DoPlan2(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info)
+	{
+		var best = DoGreedy2(isLocal, sw, rnd, input, info, (64, 64), (32, 96), (96, 32), out int wc0);
+		long bestScore = best.CalculateScore();
+		info.WC = wc0;
+
+		{
+			var temp = DoGreedy2(isLocal, sw, rnd, input, info, (64, 64), (64, 64), (64, 64), out int wc);
+			long tempScore = temp.CalculateScore();
+			if (tempScore > bestScore) {
+				best = temp;
+				bestScore = tempScore;
+				++info.Up;
+				info.WC = wc;
+			}
+		}
+
+		int limit = 1000;
+		while (sw.ElapsedMilliseconds < limit) {
+			++info.Loop;
+			var temp = DoGreedy2(isLocal, sw, rnd, input, info,
+				(rnd.Next(0, input.N), rnd.Next(0, input.N)),
+				(rnd.Next(0, input.N), rnd.Next(0, input.N)),
+				(rnd.Next(0, input.N), rnd.Next(0, input.N)), out int wc);
+			long tempScore = temp.CalculateScore();
+			if (tempScore > bestScore) {
+				best = temp;
+				bestScore = tempScore;
+				++info.Up;
+				info.WC = wc;
+			}
+		}
+
+		return best;
+	}
+
+	static State DoGreedy1(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
+		(int i, int j) f1, (int i, int j) f2, (int i, int j) f3)
+	{
+		var state = new State(isLocal, input);
+
+		state.AddFirstCirce(f1.i, f1.j);
+		state.AddFirstCirce(f2.i, f2.j);
+		state.AddFirstCirce(f3.i, f3.j);
+
+		int n = input.N;
+		for (int i = 0; i < input.M; i++) {
+			var (gi, gj) = input.G[i];
+			while ((state.CI, state.CJ) != (gi, gj)) {
+				var (ci, cj) = (state.CI, state.CJ);
+				int minDists = int.MaxValue;
+				Direction4 d = Direction4.D;
+				int a = 0;
+				int b = 0;
+				foreach (var dir in Direction4Extensions.ForEach4()) {
+					var (ti, tj) = dir.Move(ci, cj);
+					int tempDist = Math.Abs(ti - gi) + Math.Abs(tj - gj);
+					if (tempDist < minDists) {
+						minDists = tempDist;
+						d = dir;
+					}
+				}
+
+				foreach (var (mi, mj) in state.Circles) {
+					var (ti, tj) = (2 * mi - ci, 2 * mj - cj);
+					if ((uint)ti >= n || (uint)tj >= n) {
+						continue;
+					}
+
+					int tempDist = Math.Abs(ti - gi) + Math.Abs(tj - gj);
+					if (tempDist < minDists) {
+						minDists = tempDist;
+						d = Direction4.N;
+						(a, b) = (mi, mj);
+					}
+				}
+
+				if (d == Direction4.N) {
+					state.Warp(a, b);
+				} else {
+					state.Move(d);
+				}
+			}
+		}
+
+		return state;
+	}
+
+	static State DoGreedy2(bool isLocal, Stopwatch sw, Random rnd, Input input, Information info,
+	(int i, int j) f1, (int i, int j) f2, (int i, int j) f3, out int wc)
+	{
+		var state = new State(isLocal, input);
+
+		state.AddFirstCirce(f1.i, f1.j);
+		state.AddFirstCirce(f2.i, f2.j);
+		state.AddFirstCirce(f3.i, f3.j);
+
+		int n = input.N;
+		wc = 0;
+		for (int k = 0; k < input.M; k++) {
+			var (gi, gj) = input.G[k];
+			var (si, sj) = (state.CI, state.CJ);
+			var (minY, minX) = (Math.Min(si, gi), Math.Min(sj, gj));
+			var (maxY, maxX) = (Math.Max(si, gi), Math.Max(sj, gj));
+
+			int minDist = Math.Abs(si - gi) + Math.Abs(sj - gj);
+			var (wi, wj) = (-1, -1);
+			int tag = -1;
+			for (int i = minY; i <= maxY; i++) {
+				for (int j = minX; j <= maxX; j++) {
+					if ((i, j) == (gi, gj)) {
+						continue;
+					}
+
+					for (int mm = 0; mm < state.Circles.Count; mm++) {
+						var (mi, mj) = state.Circles[mm];
+						var (ti, tj) = (2 * mi - i, 2 * mj - j);
+						if ((uint)ti >= n || (uint)tj >= n) {
+							continue;
+						}
+
+						int tempDist1 = Math.Abs(si - i) + Math.Abs(sj - j);
+						int tempDist2 = Math.Abs(ti - gi) + Math.Abs(tj - gj);
+						if (tempDist1 + tempDist2 + 1 < minDist) {
+							minDist = tempDist1 + tempDist2 + 1;
+							(wi, wj) = (i, j);
+							tag = mm;
+						}
+					}
+				}
+			}
+
+			if (tag == -1) {
+				MoveTo(gi, gj);
+			} else {
+				++wc;
+				MoveTo(wi, wj);
+				var (mi, mj) = state.Circles[tag];
+				state.Warp(mi, mj);
+				MoveTo(gi, gj);
+			}
+
+			void MoveTo(int ti, int tj)
+			{
+				while ((state.CI, state.CJ) != (ti, tj)) {
+					if (state.CI < ti) {
+						state.Move(Direction4.D);
+					} else if (state.CI > ti) {
+						state.Move(Direction4.U);
+					} else if (state.CJ < tj) {
+						state.Move(Direction4.R);
+					} else if (state.CJ > tj) {
+						state.Move(Direction4.L);
+					}
+				}
+			}
+		}
+
+		return state;
+	}
 }
 
 public class State
@@ -77,15 +252,64 @@ public class State
 	private readonly bool _isLocal;
 	private readonly Input _input;
 
+	public int CI { get; private set; }
+	public int CJ { get; private set; }
+
+	public int Next { get; private set; }
+
+	public List<(int i, int j)> Firsts { get; private set; }
+	public List<(int i, int j)> Circles { get; private set; }
+	public List<(Direction4 dir, int a, int b)> Moves { get; private set; }
+
 	public State(bool isLocal, Input input)
 	{
 		_isLocal = isLocal;
 		_input = input;
+
+		(CI, CJ) = _input.S;
+		Next = 0;
+
+		Firsts = new List<(int i, int j)>();
+		Circles = new List<(int i, int j)>();
+		Moves = new List<(Direction4 dir, int a, int b)>();
+	}
+
+	public void AddFirstCirce(int i, int j)
+	{
+		Firsts.Add((i, j));
+		Circles.Add((i, j));
+	}
+
+	public void Move(Direction4 dir)
+	{
+		(CI, CJ) = dir.Move(CI, CJ);
+		Moves.Add((dir, -1, -1));
+		if ((CI, CJ) == _input.G[Next]) {
+			++Next;
+		}
+	}
+
+	public void Warp(int a, int b)
+	{
+		Circles.Remove((a, b));
+		Circles.Add((CI, CJ));
+
+		(CI, CJ) = (2 * a - CI, 2 * b - CJ);
+		Moves.Add((Direction4.N, a, b));
+		if ((CI, CJ) == _input.G[Next]) {
+			++Next;
+		}
 	}
 
 	public long CalculateScore()
 	{
-		long score = 0;
+		long score;
+		if (Next == _input.M) {
+			score = _input.M + _input.T - Moves.Count + 1;
+		} else {
+			score = Next + 1;
+		}
+
 		return score;
 	}
 }
@@ -98,6 +322,11 @@ public class Information
 	public int Up { get; set; } = 0;
 	public long Elapsed { get; set; } = 0;
 
+	public int A { get; set; } = 0;
+	public (int i, int j) F1 { get; set; } = (0, 0);
+	public (int i, int j) F2 { get; set; } = (0, 0);
+	public (int i, int j) F3 { get; set; } = (0, 0);
+	public int WC { get; set; } = 0;
 }
 
 public class Input
@@ -105,14 +334,36 @@ public class Input
 	private readonly IOManager _io;
 	private readonly bool _isLocal;
 
+	public int N { get; }
+	public int M { get; }
+	public int K { get; }
+	public int T { get; }
+	public (int i, int j) S { get; }
+	public (int i, int j)[] G { get; }
+
 	public Input(IOManager io, bool isLocal)
 	{
 		_io = io;
 		_isLocal = isLocal;
+
+		(N, M, K, T) = _io.Int4();
+		S = _io.Int2();
+		G = _io.Repeat<(int i, int j)>(M, io => io.Int2());
 	}
 
 	public void Output(State state)
 	{
+		foreach (var (i, j) in state.Firsts) {
+			_io.WriteLine($"{i} {j}");
+		}
+
+		foreach (var (dir, a, b) in state.Moves) {
+			if (dir == Direction4.N) {
+				_io.WriteLine($"J {a} {b}");
+			} else {
+				_io.WriteLine(dir.ToSymbol());
+			}
+		}
 	}
 }
 
