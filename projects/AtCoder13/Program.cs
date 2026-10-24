@@ -17,6 +17,9 @@ public class Program
 	}
 }
 
+// 以下はライブラリー。
+// https://github.com/takytank/KyoProLib
+
 public readonly struct BitFlag(int flags)
 {
 	public static BitFlag Begin() => 0;
