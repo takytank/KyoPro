@@ -1,0 +1,20 @@
+<Solution>
+  <Folder Name="/lib/">
+    <Project Path="submodules/KyoProLib/projects/TakyTank.KyoProLib.CSharp.V11/TakyTank.KyoProLib.CSharp.V11.csproj" />
+    <Project Path="submodules/KyoProLib/projects/TakyTank.KyoProLib.CSharp.V13/TakyTank.KyoProLib.CSharp.V13.csproj" />
+    <Project Path="submodules/KyoProLib/projects/TakyTank.KyoProLib.CSharp.V8/TakyTank.KyoProLib.CSharp.V8.csproj" />
+    <Project Path="submodules/KyoProLib/projects/TakyTank.KyoProLib.CSharp/TakyTank.KyoProLib.CSharp.csproj" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+  </Folder>
+  <Project Path="projects/AOJ.Temp/AOJ.Temp.csproj" />
+  <Project Path="projects/AOJ/AOJ.csproj" />
+  <Project Path="projects/AtCoder13.Heuristic/AtCoder13.Heuristic.csproj" />
+  <Project Path="projects/AtCoder13.Temp/AtCoder13.Temp.csproj" />
+  <Project Path="projects/AtCoder13/AtCoder13.csproj" />
+  <Project Path="projects/MojaCoder.Temp/MojaCoder.Temp.csproj" />
+  <Project Path="projects/MojaCoder/MojaCoder.csproj" />
+  <Project Path="projects/YukiCoder.Temp/YukiCoder.Temp.csproj" />
+  <Project Path="projects/YukiCoder/YukiCoder.csproj" />
+</Solution>

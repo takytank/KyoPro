@@ -1,0 +1,11 @@
+<Solution>
+  <Folder Name="/lib/">
+    <Project Path="submodules/KyoProLib/projects/TakyTank.KyoProLib.CSharp.V8/TakyTank.KyoProLib.CSharp.V8.csproj" />
+    <Project Path="submodules/KyoProLib/projects/TakyTank.KyoProLib.CSharp/TakyTank.KyoProLib.CSharp.csproj" />
+  </Folder>
+  <Folder Name="/Solution Items/">
+    <File Path=".editorconfig" />
+  </Folder>
+  <Project Path="projects/YukiCoder.Temp/YukiCoder.Temp.csproj" />
+  <Project Path="projects/YukiCoder/YukiCoder.csproj" />
+</Solution>
